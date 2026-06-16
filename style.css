@@ -1,0 +1,375 @@
+/* ============================================================
+   Weather Game — Mobile-only stylesheet
+   Target: phones in portrait mode (max ~430px wide)
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:root {
+  --bg:          #07131c;
+  --surface:     #0d2035;
+  --border:      rgba(100, 180, 220, 0.18);
+  --accent:      #4fc3f7;
+  --accent2:     #00e5ff;
+  --text:        #eef7ff;
+  --text-dim:    #7bafc8;
+  --danger:      #ff5252;
+  --success:     #69f0ae;
+  --radius:      14px;
+  --font:        -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Safe area for notched iPhones */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bot:    env(safe-area-inset-bottom, 0px);
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  /* push content below the notch / status bar */
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bot);
+}
+
+/* ── Screens ────────────────────────────────────────────── */
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 18px;
+  overflow-y: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.screen.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ── Loading Screen ─────────────────────────────────────── */
+#screenLoading {
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+}
+
+.loading-icon {
+  font-size: 52px;
+  animation: bob 1.4s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+
+.loading-text {
+  font-size: 18px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+/* ── Home Screen ────────────────────────────────────────── */
+.home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.game-title {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.live-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--success);
+  border: 1px solid var(--success);
+  border-radius: 20px;
+  padding: 3px 8px;
+}
+
+/* ── Weather Snapshot ───────────────────────────────────── */
+.weather-snapshot {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.snapshot-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.snapshot-label {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.snapshot-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ── Menu Buttons ───────────────────────────────────────── */
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.menu-btn {
+  width: 100%;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  text-align: center;
+}
+
+.menu-btn:active {
+  transform: scale(0.97);
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.menu-btn.primary {
+  background: linear-gradient(135deg, #1565c0, #0d47a1);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.menu-btn.primary:active {
+  background: linear-gradient(135deg, #1976d2, #1565c0);
+}
+
+.version-tag {
+  margin-top: auto;
+  padding-top: 24px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+/* ── Sub-screen header ──────────────────────────────────── */
+.screen-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.screen-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 16px;
+  font-family: var(--font);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+/* ── How To Play ────────────────────────────────────────── */
+.howto-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  line-height: 1.65;
+  font-size: 15px;
+  color: var(--text-dim);
+}
+
+/* ── High Scores ────────────────────────────────────────── */
+.score-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.score-entry {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.score-rank {
+  font-size: 13px;
+  color: var(--text-dim);
+  width: 28px;
+}
+
+.score-points {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.score-date {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-dim);
+  margin-top: 40px;
+  font-size: 15px;
+}
+
+/* ── Game Screen ────────────────────────────────────────── */
+.game-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.hud-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+
+.hud-score, .hud-timer {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.hud-timer {
+  color: var(--accent);
+}
+
+.game-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+  position: relative;
+}
+
+.placeholder-text {
+  color: var(--text-dim);
+  font-size: 15px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* ── Game Over Screen ───────────────────────────────────── */
+.gameover-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.gameover-inner h2 {
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.final-score-label {
+  font-size: 14px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.final-score {
+  font-size: 72px;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+}
+
+.gameover-inner .menu-btn {
+  width: 240px;
+}
+
+/* ── Desktop guard ──────────────────────────────────────── */
+/* If someone opens on desktop, show a message instead of a broken layout */
+@media (min-width: 600px) and (pointer: fine) {
+  #app::before {
+    content: "This app is designed for mobile. Open it on your phone or use browser dev tools to simulate a phone screen.";
+    position: fixed;
+    inset: 0;
+    background: #07131c;
+    color: #7bafc8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px;
+    font-size: 18px;
+    line-height: 1.6;
+    z-index: 9999;
+  }
+  #app > * { display: none !important; }
+}
