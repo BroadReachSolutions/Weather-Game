@@ -302,7 +302,7 @@ function setupDashboardScale() {
       const height = parseFloat(w.style.height) || w.offsetHeight;
       maxBottom = Math.max(maxBottom, top + height);
     });
-    const naturalHeight = Math.max(maxBottom + 40, dashboard.scrollHeight);
+    const naturalHeight = Math.max(maxBottom + 160, dashboard.scrollHeight);
     const spacer = document.getElementById("dashboardScrollSpacer");
     if (spacer) spacer.style.height = (naturalHeight * scale) + "px";
   }
