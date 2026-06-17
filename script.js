@@ -367,124 +367,14 @@ function setupLayoutEditor() {
       mobileEditBtn.classList.toggle("active", layoutEditMode);
     }
 
-    if (isMobile()) {
-      if (layoutEditMode) {
-        setupMobileReorder();
-      } else {
-        teardownMobileReorder();
-        closeAllSettingsPanels();
-        saveMobileOrder();
-        saveAllSettings();
-      }
-    } else {
-      if (!layoutEditMode) {
-        closeAllSettingsPanels();
-        saveLayout();
-        saveAllSettings();
-      }
+    if (!layoutEditMode) {
+      closeAllSettingsPanels();
+      saveLayout();
+      saveAllSettings();
     }
   });
 
   widgets.forEach(makeWidgetInteractive);
-}
-
-/* ==========================================================================
-   MOBILE DRAG-TO-REORDER
-   ========================================================================== */
-let mobileReorderCleanup = null;
-
-function setupMobileReorder() {
-  const dashboard = document.getElementById("dashboard");
-  if (!dashboard) return;
-
-  const widgets = [...dashboard.querySelectorAll(".widget:not(#layoutWidget)")];
-
-  /* Add drag bar to each widget if not already there */
-  widgets.forEach(w => {
-    if (!w.querySelector(".mobileDragBar")) {
-      const bar = document.createElement("div");
-      bar.className = "mobileDragBar";
-      bar.innerHTML = '<span class="mobileDragBarDots">• • •</span>';
-      /* Insert at top of widgetFrame so it overlays */
-      const frame = w.querySelector(".widgetFrame");
-      if (frame) frame.appendChild(bar);
-    }
-  });
-
-  let dragEl     = null;
-  let startY     = 0;
-  let startOrder = 0;
-
-  function getOrder(el) {
-    return parseInt(el.style.order || getComputedStyle(el).order || "0") || 0;
-  }
-
-  function onHandleTouchStart(e) {
-    if (!layoutEditMode) return;
-    const widget = e.currentTarget.closest(".widget");
-    if (!widget) return;
-    dragEl     = widget;
-    startY     = e.touches[0].clientY;
-    startOrder = getOrder(widget);
-    dragEl.classList.add("mobile-dragging");
-  }
-
-  /* passive:true — NEVER blocks scroll. We just track position. */
-  function onHandleTouchMove(e) {
-    if (!dragEl) return;
-    const dy    = e.touches[0].clientY - startY;
-    const itemH = dragEl.offsetHeight + 6;
-    const shift = Math.round(dy / itemH);
-    if (shift === 0) return;
-
-    const newOrder = Math.max(1, Math.min(widgets.length, startOrder + shift));
-    if (newOrder !== getOrder(dragEl)) {
-      widgets.forEach(w => {
-        if (w === dragEl) {
-          w.style.order = newOrder;
-        } else {
-          if (getOrder(w) === newOrder) w.style.order = startOrder;
-        }
-      });
-    }
-  }
-
-  function onHandleTouchEnd() {
-    if (dragEl) dragEl.classList.remove("mobile-dragging");
-    dragEl = null;
-  }
-
-  widgets.forEach(w => {
-    const bar = w.querySelector(".mobileDragBar");
-    if (!bar) return;
-    bar.addEventListener("touchstart", onHandleTouchStart, { passive: true });
-    bar.addEventListener("touchmove",  onHandleTouchMove,  { passive: true });
-    bar.addEventListener("touchend",   onHandleTouchEnd,   { passive: true });
-  });
-
-  mobileReorderCleanup = () => {
-    widgets.forEach(w => {
-      const bar = w.querySelector(".mobileDragBar");
-      if (bar) {
-        bar.removeEventListener("touchstart", onHandleTouchStart);
-        bar.removeEventListener("touchmove",  onHandleTouchMove);
-        bar.removeEventListener("touchend",   onHandleTouchEnd);
-      }
-      w.classList.remove("mobile-dragging");
-    });
-  };
-}
-
-function teardownMobileReorder() {
-  if (mobileReorderCleanup) {
-    mobileReorderCleanup();
-    mobileReorderCleanup = null;
-  }
-}
-
-function saveMobileOrder() {
-  /* No-op: mobile now uses the same absolute-position layout system as
-     desktop (see saveLayout/loadLayout), so ordering is just position. */
 }
 
 function makeWidgetInteractive(widget) {
