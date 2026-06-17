@@ -2,124 +2,382 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <!-- Mobile-only viewport: no scaling, no desktop zoom -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Weather Game</title>
+  <title>Marine Dashboard | St Augustine Sailing</title>
+  <meta name="description" content="Real-time marine weather for St Augustine Sailing — wind, tide, radar and forecast.">
+  <meta name="author" content="St Augustine Sailing">
+  <meta name="robots" content="noindex, nofollow">
 
-  <!-- PWA / installable on home screen -->
+  <!-- PWA -->
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#07131c">
+  <meta name="theme-color" content="#0a1628">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Weather Game">
+  <meta name="apple-mobile-web-app-title" content="Marine">
+  <link rel="apple-touch-icon" href="staugustine-sailing-logo.png">
 
-  <!-- Content Security Policy -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
     script-src 'self' 'unsafe-inline';
     style-src 'self' 'unsafe-inline';
+    img-src 'self' data:
+      https://*.arcgisonline.com
+      https://*.openstreetmap.org
+      https://tilecache.rainviewer.com
+      https://server.arcgisonline.com;
     connect-src 'self'
       https://api.open-meteo.com
       https://api.tidesandcurrents.noaa.gov
+      https://api.rainviewer.com
+      https://tilecache.rainviewer.com
+      https://nominatim.openstreetmap.org
+      https://geocoding-api.open-meteo.com
       https://noaa-proxy.lanceburkin.workers.dev;
+    frame-src https://www.rainviewer.com;
+    worker-src 'self';
+    manifest-src 'self';
   ">
 
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
   <div id="app">
+    <div id="dashboardStage">
+      <div id="dashboard">
 
-    <!-- ══ SCREEN: LOADING ══ -->
-    <div id="screenLoading" class="screen active">
-      <div class="loading-inner">
-        <div class="loading-icon">🌊</div>
-        <div class="loading-text">Loading weather…</div>
-      </div>
-    </div>
-
-    <!-- ══ SCREEN: HOME / MAIN MENU ══ -->
-    <div id="screenHome" class="screen">
-      <div class="home-header">
-        <h1 class="game-title">Weather Game</h1>
-        <div class="live-badge">LIVE DATA</div>
-      </div>
-
-      <!-- Live snapshot from the weather app -->
-      <div class="weather-snapshot" id="weatherSnapshot">
-        <div class="snapshot-row">
-          <span class="snapshot-label">Wind</span>
-          <span class="snapshot-value" id="snapWind">-- mph</span>
+        <!-- ═══ CONTROL WIDGET ═══ -->
+        <div class="widget" data-widget="layout" id="layoutWidget">
+          <div class="widgetFrame">
+            <div class="widgetHandle"></div>
+            <div class="controlPanel">
+              <div class="controlRow">
+                <label for="stationSelect" class="controlLabel">Station</label>
+                <select id="stationSelect" class="controlSelect"></select>
+              </div>
+              <div class="controlRow">
+                <label for="tideDateSelect" class="controlLabel">Tide Date</label>
+                <input type="date" id="tideDateSelect" class="controlDate">
+              </div>
+              <div class="controlBtns">
+                <button id="viewDateBtn" class="ctrlBtn">View Day</button>
+                <button id="liveViewBtn" class="ctrlBtn">Return to Live</button>
+                <button id="layoutToggle" class="ctrlBtn ctrlBtnEdit">Edit Layout</button>
+              </div>
+            </div>
+            <div class="widgetSettingsPanel dashboardSettingsPanel" data-settings-for="layout">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Dashboard Settings</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>Background Color</label>
+                <input type="color" id="dashboardBackgroundColor" value="#07131c">
+              </div>
+              <div class="settingsRow">
+                <label>Background Hue</label>
+                <input type="range" id="dashboardBackgroundHue" min="0" max="360" value="0">
+              </div>
+              <div class="settingsActions">
+                <button type="button" id="dashboardResetBtn" class="settingsActionBtn">Reset</button>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
         </div>
-        <div class="snapshot-row">
-          <span class="snapshot-label">Temp</span>
-          <span class="snapshot-value" id="snapTemp">--°F</span>
+
+        <!-- ═══ COMPASS / WIND WIDGET ═══ -->
+        <div class="widget" data-widget="wind" id="windWidget">
+          <div class="widgetFrame">
+            <div class="widgetControls">
+              <button class="widgetSettingsBtn" type="button" title="Compass settings">⚙</button>
+              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
+            </div>
+            <div class="widgetHandle"></div>
+            <div class="windBox">
+              <div class="windReadings" id="windReadings"></div>
+              <div class="compassOuter" id="compassOuter">
+                <div class="compassCardinals" id="compassCardinals">
+                  <div class="cardinal" id="cardinalN">N</div>
+                  <div class="cardinal" id="cardinalE">E</div>
+                  <div class="cardinal" id="cardinalS">S</div>
+                  <div class="cardinal" id="cardinalW">W</div>
+                </div>
+                <div class="compass" id="compassWidget">
+                  <canvas id="compassMapCanvas"></canvas>
+                  <canvas id="radarCanvas" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;border-radius:12px;z-index:10;"></canvas>
+                  <iframe id="radarIframe" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:12px;z-index:10;" allowfullscreen></iframe>
+                  <div class="ring" id="compassRing"></div>
+                  <div class="arrow" id="windArrow"></div>
+                </div>
+              </div>
+              <div class="windDir" id="windDir"></div>
+            </div>
+            <div class="widgetSettingsPanel" data-settings-for="wind">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Compass Widget</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>Location Address</label>
+                <div style="display:flex;gap:6px;">
+                  <input id="marineAddressInput" type="text" placeholder="Enter address..." class="settingsTextInput" />
+                  <button id="marineAddressBtn" type="button" class="settingsInlineBtn">Set</button>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>Map Display</label>
+                <select id="compassMapMode">
+                  <option value="none">No map</option>
+                  <option value="compass">Satellite — compass circle</option>
+                  <option value="widget">Satellite — fill widget</option>
+                  <option value="radar">Radar</option>
+                </select>
+              </div>
+              <div class="settingsRow">
+                <label>Map Zoom</label>
+                <input type="range" id="compassZoom" min="2" max="18" value="6" style="width:100%;" />
+                <span id="compassZoomLabel" style="font-size:11px;color:#aac;">6</span>
+              </div>
+              <div class="settingsRow" id="radarSpeedRow" style="display:none;">
+                <label>Radar Speed</label>
+                <input type="range" id="radarSpeed" min="1" max="10" value="5" style="width:100%;" />
+                <span id="radarSpeedLabel" style="font-size:11px;color:#aac;">5</span>
+              </div>
+              <div class="settingsRow">
+                <label>Compass Style</label>
+                <select id="compassStyle">
+                  <option value="ring">Ring</option>
+                  <option value="crosshair">Crosshair</option>
+                  <option value="none">No ring</option>
+                </select>
+              </div>
+              <div class="settingsRow">
+                <label>Show Wind Info</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="showWindMph" checked> mph</label>
+                  <label class="checkLabel"><input type="checkbox" id="showWindKph"> kph</label>
+                  <label class="checkLabel"><input type="checkbox" id="showWindKnots"> knots</label>
+                  <label class="checkLabel"><input type="checkbox" id="showWindDir" checked> direction</label>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>Cardinal Distance</label>
+                <input type="range" id="cardinalOffset" min="0" max="60" value="20" style="width:100%;" />
+                <span id="cardinalOffsetLabel" style="font-size:11px;color:#aac;">20px</span>
+              </div>
+              <div class="settingsRow">
+                <label>Speed Offset</label>
+                <input type="range" id="windTopOffset" min="-80" max="80" value="0" style="width:100%;" />
+                <span id="windTopOffsetLabel" style="font-size:11px;color:#aac;">0px</span>
+              </div>
+              <div class="settingsRow">
+                <label>Direction Offset</label>
+                <input type="range" id="windBotOffset" min="-80" max="80" value="0" style="width:100%;" />
+                <span id="windBotOffsetLabel" style="font-size:11px;color:#aac;">0px</span>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
         </div>
-        <div class="snapshot-row">
-          <span class="snapshot-label">Tide</span>
-          <span class="snapshot-value" id="snapTide">--</span>
+
+        <!-- ═══ TEMPERATURE WIDGET ═══ -->
+        <div class="widget" data-widget="temp" id="tempWidget">
+          <div class="widgetFrame">
+            <div class="widgetControls">
+              <button class="widgetSettingsBtn" type="button" title="Temperature settings">⚙</button>
+              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
+            </div>
+            <div class="widgetHandle"></div>
+            <div class="tempBox">
+              <div id="tempMain"></div>
+              <div id="tempSub"></div>
+              <div id="tempCelsius" style="display:none;"></div>
+            </div>
+            <div class="widgetSettingsPanel" data-settings-for="temp">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Temperature Widget</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>Show</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="tempShowTemp" checked> Temperature</label>
+                  <label class="checkLabel"><input type="checkbox" id="tempShowHumidity" checked> Humidity</label>
+                  <label class="checkLabel"><input type="checkbox" id="tempShowCelsius"> Also show °C</label>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>Heat Alert (°F)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="tempHeatAlertOn" checked> Enable</label>
+                  <input type="number" id="tempHeatAlertVal" value="95" min="50" max="130" style="width:60px;background:rgba(255,255,255,0.08);border:1px solid rgba(125,186,220,0.3);border-radius:5px;color:#eef7ff;padding:3px 6px;font-size:12px;">
+                  <span style="font-size:11px;color:#aac;">°F threshold</span>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>Cold Alert (°F)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="tempColdAlertOn"> Enable</label>
+                  <input type="number" id="tempColdAlertVal" value="40" min="-20" max="80" style="width:60px;background:rgba(255,255,255,0.08);border:1px solid rgba(125,186,220,0.3);border-radius:5px;color:#eef7ff;padding:3px 6px;font-size:12px;">
+                  <span style="font-size:11px;color:#aac;">°F threshold</span>
+                </div>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
         </div>
-      </div>
 
-      <!-- Game modes -->
-      <div class="menu-buttons">
-        <button class="menu-btn primary" id="btnPlay">⚡ Play</button>
-        <button class="menu-btn" id="btnHowTo">📖 How to Play</button>
-        <button class="menu-btn" id="btnHighScores">🏆 High Scores</button>
-      </div>
+        <!-- ═══ TIDE STATUS WIDGET ═══ -->
+        <div class="widget" data-widget="tideStatus" id="tideStatusWidget">
+          <div class="widgetFrame">
+            <div class="widgetControls">
+              <button class="widgetSettingsBtn" type="button" title="Tide Status settings">⚙</button>
+              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
+            </div>
+            <div class="widgetHandle"></div>
+            <div class="lowTideAlert" id="lowTideAlert"></div>
+            <div class="currentTide" id="currentTide"></div>
+            <div class="widgetSettingsPanel" data-settings-for="tideStatus">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Tide Status Widget</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>Alert text color on low tide</label>
+                <label class="checkLabel"><input type="checkbox" id="tideStatusColorAlert" checked> Enable red color alert</label>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
+        </div>
 
-      <div class="version-tag">v1.0 · St Augustine Sailing</div>
+        <!-- ═══ FORECAST WIDGET ═══ -->
+        <div class="widget" data-widget="forecast" id="forecastWidget">
+          <div class="widgetFrame">
+            <div class="widgetControls">
+              <button class="widgetSettingsBtn" type="button" title="Forecast settings">⚙</button>
+              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
+            </div>
+            <div class="widgetHandle"></div>
+            <div class="forecastWrap">
+              <div class="forecast" id="forecast"></div>
+            </div>
+            <div class="widgetSettingsPanel" data-settings-for="forecast">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Forecast Widget</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>Show on hourly cards</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="fcShowTemp" checked> Temperature</label>
+                  <label class="checkLabel"><input type="checkbox" id="fcShowHumidity" checked> Humidity</label>
+                  <label class="checkLabel"><input type="checkbox" id="fcShowRain" checked> Rain %</label>
+                  <label class="checkLabel"><input type="checkbox" id="fcShowWind" checked> Wind speed</label>
+                  <label class="checkLabel"><input type="checkbox" id="fcShowCondition" checked> Conditions</label>
+                </div>
+              </div>
+              <div class="settingsDivider"></div>
+              <div class="settingsRow">
+                <label>Heat Alert (°F)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="fcHeatAlertOn" checked> Enable</label>
+                  <input type="number" id="fcHeatAlertVal" value="95" min="50" max="130" class="settingsNumInput">
+                  <span class="settingsHint">°F — turns temp red</span>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>Cold Alert (°F)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="fcColdAlertOn"> Enable</label>
+                  <input type="number" id="fcColdAlertVal" value="40" min="-20" max="80" class="settingsNumInput">
+                  <span class="settingsHint">°F — turns temp blue</span>
+                </div>
+              </div>
+              <div class="settingsDivider"></div>
+              <div class="settingsRow">
+                <label>Rain Alert (%)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="fcRainAlertOn" checked> Enable</label>
+                  <input type="number" id="fcRainAlertVal" value="70" min="0" max="100" class="settingsNumInput">
+                  <span class="settingsHint">% — turns rain% red</span>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>Wind Alert (mph)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="fcWindAlertOn" checked> Enable</label>
+                  <input type="number" id="fcWindAlertVal" value="25" min="0" max="100" class="settingsNumInput">
+                  <span class="settingsHint">mph — turns wind red</span>
+                </div>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
+        </div>
+
+        <!-- ═══ TIDE CHART WIDGET ═══ -->
+        <div class="widget" data-widget="tideChart" id="tideChartWidget">
+          <div class="widgetFrame">
+            <div class="widgetControls">
+              <button class="widgetSettingsBtn" type="button" title="Tide Chart settings">⚙</button>
+              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
+            </div>
+            <div class="widgetHandle"></div>
+            <div class="tideSection">
+              <div class="tidePanel">
+                <canvas id="tideChart"></canvas>
+                <div id="tideLine"></div>
+              </div>
+            </div>
+            <div class="widgetSettingsPanel" data-settings-for="tideChart">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Tide Chart Widget</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>Low Tide Alert (ft)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="tideChartLowAlertOn" checked> Enable</label>
+                  <input type="number" id="tideChartLowAlertVal" value="0.4" min="-5" max="10" step="0.1" class="settingsNumInput">
+                  <span class="settingsHint">ft — alerts below this</span>
+                </div>
+              </div>
+              <div class="settingsRow">
+                <label>High Tide Alert (ft)</label>
+                <div class="checkRow">
+                  <label class="checkLabel"><input type="checkbox" id="tideChartHighAlertOn"> Enable</label>
+                  <input type="number" id="tideChartHighAlertVal" value="5.0" min="0" max="20" step="0.1" class="settingsNumInput">
+                  <span class="settingsHint">ft — alerts above this</span>
+                </div>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
+        </div>
+
+        <!-- ═══ GAME WIDGET (placeholder — built next) ═══ -->
+        <div class="widget" data-widget="game" id="gameWidget">
+          <div class="widgetFrame">
+            <div class="widgetControls">
+              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
+            </div>
+            <div class="widgetHandle"></div>
+            <div class="gameWidgetBox" id="gameWidgetBox">
+              <div class="gameWidgetPlaceholder">
+                <div class="gameWidgetIcon">🎮</div>
+                <div class="gameWidgetLabel">Game coming soon</div>
+              </div>
+            </div>
+            <div class="widgetResize"></div>
+          </div>
+        </div>
+
+      </div>
     </div>
+  </div>
 
-    <!-- ══ SCREEN: HOW TO PLAY ══ -->
-    <div id="screenHowTo" class="screen">
-      <div class="screen-header">
-        <button class="back-btn" data-target="screenHome">← Back</button>
-        <h2>How to Play</h2>
-      </div>
-      <div class="howto-content">
-        <p>How-to content goes here. Describe your game mechanics.</p>
-      </div>
-    </div>
-
-    <!-- ══ SCREEN: HIGH SCORES ══ -->
-    <div id="screenHighScores" class="screen">
-      <div class="screen-header">
-        <button class="back-btn" data-target="screenHome">← Back</button>
-        <h2>High Scores</h2>
-      </div>
-      <div id="highScoreList" class="score-list">
-        <p class="empty-state">No scores yet. Play a round!</p>
-      </div>
-    </div>
-
-    <!-- ══ SCREEN: GAME ══ -->
-    <div id="screenGame" class="screen">
-      <div class="game-hud">
-        <button class="hud-btn" id="btnPause">⏸</button>
-        <div class="hud-score">Score: <span id="hudScore">0</span></div>
-        <div class="hud-timer"><span id="hudTimer">60</span>s</div>
-      </div>
-      <div class="game-area" id="gameArea">
-        <!-- Game canvas / content rendered by game.js -->
-        <p class="placeholder-text">Game coming soon — build your mechanics here!</p>
-      </div>
-    </div>
-
-    <!-- ══ SCREEN: GAME OVER ══ -->
-    <div id="screenGameOver" class="screen">
-      <div class="gameover-inner">
-        <h2>Game Over</h2>
-        <div class="final-score-label">Your Score</div>
-        <div class="final-score" id="finalScore">0</div>
-        <button class="menu-btn primary" id="btnPlayAgain">Play Again</button>
-        <button class="menu-btn" id="btnBackHome">Main Menu</button>
-      </div>
-    </div>
-
-  </div><!-- /#app -->
-
-  <script src="game.js"></script>
+  <script src="script.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

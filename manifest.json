@@ -1,21 +1,21 @@
 {
-  "name": "Weather Game",
-  "short_name": "WeatherGame",
-  "description": "A mobile weather game",
+  "name": "Marine Dashboard",
+  "short_name": "Marine",
+  "description": "St Augustine Sailing mobile marine weather dashboard",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#07131c",
-  "theme_color": "#07131c",
+  "background_color": "#0a1628",
+  "theme_color": "#0a1628",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "icon-192.png",
+      "src": "staugustine-sailing-logo.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "icon-512.png",
+      "src": "staugustine-sailing-logo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

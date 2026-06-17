@@ -1,375 +1,1937 @@
-/* ============================================================
-   Weather Game — Mobile-only stylesheet
-   Target: phones in portrait mode (max ~430px wide)
-   ============================================================ */
-
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  -webkit-tap-highlight-color: transparent;
-}
-
 :root {
-  --bg:          #07131c;
-  --surface:     #0d2035;
-  --border:      rgba(100, 180, 220, 0.18);
-  --accent:      #4fc3f7;
-  --accent2:     #00e5ff;
-  --text:        #eef7ff;
-  --text-dim:    #7bafc8;
-  --danger:      #ff5252;
-  --success:     #69f0ae;
-  --radius:      14px;
-  --font:        -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --dash-width: 1920;
+  --dash-height: 1080;
 
-  /* Safe area for notched iPhones */
-  --safe-top:    env(safe-area-inset-top, 0px);
-  --safe-bot:    env(safe-area-inset-bottom, 0px);
+  --dashboard-bg-1: #07131c;
+  --dashboard-bg-2: #0b1f2d;
+  --dashboard-bg-3: #08141d;
+  --dashboard-accent: rgba(125, 186, 220, 0.35);
+
+  --widget-bg: rgba(10, 25, 36, 0.72);
+  --widget-border: rgba(140, 200, 230, 0.22);
+  --widget-shadow: 0 12px 30px rgba(0, 0, 0, 0.20);
+
+  --text-main: #eef7ff;
+  --text-soft: #9fc2d9;
+  --alert-color: #ff7c7c;
+
+  --control-bg: rgba(10, 25, 36, 0.96);
+  --control-border: rgba(125, 186, 220, 0.35);
+
+  --settings-width: 330px;
 }
 
-html, body {
-  height: 100%;
+html,
+body {
+  margin: 0;
   width: 100%;
+  height: 100%;
+}
+
+body {
   overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 16px;
-  -webkit-font-smoothing: antialiased;
+  color: var(--text-main);
+  font-family: "Segoe UI", Arial, sans-serif;
+  background:
+    radial-gradient(circle at top, rgba(50, 90, 120, 0.22), transparent 35%),
+    linear-gradient(to bottom, var(--dashboard-bg-1) 0%, var(--dashboard-bg-2) 45%, var(--dashboard-bg-3) 100%);
+}
+
+body.dashboard-flat-bg {
+  background: var(--dashboard-bg-1);
 }
 
 #app {
-  position: fixed;
-  inset: 0;
-  /* push content below the notch / status bar */
-  padding-top: var(--safe-top);
-  padding-bottom: var(--safe-bot);
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
 }
 
-/* ── Screens ────────────────────────────────────────────── */
-.screen {
+#dashboardStage {
+  position: absolute;
+  overflow: visible;
+}
+
+#dashboard {
+  position: relative;
+  width: calc(var(--dash-width) * 1px);
+  height: calc(var(--dash-height) * 1px);
+  transform-origin: top left;
+  background: transparent;
+}
+
+/* Widget system */
+.widget {
+  position: absolute;
+  box-sizing: border-box;
+  --widget-local-bg: var(--widget-bg);
+  --widget-local-border: var(--widget-border);
+  --widget-local-shadow: var(--widget-shadow);
+  --widget-local-radius: 18px;
+  --row1-font: "Segoe UI", Arial, sans-serif;
+  --row2-font: "Segoe UI", Arial, sans-serif;
+  --row1-color: #eef7ff;
+  --row2-color: #9fc2d9;
+  --row1-alert-color: #ff7c7c;
+  --row2-alert-color: #ff7c7c;
+}
+
+.widget.hidden-widget {
+  display: none !important;
+}
+
+.widgetFrame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.widget {
+  overflow: visible;
+}
+
+.widgetFrame::before {
+  content: "";
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 20px 18px;
-  overflow-y: auto;
+  background: var(--widget-local-bg);
+  border: 1px solid var(--widget-local-border);
+  border-radius: var(--widget-local-radius);
+  box-shadow: var(--widget-local-shadow);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.widget[data-widget="layout"] .widgetFrame::before {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.widgetHandle,
+.widgetResize,
+.widgetControls {
+  position: absolute;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.15s ease;
+  display: none;
 }
 
-.screen.active {
+body.layout-edit .widget {
+  outline: 2px dashed rgba(140, 200, 230, 0.45);
+  outline-offset: 3px;
+}
+
+body.layout-edit .widgetHandle,
+body.layout-edit .widgetResize,
+body.layout-edit .widgetControls {
+  display: flex;
   opacity: 1;
-  pointer-events: all;
+  pointer-events: auto;
 }
 
-/* ── Loading Screen ─────────────────────────────────────── */
-#screenLoading {
-  justify-content: center;
+.widgetHandle {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 26px;
+  cursor: move;
+  background: rgba(120, 190, 220, 0.08);
+  z-index: 35;
+  border-top-left-radius: var(--widget-local-radius);
+  border-top-right-radius: var(--widget-local-radius);
+}
+
+.widgetResize {
+  width: 18px;
+  height: 18px;
+  right: 4px;
+  bottom: 4px;
+  cursor: nwse-resize;
+  background: rgba(120, 190, 220, 0.45);
+  border-radius: 4px;
+  z-index: 35;
+}
+
+.widgetControls {
+  top: 8px;
+  right: 8px;
+  z-index: 45;
+  gap: 8px;
   align-items: center;
-  gap: 16px;
+  justify-content: flex-end;
 }
 
-.loading-icon {
-  font-size: 52px;
-  animation: bob 1.4s ease-in-out infinite;
-}
-
-@keyframes bob {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-10px); }
-}
-
-.loading-text {
-  font-size: 18px;
-  color: var(--text-dim);
-  letter-spacing: 0.5px;
-}
-
-/* ── Home Screen ────────────────────────────────────────── */
-.home-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.game-title {
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.live-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: var(--success);
-  border: 1px solid var(--success);
-  border-radius: 20px;
-  padding: 3px 8px;
-}
-
-/* ── Weather Snapshot ───────────────────────────────────── */
-.weather-snapshot {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 18px;
-  margin-bottom: 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.snapshot-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.snapshot-label {
-  font-size: 13px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-}
-
-.snapshot-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--accent);
-}
-
-/* ── Menu Buttons ───────────────────────────────────────── */
-.menu-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.menu-btn {
-  width: 100%;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 17px;
-  font-weight: 600;
+.widgetSettingsBtn,
+.widgetHideBtn,
+.closeSettingsBtn,
+.settingsActionBtn {
+  appearance: none;
+  border: 1px solid var(--control-border);
+  background: var(--control-bg);
+  color: #eef7ff;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
-  text-align: center;
+  border-radius: 10px;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
 
-.menu-btn:active {
-  transform: scale(0.97);
-  background: rgba(79, 195, 247, 0.1);
+.widgetSettingsBtn:hover,
+.widgetHideBtn:hover,
+.closeSettingsBtn:hover,
+.settingsActionBtn:hover,
+.layoutToggle:hover,
+.dateBtn:hover {
+  transform: translateY(-1px);
 }
 
-.menu-btn.primary {
-  background: linear-gradient(135deg, #1565c0, #0d47a1);
-  border-color: var(--accent);
-  color: #fff;
+.widgetSettingsBtn,
+.widgetHideBtn {
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.menu-btn.primary:active {
-  background: linear-gradient(135deg, #1976d2, #1565c0);
+.widgetHideBtn.is-hidden {
+  background: rgba(130, 38, 38, 0.95);
+  border-color: rgba(255, 124, 124, 0.45);
 }
 
-.version-tag {
-  margin-top: auto;
-  padding-top: 24px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-dim);
-  opacity: 0.5;
+.widgetSettingsPanel {
+  position: absolute;
+  top: 52px;
+  right: 8px;
+  width: var(--settings-width);
+  max-height: calc(100% - 62px);
+  overflow: auto;
+  padding: 14px;
+  box-sizing: border-box;
+  background: rgba(8, 20, 29, 0.97);
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.34);
+  z-index: 60;
+  display: none;
 }
 
-/* ── Sub-screen header ──────────────────────────────────── */
-.screen-header {
+.widget.show-settings .widgetSettingsPanel {
+  display: block;
+}
+
+.settingsHeader {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
-.screen-header h2 {
-  font-size: 20px;
+.settingsTitle {
+  font-size: 18px;
   font-weight: 700;
+  color: #f5fbff;
 }
 
-.back-btn {
-  background: none;
-  border: none;
-  color: var(--accent);
+.closeSettingsBtn {
+  width: 34px;
+  height: 34px;
   font-size: 16px;
-  font-family: var(--font);
-  cursor: pointer;
-  padding: 4px 0;
 }
 
-/* ── How To Play ────────────────────────────────────────── */
-.howto-content {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  line-height: 1.65;
+.settingsRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.settingsRow label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #b8dcec;
+  text-transform: uppercase;
+}
+
+.settingsRow input[type="text"],
+.settingsRow input[type="date"],
+.settingsRow input[type="color"],
+.settingsRow input[type="range"],
+.settingsRow select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settingsRow input[type="text"],
+.settingsRow input[type="date"],
+.settingsRow select {
+  background: rgba(10, 25, 36, 0.95);
+  color: #eef7ff;
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
   font-size: 15px;
-  color: var(--text-dim);
 }
 
-/* ── High Scores ────────────────────────────────────────── */
-.score-list {
+.settingsRow input[type="color"] {
+  height: 42px;
+  background: rgba(10, 25, 36, 0.95);
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.settingsRow input[type="range"] {
+  accent-color: #67c0f0;
+}
+
+.settingsActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.settingsActionBtn {
+  min-width: 100px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* Default placements */
+#layoutWidget { left: 1680px; top: 18px; width: 190px; height: 58px; }
+#stationsWidget { left: 40px; top: 20px; width: 900px; height: 130px; }
+#logoWidget { left: 980px; top: 20px; width: 150px; height: 120px; }
+#heroTextWidget { left: 1145px; top: 20px; width: 470px; height: 120px; }
+#clockWidget { left: 40px; top: 165px; width: 420px; height: 140px; }
+#tempWidget { left: 640px; top: 175px; width: 340px; height: 130px; }
+#windWidget { left: 1320px; top: 120px; width: 380px; height: 250px; }
+#tideStatusWidget { left: 600px; top: 310px; width: 720px; height: 74px; }
+#forecastWidget { left: 70px; top: 395px; width: 1780px; height: 240px; }
+#dividerWidget { left: 70px; top: 645px; width: 1780px; height: 1px; }
+#tideChartWidget { left: 70px; top: 655px; width: 1780px; height: 360px; }
+
+#layoutWidget {
+  left: 1680px;
+  top: 18px;
+  width: 190px;
+  height: 58px;
+  z-index: 99999 !important;
+}
+
+/* Layout button */
+/* layoutToggle is now handled by .ctrlBtnEdit inside controlPanel */
+.layoutToggle {
+  /* legacy — kept for compatibility */
+  background: rgba(10, 25, 36, 0.92);
+  color: #eef7ff;
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 7px 10px;
+}
+.layoutToggle.active {
+  background: rgba(40, 90, 120, 0.95);
+}
+
+.stationPanel,
+.logoBanner,
+.heroTextBanner,
+.clockWrap,
+.tempBox,
+.windBox,
+.lowTideAlert,
+.currentTide,
+.forecastWrap,
+.sectionDivider,
+.tideSection {
+  position: relative;
+  z-index: 1;
+}
+
+/* Stations widget */
+.stationPanel {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 32px 14px 8px 14px;
 }
 
-.score-entry {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
+.stationBar,
+.dateBar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.score-rank {
-  font-size: 13px;
-  color: var(--text-dim);
-  width: 28px;
-}
-
-.score-points {
+.stationLabel {
   font-size: 20px;
-  font-weight: 700;
-  color: var(--accent);
+  color: var(--row2-color);
+  text-transform: uppercase;
+  white-space: nowrap;
+  font-family: var(--row2-font);
 }
 
-.score-date {
-  font-size: 11px;
-  color: var(--text-dim);
+#stationSelect,
+#tideDateSelect {
+  background: rgba(10, 25, 36, 0.95);
+  color: #eef7ff;
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 22px;
+  font-weight: 600;
 }
 
-.empty-state {
+#stationSelect {
+  min-width: 360px;
+}
+
+#tideDateSelect {
+  min-width: 220px;
+}
+
+.dateBtn {
+  background: rgba(20, 70, 100, 0.92);
+  color: #eef7ff;
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 18px;
+  cursor: pointer;
+  min-width: 160px;
   text-align: center;
-  color: var(--text-dim);
-  margin-top: 40px;
-  font-size: 15px;
 }
 
-/* ── Game Screen ────────────────────────────────────────── */
-.game-hud {
+/* Logo widget */
+.logoBanner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 0 14px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
+  justify-content: center;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
 }
 
-.hud-btn {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 18px;
-  width: 40px;
-  height: 40px;
-  cursor: pointer;
+.sailingLogo {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
-.hud-score, .hud-timer {
-  font-size: 18px;
+/* Hero text widget */
+.heroTextBanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 12px 16px;
+  box-sizing: border-box;
+}
+
+.heroText {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.heroTitle {
+  font-size: 44px;
   font-weight: 700;
+  color: var(--row1-color);
+  font-family: var(--row1-font);
+  line-height: 1.05;
 }
 
-.hud-timer {
-  color: var(--accent);
+.heroSubtitle {
+  font-size: 24px;
+  color: var(--row2-color);
+  font-family: var(--row2-font);
+  margin-top: 6px;
 }
 
-.game-area {
-  flex: 1;
+/* Clock widget */
+.clockWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  padding: 16px 14px 10px 14px;
+  box-sizing: border-box;
+}
+
+.clock {
+  font-size: 86px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--row1-color);
+  font-family: var(--row1-font);
+}
+
+.date {
+  margin-top: 10px;
+  font-size: 30px;
+  color: var(--row2-color);
+  font-family: var(--row2-font);
+}
+
+/* Temp widget */
+.tempBox {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  height: 100%;
+  text-align: center;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+#tempMain {
+  font-size: 66px;
+  font-weight: 700;
+  color: var(--row1-color);
+  font-family: var(--row1-font);
+  line-height: 1;
+}
+
+#tempSub {
+  margin-top: 5px;
+  font-size: 24px;
+  color: var(--row2-color);
+  font-family: var(--row2-font);
+}
+
+
+/* === COMPASS SYSTEM ===================================================== */
+/* === COMPASS SYSTEM ===================================================== */
+.windBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  gap: 6px;
+  padding: 8px;
+  box-sizing: border-box;
   overflow: hidden;
   position: relative;
 }
 
-.placeholder-text {
-  color: var(--text-dim);
-  font-size: 15px;
+.windReadings {
   text-align: center;
-  padding: 20px;
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
 }
 
-/* ── Game Over Screen ───────────────────────────────────── */
-.gameover-inner {
-  flex: 1;
+.windReadingLine {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--row1-color);
+  font-family: var(--row1-font);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.windDir {
+  text-align: center;
+  width: 100%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.windReadingDir {
+  font-size: 16px;
+  color: var(--row2-color);
+  font-family: var(--row2-font);
+  line-height: 1.2;
+}
+
+.compassOuter {
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  flex-shrink: 0;
+}
+
+.compassCardinals {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.cardinal {
+  position: absolute;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--row2-color);
+  font-family: var(--row2-font);
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.compass {
+  position: relative;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#compassMapCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  opacity: 0.65;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+}
+
+#compassMapCanvas.fillWidget {
+  border-radius: 8px;
+  opacity: 0.45;
+}
+
+.ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.compassStyle-none .ring {
+  display: none !important;
+}
+
+.compassStyle-ring .ring {
+  border: 3px solid rgba(160, 220, 255, 0.75);
+  box-shadow: 0 0 18px rgba(84,180,255,0.14), inset 0 0 14px rgba(84,180,255,0.06);
+}
+
+.compassStyle-crosshair .ring {
+  border: 2px solid rgba(160, 220, 255, 0.5);
+}
+.compassStyle-crosshair .ring::before,
+.compassStyle-crosshair .ring::after {
+  content: "";
+  position: absolute;
+  background: rgba(160, 220, 255, 0.3);
+}
+.compassStyle-crosshair .ring::before {
+  width: 1px; height: 100%; left: 50%; top: 0;
+}
+.compassStyle-crosshair .ring::after {
+  height: 1px; width: 100%; top: 50%; left: 0;
+}
+
+.compassStyle-nautical .ring {
+  border: 3px solid rgba(255, 200, 100, 0.7);
+  box-shadow: 0 0 18px rgba(255,200,100,0.15), inset 0 0 14px rgba(255,200,100,0.07);
+}
+
+.compassStyle-minimal .ring {
+  border: 1px solid rgba(160, 220, 255, 0.3);
+  box-shadow: none;
+}
+
+.arrow {
+  position: absolute;
+  width: 6px;
+  background: linear-gradient(to top, #ff7b54, #ffb08a);
+  top: 10%;
+  left: 50%;
+  transform-origin: bottom center;
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(255,140,100,0.35);
+  margin-left: -3px;
+  z-index: 2;
+}
+
+.deg { display: none; }
+/* Tide status widget */
+.lowTideAlert {
+  min-height: 26px;
   text-align: center;
-}
-
-.gameover-inner h2 {
-  font-size: 34px;
+  font-size: 24px;
   font-weight: 800;
+  color: var(--row1-alert-color);
+  letter-spacing: 0.04em;
+  padding-top: 12px;
+  font-family: var(--row1-font);
 }
 
-.final-score-label {
+.currentTide {
+  text-align: center;
+  font-size: 28px;
+  margin-top: 4px;
+  font-weight: 600;
+  padding: 0 12px;
+  color: var(--row2-color);
+  font-family: var(--row2-font);
+}
+
+/* Forecast widget */
+.forecastWrap {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 18px 8px 8px 8px;
+  cursor: pointer;
+}
+
+.forecast {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  align-items: stretch;
+}
+
+.card {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  background: linear-gradient(to bottom, rgba(18, 42, 58, 0.95), rgba(10, 24, 35, 0.96));
+  border: 1px solid rgba(140, 200, 230, 0.22);
+  border-radius: 14px;
+  padding: 12px 8px;
+  text-align: center;
   font-size: 14px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.final-score {
-  font-size: 72px;
-  font-weight: 900;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+/* Dynamic animated forecast backgrounds */
+.widget.theme-dynamic .card.weather-sunny::before,
+.widget.theme-dynamic .card.weather-partly::before,
+.widget.theme-dynamic .card.weather-cloudy::before,
+.widget.theme-dynamic .card.weather-rainy::before,
+.widget.theme-dynamic .card.weather-stormy::before,
+.widget.theme-dynamic .card.weather-night::before {
+  opacity: 1;
+}
+
+.widget.theme-dynamic .card.weather-sunny::before {
+  background:
+    radial-gradient(circle at 75% 22%, rgba(255, 230, 85, 0.95) 0 12%, rgba(255, 230, 85, 0.18) 12% 24%, transparent 25%),
+    linear-gradient(to bottom, rgba(92, 187, 255, 0.85), rgba(21, 78, 132, 0.65));
+}
+
+.widget.theme-dynamic .card.weather-partly::before {
+  background:
+    radial-gradient(circle at 72% 20%, rgba(255, 226, 112, 0.82) 0 10%, rgba(255, 226, 112, 0.20) 10% 20%, transparent 21%),
+    radial-gradient(circle at 30% 35%, rgba(255,255,255,0.78) 0 10%, transparent 11%),
+    radial-gradient(circle at 42% 37%, rgba(255,255,255,0.78) 0 10%, transparent 11%),
+    radial-gradient(circle at 52% 35%, rgba(255,255,255,0.78) 0 10%, transparent 11%),
+    linear-gradient(to bottom, rgba(114, 177, 227, 0.88), rgba(34, 67, 101, 0.74));
+}
+
+.widget.theme-dynamic .card.weather-cloudy::before {
+  background:
+    radial-gradient(circle at 26% 36%, rgba(224, 233, 239, 0.62) 0 11%, transparent 12%),
+    radial-gradient(circle at 38% 38%, rgba(224, 233, 239, 0.62) 0 11%, transparent 12%),
+    radial-gradient(circle at 52% 36%, rgba(224, 233, 239, 0.62) 0 11%, transparent 12%),
+    linear-gradient(to bottom, rgba(108, 129, 148, 0.94), rgba(53, 67, 82, 0.82));
+}
+
+.widget.theme-dynamic .card.weather-rainy::before {
+  background:
+    repeating-linear-gradient(
+      110deg,
+      rgba(170, 220, 255, 0.00) 0 10px,
+      rgba(170, 220, 255, 0.32) 10px 12px,
+      rgba(170, 220, 255, 0.00) 12px 22px
+    ),
+    linear-gradient(to bottom, rgba(92, 111, 129, 0.95), rgba(35, 47, 60, 0.9));
+  animation: rainShift 1.3s linear infinite;
+}
+
+.widget.theme-dynamic .card.weather-stormy::before {
+  background:
+    repeating-linear-gradient(
+      110deg,
+      rgba(170, 220, 255, 0.00) 0 10px,
+      rgba(170, 220, 255, 0.26) 10px 12px,
+      rgba(170, 220, 255, 0.00) 12px 22px
+    ),
+    linear-gradient(to bottom, rgba(67, 76, 93, 0.98), rgba(19, 25, 34, 0.94));
+  animation: rainShift 1.15s linear infinite, lightningFlash 6s infinite;
+}
+
+.widget.theme-dynamic .card.weather-night::before {
+  background:
+    radial-gradient(circle at 76% 22%, rgba(236, 241, 255, 0.9) 0 7%, rgba(236, 241, 255, 0.15) 7% 16%, transparent 17%),
+    linear-gradient(to bottom, rgba(35, 50, 82, 0.92), rgba(11, 16, 29, 0.92));
+}
+
+@keyframes rainShift {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 0 28px, 0 0; }
+}
+
+@keyframes lightningFlash {
+  0%, 85%, 100% { filter: brightness(1); }
+  86% { filter: brightness(1.7); }
+  87% { filter: brightness(1.05); }
+  88% { filter: brightness(1.5); }
+  89% { filter: brightness(1); }
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.card.weekly {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.card .hour {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--row1-color);
+  margin-bottom: 8px;
+  font-family: var(--row1-font);
+}
+
+.card .tempF {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--row1-color);
+  font-family: var(--row1-font);
+}
+
+.card .humidity {
+  font-size: 15px;
+  color: var(--row2-color);
+  margin-top: 3px;
+  margin-bottom: 6px;
+  font-family: var(--row2-font);
+}
+
+.card .tempC {
+  font-size: 16px;
+  color: var(--row2-color);
+  margin-bottom: 8px;
+  font-family: var(--row2-font);
+}
+
+.card .rain {
+  font-size: 17px;
+  color: #8ed8ff;
+  margin-bottom: 6px;
+  font-family: var(--row2-font);
+}
+
+.card .windMini {
+  font-size: 16px;
+  color: var(--row1-color);
+  font-family: var(--row2-font);
+}
+
+.card .dirMini {
+  font-size: 16px;
+  color: var(--row2-color);
+  margin-top: 3px;
+  font-family: var(--row2-font);
+}
+
+.card .danger {
+  color: var(--row1-alert-color) !important;
+  font-weight: 700;
+}
+
+.card .boxAlert {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--row2-alert-color);
+  line-height: 1.2;
+  text-transform: uppercase;
+  font-family: var(--row2-font);
+}
+
+/* Divider widget */
+.sectionDivider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(160, 220, 255, 0.45), transparent);
+  margin-top: 0;
+}
+
+/* Tide chart widget */
+.tideSection {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 14px 0 0 0;
+}
+
+.tidePanel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: rgba(10, 24, 35, 0.22);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+#tideChart {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: ew-resize;
+}
+
+#tideLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff6f61;
+  box-shadow: 0 0 10px rgba(255, 111, 97, 0.45);
+  pointer-events: none;
+}
+
+#tideReadout {
+  position: absolute;
+  top: 10px;
+  transform: translateX(-50%);
+  background: rgba(8, 20, 29, 0.92);
+  color: #eef7ff;
+  border: 1px solid rgba(125, 186, 220, 0.35);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Theme presets */
+.widget.theme-default {
+  --widget-local-bg: rgba(10, 25, 36, 0.72);
+  --widget-local-border: rgba(140, 200, 230, 0.22);
+  --widget-local-shadow: 0 12px 30px rgba(0, 0, 0, 0.20);
+}
+
+.widget.theme-clean {
+  --widget-local-bg: transparent;
+  --widget-local-border: transparent;
+  --widget-local-shadow: none;
+}
+
+.widget.theme-clean .widgetFrame::before {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.widget.theme-glass {
+  --widget-local-bg: linear-gradient(to bottom, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  --widget-local-border: rgba(220, 240, 255, 0.28);
+  --widget-local-shadow: 0 16px 34px rgba(0, 0, 0, 0.18);
+}
+
+.widget.theme-ocean {
+  --widget-local-bg: linear-gradient(to bottom, rgba(13, 57, 84, 0.74), rgba(5, 23, 38, 0.78));
+  --widget-local-border: rgba(107, 196, 255, 0.30);
+  --widget-local-shadow: 0 16px 34px rgba(0, 30, 54, 0.24);
+}
+
+.widget.theme-sunset {
+  --widget-local-bg: linear-gradient(to bottom, rgba(88, 42, 52, 0.72), rgba(37, 17, 28, 0.80));
+  --widget-local-border: rgba(255, 170, 125, 0.26);
+  --widget-local-shadow: 0 16px 34px rgba(40, 10, 18, 0.26);
+}
+
+.widget.theme-dynamic {
+  --widget-local-bg: rgba(8, 20, 29, 0.40);
+  --widget-local-border: rgba(140, 200, 230, 0.16);
+  --widget-local-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+/* Better edit mode visibility for clean theme */
+body.layout-edit .widget.theme-clean {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Tiny widgets */
+#dividerWidget .widgetSettingsPanel,
+#layoutWidget .widgetSettingsPanel {
+  max-height: 380px;
+}
+
+/* Scrollbar */
+.widgetSettingsPanel::-webkit-scrollbar {
+  width: 10px;
+}
+
+.widgetSettingsPanel::-webkit-scrollbar-thumb {
+  background: rgba(125, 186, 220, 0.30);
+  border-radius: 20px;
+}
+
+.widgetSettingsPanel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.widgetFrame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.widget {
+  overflow: visible;
+}
+
+#layoutWidget {
+  left: 1680px;
+  top: 18px;
+  width: 190px;
+  height: 58px;
+  z-index: 99999 !important;
+}
+
+#layoutWidget .widgetHandle {
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  height: 20px;
+  border-radius: 10px 10px 0 0;
+  z-index: 120000;
+}
+
+#layoutWidget .widgetResize {
+  z-index: 120000;
+}
+
+#layoutWidget .widgetControls {
+  z-index: 120001;
+}
+
+#layoutWidget .widgetSettingsPanel {
+  z-index: 120002;
+  top: 52px;
+  right: 0;
+}
+
+#layoutWidget .layoutToggle {
+  position: relative;
+  z-index: 100000;
+}
+
+/* Marina address input */
+.marineAddressWrap {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  width: 190px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.marineAddressWrap input {
+  flex: 1;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(125,186,220,0.3);
+  border-radius: 8px;
+  color: #eef7ff;
+  padding: 5px 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.marineAddressWrap button {
+  background: rgba(100,180,255,0.18);
+  border: 1px solid rgba(100,180,255,0.35);
+  border-radius: 8px;
+  color: #eef7ff;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.marineAddressWrap button:hover {
+  background: rgba(100,180,255,0.30);
+}
+
+/* === SATELLITE COMPASS ================================================== */
+#compassMapCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  opacity: 0.65;
+  z-index: 0;
+  pointer-events: none;
+}
+
+#compassMapCanvas.fillWidget {
+  border-radius: 8px;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 0.45;
+  z-index: 0;
+}
+#compassWidget {
+  position: relative;
+  transition: width 0.2s, height 0.2s;
+}
+
+.compass .ring  { position: relative; z-index: 1; }
+.compass .arrow { z-index: 2; }
+.compass .deg   { z-index: 2; }
+.compass .cardinal { z-index: 3; }
+
+/* when map fills the whole widget */
+#compassMapCanvas.fillWidget {
+  border-radius: 8px;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 0.45;
+}
+
+/* === DRAGGABLE SETTINGS PANEL =========================================== */
+.widgetSettingsPanel.is-detached {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  max-height: 80vh;
+  z-index: 99999;
+  cursor: default;
+}
+
+.widgetSettingsPanel.is-detached .settingsHeader {
+  cursor: grab;
+}
+
+.widgetSettingsPanel.is-detached .settingsHeader:active {
+  cursor: grabbing;
+}
+
+.settingsDragBtn {
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+  background: rgba(100,180,255,0.15);
+  border: 1px solid rgba(100,180,255,0.3);
+  border-radius: 6px;
+  color: #eef7ff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.windSep {
+  opacity: 0.4;
+  font-weight: 300;
+  margin: 0 2px;
+}
+
+/* ==========================================================================
+   MOBILE OVERRIDES — only active when body.is-mobile (< 768px)
+   Desktop styles are completely untouched above this line.
+   ========================================================================== */
+
+/* Hide widgets removed for mobile */
+.mobile-hidden {
+  display: none !important;
+}
+
+@media (max-width: 767px) {
+
+  html, body {
+    margin: 0; padding: 0;
+    overflow-x: hidden;
+    background: var(--dashboard-bg-1, #07131c) !important;
+  }
+
+  body { overflow-y: auto; min-height: 100vh; }
+
+  #app, #dashboardStage {
+    position: static;
+    width: 100%; height: auto;
+    overflow: visible;
+  }
+
+  /* Dashboard: full-height flex column, padded below fixed header */
+  #dashboard {
+    position: relative;
+    width: 100% !important;
+    height: auto !important;
+    transform: none !important;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 6px 40px 6px;
+    padding-top: 58px !important; /* below fixed header */
+    box-sizing: border-box;
+    min-height: calc(100vh - 76px);
+  }
+
+  #dashboard { padding-bottom: 40px !important; }  /* always enough room for station widget */
+
+  /* Hidden widgets are hidden on mobile too (except during edit mode) */
+  body.layout-edit .widget.hidden-widget { display: flex !important; }
+  .mobile-hidden { display: none !important; }
+
+  /* All widgets: full width, flex column */
+  .widget {
+    position: relative !important;
+    width: 100% !important;
+    left: auto !important; top: auto !important;
+    box-sizing: border-box;
+    border-radius: 12px;
+    overflow: visible;
+    flex-shrink: 0;
+  }
+
+  .widgetFrame { overflow: hidden; border-radius: 12px; height: 100%; position: relative; }
+
+  /* ── Widget order and proportional heights ──
+     Total usable height ≈ 100vh - 76px header - 24px padding - 5*6px gaps = ~100vh - 130px
+     Split: compass 28%, forecast 22%, tide chart 22%, tide status 8%, station 10% */
+  #layoutWidget     { order: 5; height: auto !important; min-height: 90px; }
+  #windWidget       { order: 1; height: 28vh !important; min-height: 200px; }
+  #tideStatusWidget { display: none !important; }
+  #forecastWidget   { order: 2; height: 22vh !important; min-height: 160px; }
+  #tideChartWidget  { order: 4; height: 22vh !important; min-height: 160px; padding: 0 !important; border-radius: 10px !important; overflow: hidden !important; }
+  #tempWidget       { display: none !important; } /* shown in header */
+
+  /* ── Fixed header — sits under phone status bar ── */
+  #mobileHeader {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: auto;
+    min-height: 48px;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(5, 14, 22, 0.97);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(125, 186, 220, 0.2);
+    box-sizing: border-box;
+    gap: 10px;
+  }
+
+  #mobileHeaderTemp {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  #mobileHeaderTempVal {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f5fbff;
+    line-height: 1;
+  }
+
+  #mobileHeaderHumWrap {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+  }
+
+  #mobileHeaderHumPct   { font-size: 13px; font-weight: 600; color: #9fc2d9; line-height: 1.2; }
+  #mobileHeaderHumLabel { font-size: 10px; color: rgba(125,186,220,0.55); text-transform: uppercase; line-height: 1; }
+
+
+
+  /* Edit button in header */
+  .mobileEditBtn {
+    flex-shrink: 0;
+    background: rgba(100,180,255,0.15);
+    border: 1px solid rgba(100,180,255,0.4);
+    border-radius: 8px;
+    color: #a8daff;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 6px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .mobileEditBtn.active {
+    background: rgba(100,180,255,0.35);
+    color: #ffffff;
+  }
+
+  /* ── Station/control widget (bottom of scroll, shows tide date) ── */
+  #layoutWidget .widgetFrame { background: rgba(8,20,32,0.7); border-radius: 12px; overflow: hidden; }
+  #layoutWidget .controlPanel { padding: 10px 12px; box-sizing: border-box; width: 100%; }
+  #layoutWidget .controlRow { width: 100%; overflow: hidden; }
+  #layoutWidget .controlSelect,
+  #layoutWidget .controlDate  {
+    font-size: 15px !important;
+    padding: 7px 10px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+  #layoutWidget .controlBtns  { gap: 6px; }
+  #layoutWidget .ctrlBtn      { font-size: 12px !important; padding: 6px 8px !important; flex: 1; }
+  #layoutWidget .ctrlBtnEdit  { display: none !important; } /* Edit is in fixed header */
+
+  /* ── Tide chart ── */
+  #tideChartWidget .tideSection,
+  #tideChartWidget .tidePanel { padding: 0 !important; margin: 0 !important; height: 100% !important; border-radius: 0 !important; }
+  #tideChartWidget #tideChart { display: block; width: 100% !important; height: 100% !important; }
+  #tideLine { display: none !important; }
+
+  /* ── Forecast scroll ── */
+  .forecastWrap {
+    padding: 6px 0;
+    overflow: hidden;
+    touch-action: pan-y;
+    user-select: none;
+    height: calc(100% - 12px);
+  }
+
+  .forecast {
+    gap: 0;
+    display: flex;
+    flex-wrap: nowrap;
+    will-change: transform;
+    height: 100%;
+  }
+
+  .card {
+    flex: 0 0 calc(100% / 3);
+    box-sizing: border-box;
+    padding: 10px 5px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .card .hour   { font-size: 14px; }
+  .card .tempF  { font-size: 26px; }
+  .card .humidity, .card .rain, .card .windMini, .card .dirMini { font-size: 12px; }
+
+  /* ── Tide chart touch ── */
+  #tideChart { cursor: grab; touch-action: pan-y; }
+
+  /* ── Widget controls — edit mode only ── */
+  .widgetControls { display: none !important; }
+  body.layout-edit .widgetControls {
+    display: flex !important;
+    position: absolute; top: 6px; right: 6px; z-index: 60;
+  }
+
+  .widgetHandle { display: none !important; }
+
+  body.layout-edit .widget {
+    outline: 2px dashed rgba(140,200,230,0.4) !important;
+    touch-action: pan-y;
+  }
+
+  /* No outline or header visual outside edit mode */
+  .widget { outline: none !important; }
+
+  body.layout-edit .widgetResize {
+    display: flex !important;
+    align-items: center; justify-content: center;
+    position: absolute !important;
+    width: 40px !important; height: 40px !important;
+    right: 0 !important; bottom: 0 !important;
+    background: rgba(100,180,255,0.3) !important;
+    border-radius: 10px 0 10px 0 !important;
+    z-index: 50 !important;
+  }
+
+  body.layout-edit .widgetResize::after {
+    content: "⤡"; font-size: 18px; color: rgba(180,220,255,0.9); pointer-events: none;
+  }
+
+  /* ── Settings panels ── */
+  .widgetSettingsPanel {
+    width: calc(100vw - 24px);
+    max-height: 40vh;
+    position: fixed;
+    top: 56px; left: 12px; right: 12px;
+    z-index: 99998;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+
+  .widget.mobile-dragging { opacity: 0.6; outline: 2px solid rgba(100,200,255,0.8) !important; }
+
+  /* Wind info hidden in wind widget on mobile (shown in header or overlay) */
+  #windInlineTemp { display: none !important; }
+}
+
+
+
+  /* Widget being dragged during mobile reorder */
+  .widget.mobile-dragging {
+    opacity: 0.6;
+    outline: 2px solid rgba(100,200,255,0.8) !important;
+    z-index: 999;
+  }
+
+
+/* ── Merged Control Widget ── */
+.controlPanel {
+  padding: 10px 12px 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controlLabel {
+  font-size: 12px;
+  color: #7db8d8;
+  white-space: nowrap;
+  min-width: 68px;
+}
+
+.controlSelect,
+.controlDate {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(125,186,220,0.28);
+  border-radius: 8px;
+  color: #eef7ff;
+  padding: 8px 12px;
+  font-size: 20px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+
+.controlBtns {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ctrlBtn {
+  flex: 1;
+  padding: 7px 4px;
+  border-radius: 7px;
+  border: 1px solid rgba(125,186,220,0.3);
+  background: rgba(255,255,255,0.06);
+  color: #d0ecff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s;
+}
+
+.ctrlBtn:hover {
+  background: rgba(100,180,255,0.18);
+}
+
+.ctrlBtnEdit {
+  background: rgba(100,180,255,0.14);
+  border-color: rgba(100,180,255,0.4);
+  color: #a8daff;
+}
+
+.ctrlBtnEdit.active {
+  background: rgba(100,180,255,0.32);
+  color: #ffffff;
+}
+
+/* ── Settings helper styles ── */
+.checkRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.checkLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #c8e8ff;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settingsTextInput {
+  flex: 1;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(125,186,220,0.3);
+  border-radius: 6px;
+  color: #eef7ff;
+  padding: 4px 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.settingsInlineBtn {
+  background: rgba(100,180,255,0.18);
+  border: 1px solid rgba(100,180,255,0.35);
+  border-radius: 6px;
+  color: #eef7ff;
+  padding: 4px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settingsNumInput {
+  width: 60px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(125,186,220,0.3);
+  border-radius: 5px;
+  color: #eef7ff;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.settingsDivider {
+  border-top: 1px solid rgba(125,186,220,0.15);
+  margin: 4px 0;
+}
+
+.settingsHint {
+  font-size: 11px;
+  color: #7a9fb8;
+}
+
+/* ── Cold alert style on forecast cards ── */
+.card .tempF.cold-alert {
+  color: #74c0fc !important;
+  text-shadow: 0 0 8px rgba(116,192,252,0.6);
+}
+
+
+/* Control widget — no visible handle, no settings gear in normal mode */
+#layoutWidget .widgetHandle {
+  cursor: move;
+  height: 6px;
+  background: transparent;
+}
+
+/* Hide the stationPanel class if it somehow still renders */
+.stationPanel .stationBar,
+.stationPanel .dateBar {
+  display: flex;
+}
+
+
+/* ── Control panel widget frame gets its own styled background ── */
+#layoutWidget .widgetFrame {
+  overflow: visible;
+}
+
+#layoutWidget .widgetFrame::before {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Clean theme override for control widget */
+#layoutWidget.theme-clean .widgetFrame::before {
+  background: rgba(8, 22, 34, 0.88) !important;
+  border-color: rgba(100, 170, 210, 0.25) !important;
+}
+
+/* Override stale stationPanel styles if they somehow apply */
+#layoutWidget .stationPanel {
+  display: none;
+}
+
+
+/* Larger Celsius reading in temperature widget */
+#tempCelsius {
+  font-size: 2.2em;
+  font-weight: 600;
+  color: var(--row2-color, #9fc2d9);
+  font-family: var(--row1-font);
+  margin-top: 4px;
+}
+
+
+/* Mobile control panel styling */
+@media (max-width: 767px), (max-width: 1400px) and (pointer: coarse) {
+  #layoutWidget .controlPanel {
+    padding: 10px 10px 6px 10px;
+    background: rgba(8, 20, 30, 0.85);
+    border-radius: 12px;
+    border: 1px solid rgba(100,180,230,0.2);
+  }
+
+  #layoutWidget .controlSelect,
+  #layoutWidget .controlDate {
+    font-size: 16px !important;
+    padding: 8px 10px !important;
+    height: auto !important;
+  }
+
+  #layoutWidget .controlLabel {
+    font-size: 13px !important;
+    min-width: 75px !important;
+  }
+}
+
+
+/* ── Mobile drag handle — invisible outside edit mode, appears in edit ── */
+.mobileDragBar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 0;           /* zero height — totally invisible outside edit */
+  overflow: hidden;
+  background: transparent;
+  border-radius: 12px 12px 0 0;
+  z-index: 30;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  transition: height 0.15s ease;
+}
+
+body.layout-edit .mobileDragBar {
+  height: 26px;        /* appears only in edit mode */
+  pointer-events: auto;
+  background: linear-gradient(rgba(100,180,255,0.14), rgba(100,180,255,0));
+  border-bottom: 1px solid rgba(100,180,255,0.18);
+  overflow: visible;
+}
+
+.mobileDragBarDots {
+  font-size: 14px;
+  color: transparent;
+  letter-spacing: 3px;
+  pointer-events: none;
+  user-select: none;
+  margin-top: -4px;
+}
+
+body.layout-edit .mobileDragBarDots {
+  color: rgba(140,200,240,0.45);
+}
+
+
+
+/* ==========================================================================
+   MOBILE-ONLY GAME BUILD — overrides & additions
+   Force mobile layout regardless of screen size, no fixed widget heights
+   ========================================================================== */
+
+html, body {
+  margin: 0; padding: 0;
+  overflow-x: hidden;
+  background: var(--dashboard-bg-1, #07131c) !important;
+}
+
+body { overflow-y: auto; min-height: 100vh; }
+
+#app, #dashboardStage {
+  position: static;
+  width: 100%; height: auto;
+  overflow: visible;
+}
+
+#dashboard {
+  position: relative !important;
+  width: 100% !important;
+  height: auto !important;
+  transform: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  padding: 6px 6px 40px 6px !important;
+  padding-top: 58px !important;
+  box-sizing: border-box !important;
+}
+
+/* All widgets: full width, height driven by content */
+.widget {
+  position: relative !important;
+  width: 100% !important;
+  left: auto !important; top: auto !important;
+  box-sizing: border-box !important;
+  border-radius: 12px !important;
+  overflow: visible !important;
+  flex-shrink: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.widgetFrame {
+  overflow: hidden !important;
+  border-radius: 12px !important;
+  position: relative !important;
+  height: auto !important;
+}
+
+/* Widget order */
+#windWidget       { order: 1; }
+#forecastWidget   { order: 2; }
+#tideChartWidget  { order: 3; }
+#tideStatusWidget { order: 4; }
+#tempWidget       { order: 5; }
+#gameWidget       { order: 6; }
+#layoutWidget     { order: 7; }
+
+/* Widgets that need a minimum sensible height to render their canvas/content */
+#windWidget       { min-height: 280px; }
+#forecastWidget   { min-height: 180px; }
+#tideChartWidget  { min-height: 180px; padding: 0 !important; border-radius: 10px !important; overflow: hidden !important; }
+#tideStatusWidget { min-height: 60px; }
+#tempWidget       { min-height: 80px; }
+#gameWidget       { min-height: 180px; }
+
+/* Fixed header */
+#mobileHeader {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: auto;
+  min-height: 48px;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(5, 14, 22, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(125, 186, 220, 0.2);
+  box-sizing: border-box;
+  gap: 10px;
+}
+
+#mobileHeaderTemp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+#mobileHeaderTempVal {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f5fbff;
   line-height: 1;
 }
 
-.gameover-inner .menu-btn {
-  width: 240px;
+#mobileHeaderHumWrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
 }
 
-/* ── Desktop guard ──────────────────────────────────────── */
-/* If someone opens on desktop, show a message instead of a broken layout */
-@media (min-width: 600px) and (pointer: fine) {
-  #app::before {
-    content: "This app is designed for mobile. Open it on your phone or use browser dev tools to simulate a phone screen.";
-    position: fixed;
-    inset: 0;
-    background: #07131c;
-    color: #7bafc8;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 40px;
-    font-size: 18px;
-    line-height: 1.6;
-    z-index: 9999;
-  }
-  #app > * { display: none !important; }
+#mobileHeaderHumPct   { font-size: 13px; font-weight: 600; color: #9fc2d9; line-height: 1.2; }
+#mobileHeaderHumLabel { font-size: 10px; color: rgba(125,186,220,0.55); text-transform: uppercase; line-height: 1; }
+
+.mobileEditBtn {
+  flex-shrink: 0;
+  background: rgba(100,180,255,0.15);
+  border: 1px solid rgba(100,180,255,0.4);
+  border-radius: 8px;
+  color: #a8daff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 14px;
+  cursor: pointer;
+  white-space: nowrap;
 }
+
+.mobileEditBtn.active {
+  background: rgba(100,180,255,0.35);
+  color: #ffffff;
+}
+
+/* Tide chart — canvas fills its container */
+#tideChartWidget .tideSection { height: 180px; }
+#tideChartWidget .tidePanel   { padding: 0 !important; margin: 0 !important; height: 100% !important; border-radius: 0 !important; }
+#tideChartWidget #tideChart   { display: block; width: 100% !important; height: 100% !important; }
+#tideLine { display: none !important; }
+
+/* Forecast — horizontal scroll strip, height from content */
+.forecastWrap {
+  padding: 6px 0 !important;
+  overflow: hidden !important;
+  touch-action: pan-y !important;
+  user-select: none !important;
+}
+
+.forecast {
+  gap: 0 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  will-change: transform !important;
+}
+
+.card {
+  flex: 0 0 calc(100% / 3) !important;
+  box-sizing: border-box !important;
+  padding: 10px 5px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  min-height: 160px !important;
+}
+
+.card .hour    { font-size: 14px !important; }
+.card .tempF   { font-size: 22px !important; }
+.card .humidity, .card .rain, .card .windMini, .card .dirMini { font-size: 11px !important; }
+
+/* Tide status */
+.currentTide  { font-size: 16px !important; margin-top: 2px !important; }
+.lowTideAlert { font-size: 16px !important; padding-top: 6px !important; }
+
+/* Control panel */
+#layoutWidget .controlPanel {
+  padding: 10px 10px 6px 10px;
+  background: rgba(8, 20, 30, 0.85);
+  border-radius: 12px;
+  border: 1px solid rgba(100,180,230,0.2);
+}
+
+#layoutWidget .controlSelect,
+#layoutWidget .controlDate {
+  font-size: 15px !important;
+  padding: 7px 10px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+#layoutWidget .controlBtns { gap: 6px; }
+#layoutWidget .ctrlBtn     { font-size: 12px !important; padding: 6px 8px !important; flex: 1; }
+#layoutWidget .ctrlBtnEdit { display: none !important; }
+
+/* Widget controls — edit mode only */
+.widgetControls { display: none !important; }
+body.layout-edit .widgetControls {
+  display: flex !important;
+  position: absolute; top: 6px; right: 6px; z-index: 60;
+}
+
+.widgetHandle { display: none !important; }
+
+body.layout-edit .widget {
+  outline: 2px dashed rgba(140,200,230,0.4) !important;
+}
+.widget { outline: none !important; }
+
+body.layout-edit .widgetResize {
+  display: flex !important;
+  align-items: center; justify-content: center;
+  position: absolute !important;
+  width: 40px !important; height: 40px !important;
+  right: 0 !important; bottom: 0 !important;
+  background: rgba(100,180,255,0.3) !important;
+  border-radius: 10px 0 10px 0 !important;
+  z-index: 50 !important;
+}
+
+/* Settings panels */
+.widgetSettingsPanel {
+  width: calc(100vw - 24px) !important;
+  max-height: 40vh !important;
+  position: fixed !important;
+  top: 56px; left: 12px; right: 12px !important;
+  z-index: 99998 !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ═══ GAME WIDGET ═══ */
+.gameWidgetBox {
+  width: 100%;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 20, 32, 0.6);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.gameWidgetPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  opacity: 0.5;
+}
+
+.gameWidgetIcon  { font-size: 40px; }
+.gameWidgetLabel { font-size: 14px; color: #9fc2d9; letter-spacing: 0.5px; }

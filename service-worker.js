@@ -1,10 +1,11 @@
-const CACHE_VERSION = 'weather-game-v1';
+const CACHE_VERSION = 'marine-mobile-v1';
 const APP_SHELL = [
   '/',
   '/index.html',
+  '/script.js',
   '/style.css',
-  '/game.js',
   '/manifest.json',
+  '/staugustine-sailing-logo.png',
 ];
 
 self.addEventListener('install', event => {
@@ -26,29 +27,28 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-
-  // Always fetch live weather data from the network
   if (
     url.hostname.includes('api.open-meteo.com') ||
     url.hostname.includes('tidesandcurrents.noaa.gov') ||
+    url.hostname.includes('nominatim.openstreetmap.org') ||
+    url.hostname.includes('arcgisonline.com') ||
+    url.hostname.includes('rainviewer.com') ||
+    url.hostname.includes('openstreetmap.org') ||
     url.hostname.includes('noaa-proxy.lanceburkin.workers.dev')
   ) {
     event.respondWith(fetch(event.request));
     return;
   }
-
-  // Cache-first for everything else
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(response => {
+    fetch(event.request)
+      .then(response => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_VERSION).then(cache => cache.put(event.request, clone));
         }
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
