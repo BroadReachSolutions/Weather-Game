@@ -4,6 +4,7 @@
    ========================================================================== */
 
 const DASHBOARD_WIDTH = 1920;
+const MOBILE_DASHBOARD_WIDTH = 760;
 
 /* Default layout for the mobile canvas (760px virtual width).
    Widgets stack vertically, full width, sensible default heights.
@@ -273,8 +274,6 @@ function removeMobileWidgetOverrides() {
    different virtual canvas width. This keeps drag/resize behavior
    identical everywhere.
    ========================================================================== */
-const MOBILE_DASHBOARD_WIDTH = 760;
-
 function setupDashboardScale() {
   const stage = document.getElementById("dashboardStage");
   const dashboard = document.getElementById("dashboard");
