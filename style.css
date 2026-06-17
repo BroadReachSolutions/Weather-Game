@@ -1791,6 +1791,31 @@ body.layout-edit .widgetResize {
   background: rgba(100,180,255,0.25);
 }
 
+/* Same recenter control, placed on the wind/radar widget instead of
+   the game map. Higher z-index than the radar iframe (10) and its
+   overlay canvas (20) so it stays clickable. */
+.osRadarCenterBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 30;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(125,186,220,0.35);
+  background: rgba(10, 25, 36, 0.88);
+  color: #eef7ff;
+  font-size: 15px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.osRadarCenterBtn:active {
+  background: rgba(100,180,255,0.3);
+}
+
 /* Course mode controls */
 .osCourseControls {
   display: flex;

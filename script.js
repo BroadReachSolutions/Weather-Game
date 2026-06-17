@@ -1853,12 +1853,14 @@ function attachCompassSettingsEvents() {
         stopRadarAnimation();
       }
       updateCompassMap();
+      updateRadarCenterBtnVisibility();
       /* Immediately draw overlay if switching to radar */
       if (compassMapMode === "radar") {
         setTimeout(refreshRadarOverlay, 100);
       }
     });
     updateRadarRow();
+    updateRadarCenterBtnVisibility();
   }
 
   /* Radar speed slider */
@@ -2992,6 +2994,31 @@ function shiftHue(hex, degree) {
 }
 
 /* ==========================================================================
+   RADAR CENTER-ON-VESSEL BUTTON
+   Lets the player snap the radar view to their Oregon Sail boat's
+   current position instead of the saved home address. Purely a
+   display override — doesn't touch the saved address setting.
+   ========================================================================== */
+function updateRadarCenterBtnVisibility() {
+  const btn = document.getElementById("osRadarCenterBtn");
+  if (!btn) return;
+  const hasBoat = typeof window.OS !== "undefined" && window.OS.boat;
+  btn.style.display = (compassMapMode === "radar" && hasBoat) ? "flex" : "none";
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("osRadarCenterBtn");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    if (typeof window.OS === "undefined" || !window.OS.boat) return;
+    const estimated = window.OS.estimateLiveLatLon(window.OS.boat, 4.5);
+    window.radarCenterOverride = { lat: estimated.lat, lon: estimated.lon };
+    updateCompassMap();
+    setTimeout(refreshRadarOverlay, 100);
+  });
+});
+
+/* ==========================================================================
    SATELLITE COMPASS
    ========================================================================== */
 function updateCompassMap() {
@@ -3028,15 +3055,18 @@ function updateCompassMap() {
     /* Move iframe directly into the widget (not widgetFrame) */
     if (iframe.parentElement !== widgetEl2) widgetEl2.appendChild(iframe);
 
-    /* Always prefer saved address location, then geolocation, then default */
+    /* If the player tapped "center on vessel", that takes priority.
+       Otherwise: saved address location, then geolocation, then default. */
     const savedLat = parseFloat(localStorage.getItem("marineLocationLat"));
     const savedLon = parseFloat(localStorage.getItem("marineLocationLon"));
-    const lat  = (marineLocationLat != null ? marineLocationLat :
+    const lat  = (window.radarCenterOverride ? window.radarCenterOverride.lat :
+                  (marineLocationLat != null ? marineLocationLat :
                   (!isNaN(savedLat)  ? savedLat  :
-                  (userLat           ? userLat   : 29.9)));
-    const lon  = (marineLocationLon != null ? marineLocationLon :
+                  (userLat           ? userLat   : 29.9))));
+    const lon  = (window.radarCenterOverride ? window.radarCenterOverride.lon :
+                  (marineLocationLon != null ? marineLocationLon :
                   (!isNaN(savedLon)  ? savedLon  :
-                  (userLon           ? userLon   : -81.3)));
+                  (userLon           ? userLon   : -81.3))));
     const zoom = Math.max(2, Math.min(compassZoom, 14));
 
     const newSrc = "https://www.rainviewer.com/map.html?loc=" +

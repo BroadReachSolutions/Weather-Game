@@ -28,6 +28,7 @@
     renderResourceBar(boat);
     renderStatusLine(boat);
     wireControls();
+    if (typeof updateRadarCenterBtnVisibility === "function") updateRadarCenterBtnVisibility();
 
     /* Smoothly re-render position + status every few seconds using
        client-side interpolation between server ticks */
