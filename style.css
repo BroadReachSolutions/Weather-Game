@@ -1686,9 +1686,10 @@ body.layout-edit .mobileDragBarDots {
 
 
 
+
+
 /* ==========================================================================
    MOBILE-ONLY GAME BUILD — overrides & additions
-   Force mobile layout regardless of screen size, no fixed widget heights
    ========================================================================== */
 
 html, body {
@@ -1711,22 +1712,28 @@ body { overflow-y: auto; min-height: 100vh; }
   height: auto !important;
   transform: none !important;
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  align-content: flex-start !important;
   gap: 6px !important;
   padding: 6px 6px 40px 6px !important;
   padding-top: 58px !important;
   box-sizing: border-box !important;
 }
 
-/* All widgets: full width, height driven by content */
+/* Each widget: independently resizable width + height.
+   Default to full row width; resize handle overrides via inline !important styles. */
 .widget {
   position: relative !important;
-  width: 100% !important;
-  left: auto !important; top: auto !important;
+  left: auto !important;
+  top: auto !important;
   box-sizing: border-box !important;
   border-radius: 12px !important;
   overflow: visible !important;
   flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  width: 100% !important;
   height: auto !important;
   min-height: 0 !important;
 }
@@ -1741,16 +1748,17 @@ body { overflow-y: auto; min-height: 100vh; }
 /* Widget order */
 #windWidget       { order: 1; }
 #forecastWidget   { order: 2; }
-#tideChartWidget  { order: 3; }
-#tideStatusWidget { order: 4; }
-#tempWidget       { order: 5; }
-#gameWidget       { order: 6; }
-#layoutWidget     { order: 7; }
+#tideStatusWidget { order: 3; }
+#tempWidget       { order: 4; }
+#gameWidget       { order: 5; }
+#layoutWidget     { order: 6; }
 
-/* Widgets that need a minimum sensible height to render their canvas/content */
+/* Tide chart hidden */
+#tideChartWidget  { order: 3; min-height: 180px; padding: 0 !important; border-radius: 10px !important; overflow: hidden !important; }
+
+/* Minimum heights so canvases/content have room to render */
 #windWidget       { min-height: 280px; }
 #forecastWidget   { min-height: 180px; }
-#tideChartWidget  { min-height: 180px; padding: 0 !important; border-radius: 10px !important; overflow: hidden !important; }
 #tideStatusWidget { min-height: 60px; }
 #tempWidget       { min-height: 80px; }
 #gameWidget       { min-height: 180px; }
@@ -1759,7 +1767,6 @@ body { overflow-y: auto; min-height: 100vh; }
 #mobileHeader {
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: auto;
   min-height: 48px;
   z-index: 99999;
   display: flex;
@@ -1781,22 +1788,10 @@ body { overflow-y: auto; min-height: 100vh; }
   flex-shrink: 0;
 }
 
-#mobileHeaderTempVal {
-  font-size: 22px;
-  font-weight: 700;
-  color: #f5fbff;
-  line-height: 1;
-}
-
-#mobileHeaderHumWrap {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-}
-
-#mobileHeaderHumPct   { font-size: 13px; font-weight: 600; color: #9fc2d9; line-height: 1.2; }
-#mobileHeaderHumLabel { font-size: 10px; color: rgba(125,186,220,0.55); text-transform: uppercase; line-height: 1; }
+#mobileHeaderTempVal    { font-size: 22px; font-weight: 700; color: #f5fbff; line-height: 1; }
+#mobileHeaderHumWrap    { display: flex; flex-direction: column; gap: 1px; }
+#mobileHeaderHumPct     { font-size: 13px; font-weight: 600; color: #9fc2d9; line-height: 1.2; }
+#mobileHeaderHumLabel   { font-size: 10px; color: rgba(125,186,220,0.55); text-transform: uppercase; line-height: 1; }
 
 .mobileEditBtn {
   flex-shrink: 0;
@@ -1810,33 +1805,21 @@ body { overflow-y: auto; min-height: 100vh; }
   cursor: pointer;
   white-space: nowrap;
 }
+.mobileEditBtn.active { background: rgba(100,180,255,0.35); color: #fff; }
 
-.mobileEditBtn.active {
-  background: rgba(100,180,255,0.35);
-  color: #ffffff;
-}
-
-/* Tide chart — canvas fills its container */
-#tideChartWidget .tideSection { height: 180px; }
-#tideChartWidget .tidePanel   { padding: 0 !important; margin: 0 !important; height: 100% !important; border-radius: 0 !important; }
-#tideChartWidget #tideChart   { display: block; width: 100% !important; height: 100% !important; }
-#tideLine { display: none !important; }
-
-/* Forecast — horizontal scroll strip, height from content */
+/* Forecast scroll strip */
 .forecastWrap {
   padding: 6px 0 !important;
   overflow: hidden !important;
   touch-action: pan-y !important;
   user-select: none !important;
 }
-
 .forecast {
   gap: 0 !important;
   display: flex !important;
   flex-wrap: nowrap !important;
   will-change: transform !important;
 }
-
 .card {
   flex: 0 0 calc(100% / 3) !important;
   box-sizing: border-box !important;
@@ -1846,7 +1829,6 @@ body { overflow-y: auto; min-height: 100vh; }
   justify-content: center !important;
   min-height: 160px !important;
 }
-
 .card .hour    { font-size: 14px !important; }
 .card .tempF   { font-size: 22px !important; }
 .card .humidity, .card .rain, .card .windMini, .card .dirMini { font-size: 11px !important; }
@@ -1855,6 +1837,9 @@ body { overflow-y: auto; min-height: 100vh; }
 .currentTide  { font-size: 16px !important; margin-top: 2px !important; }
 .lowTideAlert { font-size: 16px !important; padding-top: 6px !important; }
 
+/* Station row hidden — location from IP/compass address only */
+/* Station row visible */
+
 /* Control panel */
 #layoutWidget .controlPanel {
   padding: 10px 10px 6px 10px;
@@ -1862,44 +1847,48 @@ body { overflow-y: auto; min-height: 100vh; }
   border-radius: 12px;
   border: 1px solid rgba(100,180,230,0.2);
 }
-
 #layoutWidget .controlSelect,
 #layoutWidget .controlDate {
   font-size: 15px !important;
   padding: 7px 10px !important;
   width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
   box-sizing: border-box !important;
 }
-
 #layoutWidget .controlBtns { gap: 6px; }
 #layoutWidget .ctrlBtn     { font-size: 12px !important; padding: 6px 8px !important; flex: 1; }
 #layoutWidget .ctrlBtnEdit { display: none !important; }
 
-/* Widget controls — edit mode only */
+/* Widget controls — only visible in edit mode */
 .widgetControls { display: none !important; }
 body.layout-edit .widgetControls {
   display: flex !important;
   position: absolute; top: 6px; right: 6px; z-index: 60;
 }
-
 .widgetHandle { display: none !important; }
-
-body.layout-edit .widget {
-  outline: 2px dashed rgba(140,200,230,0.4) !important;
-}
+body.layout-edit .widget { outline: 2px dashed rgba(140,200,230,0.4) !important; }
 .widget { outline: none !important; }
 
+/* Resize handle — bottom-right corner, works both X and Y */
 body.layout-edit .widgetResize {
   display: flex !important;
-  align-items: center; justify-content: center;
+  align-items: center;
+  justify-content: center;
   position: absolute !important;
-  width: 40px !important; height: 40px !important;
-  right: 0 !important; bottom: 0 !important;
-  background: rgba(100,180,255,0.3) !important;
-  border-radius: 10px 0 10px 0 !important;
+  width: 44px !important;
+  height: 44px !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: rgba(100,180,255,0.35) !important;
+  border-radius: 12px 0 12px 0 !important;
   z-index: 50 !important;
+  cursor: nwse-resize !important;
+  touch-action: none !important;
+}
+body.layout-edit .widgetResize::after {
+  content: "⤡";
+  font-size: 20px;
+  color: rgba(180,220,255,0.95);
+  pointer-events: none;
 }
 
 /* Settings panels */
@@ -1924,7 +1913,6 @@ body.layout-edit .widgetResize {
   border-radius: 12px;
   overflow: hidden;
 }
-
 .gameWidgetPlaceholder {
   display: flex;
   flex-direction: column;
@@ -1932,7 +1920,5 @@ body.layout-edit .widgetResize {
   gap: 10px;
   opacity: 0.5;
 }
-
 .gameWidgetIcon  { font-size: 40px; }
 .gameWidgetLabel { font-size: 14px; color: #9fc2d9; letter-spacing: 0.5px; }
-/* v4 */

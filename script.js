@@ -496,33 +496,38 @@ function saveMobileSize(widget) {
   if (!widget.dataset.widget) return;
   const sizes = JSON.parse(localStorage.getItem("marineMobileSizes") || "{}");
   sizes[widget.dataset.widget] = {
-    h: widget.style.height || ""
+    h: widget.style.height || "",
+    w: widget.style.width  || ""
   };
   localStorage.setItem("marineMobileSizes", JSON.stringify(sizes));
 }
 
 function loadMobileSizes() {
   const raw = localStorage.getItem("marineMobileSizes");
-  let sizes = DEFAULT_MOBILE_SIZES;
+  let sizes = {};
 
   if (raw) {
     try {
       const saved = JSON.parse(raw);
-      /* Skip if stale (has old widget keys) */
       if (saved.stations || saved.clock || saved.logo) {
         localStorage.removeItem("marineMobileSizes");
       } else {
-        sizes = Object.assign({}, DEFAULT_MOBILE_SIZES, saved);
+        sizes = saved;
       }
     } catch (e) {}
   }
 
   Object.entries(sizes).forEach(([key, val]) => {
     const el = document.querySelector(`.widget[data-widget="${key}"]`);
-    if (el && val.h && parseInt(val.h) > 40) {
+    if (!el) return;
+    if (val.h && parseInt(val.h) > 40) {
       el.style.setProperty("height",     val.h, "important");
       el.style.setProperty("min-height", val.h, "important");
       el.style.setProperty("max-height", "none", "important");
+    }
+    if (val.w && parseInt(val.w) > 80) {
+      el.style.setProperty("width",     val.w, "important");
+      el.style.setProperty("max-width", "none", "important");
     }
   });
 }
@@ -585,8 +590,8 @@ function makeWidgetInteractive(widget) {
     const dy = (y - resizeStart.startY) / resizeStart.scale;
     const newW = Math.max(120, resizeStart.width  + dx);
     const newH = Math.max(60,  resizeStart.height + dy);
-    /* Use !important via setProperty to override CSS media query heights */
     widget.style.setProperty("width",     `${newW}px`, "important");
+    widget.style.setProperty("max-width", "none",       "important");
     widget.style.setProperty("height",    `${newH}px`, "important");
     widget.style.setProperty("min-height",`${newH}px`, "important");
     widget.style.setProperty("max-height","none",       "important");
@@ -595,8 +600,8 @@ function makeWidgetInteractive(widget) {
 
   function onResizeEnd() {
     resizeStart = null;
-    if (isMobile()) saveMobileSize(widget);
-    else saveLayout();
+    saveMobileSize(widget);
+    if (!isMobile()) saveLayout();
     if (widget.dataset.widget === "tideChart" && tidePredictions.length) drawTide(tidePredictions);
     window.removeEventListener("mousemove", onResizeMove);
     window.removeEventListener("mouseup",   onResizeEnd);
