@@ -189,6 +189,12 @@
       await OS.dropAnchor();
       renderStatusLine(OS.boat);
     });
+
+    document.getElementById("osCenterBtn").addEventListener("click", () => {
+      if (!map || !OS.boat) return;
+      const estimated = OS.estimateLiveLatLon(OS.boat, 4.5);
+      map.setView([estimated.lat, estimated.lon], map.getZoom(), { animate: true });
+    });
   }
 
   async function switchMode(mode) {
