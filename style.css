@@ -1816,6 +1816,17 @@ body.layout-edit .widgetResize {
   background: rgba(100,180,255,0.3);
 }
 
+/* Edit-mode affordance: both center buttons get a dashed outline
+   and a "move" cursor while the dashboard is in Edit Layout mode,
+   signaling they can be dragged to a new spot. */
+body.layout-edit .osCenterBtn,
+body.layout-edit .osRadarCenterBtn {
+  outline: 2px dashed rgba(140,200,230,0.6);
+  outline-offset: 2px;
+  cursor: move;
+  touch-action: none;
+}
+
 /* Course mode controls */
 .osCourseControls {
   display: flex;
