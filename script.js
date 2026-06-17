@@ -23,6 +23,7 @@ const DASHBOARD_HEIGHT = 1080;
 
 /* storage keys */
 const STORAGE_KEY = "marineDashboardLayoutV2";
+const MOBILE_STORAGE_KEY = STORAGE_KEY + "_mobile";
 
 const DEFAULT_MOBILE_SIZES = {
   forecast:  { h: "203px" },
@@ -593,8 +594,6 @@ function makeWidgetInteractive(widget) {
 /* ==========================================================================
    SAVE / LOAD LAYOUT
    ========================================================================== */
-const MOBILE_STORAGE_KEY = STORAGE_KEY + "_mobile";
-
 function saveLayout() {
   const key = isMobile() ? MOBILE_STORAGE_KEY : STORAGE_KEY;
   const layout = {};
