@@ -292,9 +292,17 @@ function setupDashboardScale() {
     dashboard.style.transformOrigin = "top left";
     dashboard.style.transform = `scale(${scale})`;
 
-    /* Transforms don't expand scroll bounds — use a spacer with the
-       real scaled pixel height so the stage can actually scroll to it */
-    const naturalHeight = dashboard.scrollHeight;
+    /* Transforms don't expand scroll bounds, and since every .widget is
+       absolutely positioned, #dashboard's own scrollHeight doesn't
+       reliably include them. Calculate the true bottom edge by checking
+       every widget's top+height instead. */
+    let maxBottom = 0;
+    document.querySelectorAll(".widget").forEach(w => {
+      const top    = parseFloat(w.style.top)    || w.offsetTop;
+      const height = parseFloat(w.style.height) || w.offsetHeight;
+      maxBottom = Math.max(maxBottom, top + height);
+    });
+    const naturalHeight = Math.max(maxBottom + 40, dashboard.scrollHeight);
     const spacer = document.getElementById("dashboardScrollSpacer");
     if (spacer) spacer.style.height = (naturalHeight * scale) + "px";
   }
