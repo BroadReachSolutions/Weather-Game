@@ -1636,24 +1636,163 @@ body.layout-edit .widgetResize {
   -webkit-overflow-scrolling: touch;
 }
 
-/* ═══ GAME WIDGET ═══ */
+/* ═══ GAME WIDGET — Oregon Sail ═══ */
 .gameWidgetBox {
   width: 100%;
   height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   background: rgba(8, 20, 32, 0.6);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
 }
-.gameWidgetPlaceholder {
+
+/* Resource bar */
+.osResourceBar {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 10px;
-  opacity: 0.5;
+  padding: 8px 10px;
+  flex-shrink: 0;
 }
-.gameWidgetIcon  { font-size: 40px; }
-.gameWidgetLabel { font-size: 14px; color: #9fc2d9; letter-spacing: 0.5px; }
+
+.osResource {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.osResourceIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.osResourceTrack {
+  flex: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.osResourceFill {
+  height: 100%;
+  background: linear-gradient(90deg, #4fc3f7, #00e5ff);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  width: 100%;
+}
+
+.osResourceFill.osLow {
+  background: linear-gradient(90deg, #ff5252, #ff8a80);
+}
+
+.osMoney {
+  font-size: 13px;
+  font-weight: 700;
+  color: #69f0ae;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Status line */
+.osStatusLine {
+  font-size: 13px;
+  color: #9fc2d9;
+  padding: 0 10px 6px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+/* Map */
+.osMapWrap {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
+}
+
+#osMap {
+  width: 100%;
+  height: 100%;
+  background: #0a1924;
+}
+
+/* Leaflet overrides to match the app's dark theme */
+.leaflet-control-zoom a {
+  background: rgba(10, 25, 36, 0.9) !important;
+  color: #eef7ff !important;
+  border-color: rgba(125, 186, 220, 0.3) !important;
+}
+
+.osBoatIcon, .osPinIcon, .osPinIconPending {
+  font-size: 22px;
+  text-align: center;
+  line-height: 28px;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+}
+
+.osPinIconPending { animation: osPinBounce 0.6s ease infinite alternate; }
+
+@keyframes osPinBounce {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-4px); }
+}
+
+.osMapBtn {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  padding: 9px 18px;
+  border-radius: 20px;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(135deg, #1976d2, #1565c0);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+}
+
+.osMapBtn.osMapBtnSecondary {
+  bottom: 56px;
+  background: rgba(20, 40, 55, 0.92);
+  color: #d0ecff;
+  border: 1px solid rgba(125,186,220,0.3);
+}
+
+/* Course mode controls */
+.osCourseControls {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+}
+
+.osModeBtn {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(125,186,220,0.3);
+  background: rgba(255,255,255,0.06);
+  color: #d0ecff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.osModeBtn.active {
+  background: rgba(100,180,255,0.3);
+  border-color: rgba(100,180,255,0.6);
+  color: #fff;
+}
+
+.osModeBtn.osAnchorBtn.active {
+  background: rgba(255,200,80,0.25);
+  border-color: rgba(255,200,80,0.5);
+}

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'marine-mobile-v1';
+const CACHE_VERSION = 'marine-mobile-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -34,7 +34,8 @@ self.addEventListener('fetch', event => {
     url.hostname.includes('arcgisonline.com') ||
     url.hostname.includes('rainviewer.com') ||
     url.hostname.includes('openstreetmap.org') ||
-    url.hostname.includes('noaa-proxy.lanceburkin.workers.dev')
+    url.hostname.includes('noaa-proxy.lanceburkin.workers.dev') ||
+    url.hostname.includes('supabase.co')
   ) {
     event.respondWith(fetch(event.request));
     return;

@@ -18,13 +18,14 @@
 
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'unsafe-inline';
-    style-src 'self' 'unsafe-inline';
-    img-src 'self' data:
+    script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net;
+    style-src 'self' 'unsafe-inline' https://unpkg.com;
+    img-src 'self' data: blob:
       https://*.arcgisonline.com
       https://*.openstreetmap.org
       https://tilecache.rainviewer.com
-      https://server.arcgisonline.com;
+      https://server.arcgisonline.com
+      https://unpkg.com;
     connect-src 'self'
       https://api.open-meteo.com
       https://api.tidesandcurrents.noaa.gov
@@ -32,11 +33,21 @@
       https://tilecache.rainviewer.com
       https://nominatim.openstreetmap.org
       https://geocoding-api.open-meteo.com
-      https://noaa-proxy.lanceburkin.workers.dev;
+      https://noaa-proxy.lanceburkin.workers.dev
+      https://server.arcgisonline.com
+      https://*.supabase.co
+      wss://*.supabase.co;
     frame-src https://www.rainviewer.com;
     worker-src 'self';
     manifest-src 'self';
   ">
+
+  <!-- Leaflet (interactive map for course-setting) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Supabase client SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
   <link rel="stylesheet" href="style.css">
 </head>
@@ -286,7 +297,7 @@
           </div>
         </div>
 
-        <!-- ═══ GAME WIDGET (placeholder — built next) ═══ -->
+        <!-- ═══ OREGON SAIL GAME WIDGET ═══ -->
         <div class="widget" data-widget="game" id="gameWidget">
           <div class="widgetFrame">
             <div class="widgetControls">
@@ -294,14 +305,50 @@
             </div>
             <div class="widgetHandle"></div>
             <div class="gameWidgetBox" id="gameWidgetBox">
-              <div class="gameWidgetPlaceholder">
-                <div class="gameWidgetIcon">🎮</div>
-                <div class="gameWidgetLabel">Game coming soon</div>
+
+              <!-- Resource bar -->
+              <div class="osResourceBar" id="osResourceBar">
+                <div class="osResource" data-resource="food">
+                  <span class="osResourceIcon">🍞</span>
+                  <div class="osResourceTrack"><div class="osResourceFill" id="osFoodFill"></div></div>
+                </div>
+                <div class="osResource" data-resource="water">
+                  <span class="osResourceIcon">💧</span>
+                  <div class="osResourceTrack"><div class="osResourceFill" id="osWaterFill"></div></div>
+                </div>
+                <div class="osResource" data-resource="fuel">
+                  <span class="osResourceIcon">⛽</span>
+                  <div class="osResourceTrack"><div class="osResourceFill" id="osFuelFill"></div></div>
+                </div>
+                <div class="osResource" data-resource="hull">
+                  <span class="osResourceIcon">🛟</span>
+                  <div class="osResourceTrack"><div class="osResourceFill" id="osHullFill"></div></div>
+                </div>
+                <div class="osMoney" id="osMoney">$200</div>
               </div>
+
+              <!-- Status line -->
+              <div class="osStatusLine" id="osStatusLine">Loading your vessel…</div>
+
+              <!-- Map for course setting -->
+              <div class="osMapWrap">
+                <div id="osMap"></div>
+                <button class="osMapBtn" id="osSetCourseBtn" style="display:none;">Set Course Here</button>
+                <button class="osMapBtn osMapBtnSecondary" id="osCancelCourseBtn" style="display:none;">Cancel</button>
+              </div>
+
+              <!-- Course mode controls -->
+              <div class="osCourseControls" id="osCourseControls" style="display:none;">
+                <button class="osModeBtn active" id="osModeSail" data-mode="sailing">⛵ Sail</button>
+                <button class="osModeBtn" id="osModeMotor" data-mode="motoring">🛥 Motor</button>
+                <button class="osModeBtn osAnchorBtn" id="osModeAnchor">⚓ Anchor</button>
+              </div>
+
             </div>
             <div class="widgetResize"></div>
           </div>
         </div>
+
 
       </div>
       <div id="dashboardScrollSpacer"></div>
@@ -309,6 +356,12 @@
   </div>
 
   <script src="script.js"></script>
+
+  <!-- Oregon Sail game -->
+  <script src="oregon-sail/supabase-config.js"></script>
+  <script src="oregon-sail/game-core.js"></script>
+  <script src="oregon-sail/game-ui.js"></script>
+
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
