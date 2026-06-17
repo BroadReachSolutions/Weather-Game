@@ -15,9 +15,7 @@ const DEFAULT_MOBILE_LAYOUT = {
   "wind":       { "left": "10px",  "top": "130px", "width": "740px", "height": "360px" },
   "forecast":   { "left": "10px",  "top": "500px", "width": "740px", "height": "190px" },
   "tideChart":  { "left": "10px",  "top": "700px", "width": "740px", "height": "220px" },
-  "tideStatus": { "left": "10px",  "top": "930px", "width": "740px", "height": "80px"  },
-  "temp":       { "left": "10px",  "top": "1020px","width": "740px", "height": "90px"  },
-  "game":       { "left": "10px",  "top": "1120px","width": "740px", "height": "220px" }
+  "game":       { "left": "10px",  "top": "930px", "width": "740px", "height": "220px" }
 };
 const DASHBOARD_HEIGHT = 1080;
 
