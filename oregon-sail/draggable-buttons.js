@@ -106,6 +106,59 @@
     } catch (e) {}
   }
 
+  /* ---------------------------------------------------------------
+     VERTICAL POSITION SLIDER
+     A simpler alternative to free dragging — useful when the button
+     is stuck under another widget and hard to grab directly. Moves
+     the button up/down within its container; horizontal position is
+     left untouched.
+     --------------------------------------------------------------- */
+  function wireVerticalSlider(buttonId, sliderId, labelId) {
+    const btn = document.getElementById(buttonId);
+    const slider = document.getElementById(sliderId);
+    const label = document.getElementById(labelId);
+    if (!btn || !slider) return;
+
+    const container = btn.parentElement;
+
+    function applySliderValue(pct, save) {
+      const containerH = container.getBoundingClientRect().height;
+      const btnH = btn.offsetHeight || 34;
+      const usableH = Math.max(0, containerH - btnH - 4);
+      const newTop = 2 + (pct / 100) * usableH;
+
+      btn.style.top = newTop + "px";
+      btn.style.bottom = "auto";
+
+      if (label) {
+        label.textContent = pct <= 5 ? "Top" : pct >= 95 ? "Bottom" : pct + "%";
+      }
+      if (save) savePosition(btn, buttonId);
+    }
+
+    /* Initialize slider to match the button's restored/default position */
+    function syncSliderFromButton() {
+      const containerH = container.getBoundingClientRect().height;
+      const btnH = btn.offsetHeight || 34;
+      const usableH = Math.max(1, containerH - btnH - 4);
+      const currentTop = parseFloat(btn.style.top) || 2;
+      const pct = Math.round(((currentTop - 2) / usableH) * 100);
+      slider.value = Math.max(0, Math.min(100, pct));
+      if (label) label.textContent = slider.value <= 5 ? "Top" : slider.value >= 95 ? "Bottom" : slider.value + "%";
+    }
+
+    slider.addEventListener("input", () => {
+      applySliderValue(parseInt(slider.value, 10), false);
+    });
+    slider.addEventListener("change", () => {
+      applySliderValue(parseInt(slider.value, 10), true);
+    });
+
+    /* Give layout a moment to settle (widget sizes load async) before
+       reading container height for the initial sync */
+    setTimeout(syncSliderFromButton, 500);
+  }
+
   function initDraggableButtons(attempts) {
     const gameBtn = document.getElementById("osCenterBtn");
     const radarBtn = document.getElementById("osRadarCenterBtn");
@@ -113,6 +166,8 @@
     if (gameBtn && radarBtn) {
       makeButtonDraggable("osCenterBtn");
       makeButtonDraggable("osRadarCenterBtn");
+      wireVerticalSlider("osCenterBtn", "osGameBtnVPos", "osGameBtnVPosLabel");
+      wireVerticalSlider("osRadarCenterBtn", "osRadarBtnVPos", "osRadarBtnVPosLabel");
       return;
     }
     if (attempts > 0) {

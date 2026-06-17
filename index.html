@@ -157,6 +157,11 @@
                 <span id="radarSpeedLabel" style="font-size:11px;color:#aac;">5</span>
               </div>
               <div class="settingsRow">
+                <label>⛵ Button Position</label>
+                <input type="range" id="osRadarBtnVPos" min="0" max="100" value="0" style="width:100%;" />
+                <span id="osRadarBtnVPosLabel" style="font-size:11px;color:#aac;">Top</span>
+              </div>
+              <div class="settingsRow">
                 <label>Compass Style</label>
                 <select id="compassStyle">
                   <option value="ring">Ring</option>
@@ -302,6 +307,7 @@
         <div class="widget" data-widget="game" id="gameWidget">
           <div class="widgetFrame">
             <div class="widgetControls">
+              <button class="widgetSettingsBtn" type="button" title="Oregon Sail settings">⚙</button>
               <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
             </div>
             <div class="widgetHandle"></div>
@@ -346,6 +352,17 @@
                 <button class="osModeBtn osAnchorBtn" id="osModeAnchor">⚓ Anchor</button>
               </div>
 
+            </div>
+            <div class="widgetSettingsPanel" data-settings-for="game">
+              <div class="settingsHeader">
+                <div class="settingsTitle">Oregon Sail Settings</div>
+                <button class="closeSettingsBtn" type="button">✕</button>
+              </div>
+              <div class="settingsRow">
+                <label>⛵ Button Position</label>
+                <input type="range" id="osGameBtnVPos" min="0" max="100" value="0" style="width:100%;" />
+                <span id="osGameBtnVPosLabel" style="font-size:11px;color:#aac;">Top</span>
+              </div>
             </div>
             <div class="widgetResize"></div>
           </div>
