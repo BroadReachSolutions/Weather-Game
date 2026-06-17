@@ -4,6 +4,20 @@
    ========================================================================== */
 
 const DASHBOARD_WIDTH = 1920;
+
+/* Default layout for the mobile canvas (760px virtual width).
+   Widgets stack vertically, full width, sensible default heights.
+   User can drag/resize freely in Edit Layout mode — saved separately
+   from the desktop layout. */
+const DEFAULT_MOBILE_LAYOUT = {
+  "layout":     { "left": "10px",  "top": "10px",  "width": "740px", "height": "110px" },
+  "wind":       { "left": "10px",  "top": "130px", "width": "740px", "height": "360px" },
+  "forecast":   { "left": "10px",  "top": "500px", "width": "740px", "height": "190px" },
+  "tideChart":  { "left": "10px",  "top": "700px", "width": "740px", "height": "220px" },
+  "tideStatus": { "left": "10px",  "top": "930px", "width": "740px", "height": "80px"  },
+  "temp":       { "left": "10px",  "top": "1020px","width": "740px", "height": "90px"  },
+  "game":       { "left": "10px",  "top": "1120px","width": "740px", "height": "220px" }
+};
 const DASHBOARD_HEIGHT = 1080;
 
 /* storage keys */
@@ -214,31 +228,6 @@ async function init() {
 function applyMobileWidgetOverrides() {
   document.body.classList.add("is-mobile");
 
-  /* Clear any desktop inline position/size styles so CSS flex takes over */
-  document.querySelectorAll(".widget").forEach(w => {
-    w.style.left   = "";
-    w.style.top    = "";
-    w.style.width  = "";
-    w.style.height = "";
-    w.style.position = "";
-    w.style.transform = "";
-  });
-
-  /* Also clear dashboard inline styles set by setupDashboardScale */
-  const dashboard = document.getElementById("dashboard");
-  const stage = document.getElementById("dashboardStage");
-  if (dashboard) {
-    dashboard.style.position  = "";
-    dashboard.style.transform = "";
-    dashboard.style.left      = "";
-    dashboard.style.top       = "";
-  }
-  if (stage) {
-    stage.style.width    = "";
-    stage.style.height   = "";
-    stage.style.overflow = "";
-  }
-
   ["clockWidget", "dividerWidget", "logoWidget", "heroTextWidget"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("mobile-hidden");
@@ -267,9 +256,6 @@ function applyMobileWidgetOverrides() {
       mobileEditBtn.addEventListener("click", () => desktopToggle.click());
     }
   }
-
-  loadMobileOrder();
-  loadMobileSizes();
 }
 
 function removeMobileWidgetOverrides() {
@@ -282,33 +268,42 @@ function removeMobileWidgetOverrides() {
 
 /* ==========================================================================
    SCALE
+   This build always uses the free-form absolute-position canvas that
+   scales as a whole — same system on mobile and desktop, just a
+   different virtual canvas width. This keeps drag/resize behavior
+   identical everywhere.
    ========================================================================== */
- function setupDashboardScale() {
-  /* Mobile uses CSS flex layout — skip JS scaling entirely */
-  if (isMobile()) return;
+const MOBILE_DASHBOARD_WIDTH = 760;
 
+function setupDashboardScale() {
   const stage = document.getElementById("dashboardStage");
   const dashboard = document.getElementById("dashboard");
 
   function applyScale() {
-    if (isMobile()) return; /* safety check on resize */
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    const scale = vw / DASHBOARD_WIDTH;
+    const canvasWidth = isMobile() ? MOBILE_DASHBOARD_WIDTH : DASHBOARD_WIDTH;
+    const scale = vw / canvasWidth;
 
     stage.style.width = "100vw";
-    stage.style.height = "100vh";
-    stage.style.left = "0px";
-    stage.style.top = "0px";
-    stage.style.overflow = "visible";
+    stage.style.overflow = isMobile() ? "auto" : "visible";
 
     dashboard.style.position = "absolute";
     dashboard.style.left = "0px";
     dashboard.style.top = "0px";
+    dashboard.style.width = canvasWidth + "px";
     dashboard.style.transformOrigin = "top left";
     dashboard.style.transform = `scale(${scale})`;
+
+    /* Transforms don't expand scroll bounds — use a spacer with the
+       real scaled pixel height so the stage can actually scroll to it */
+    const naturalHeight = dashboard.scrollHeight;
+    const spacer = document.getElementById("dashboardScrollSpacer");
+    if (spacer) spacer.style.height = (naturalHeight * scale) + "px";
   }
+
+  /* Expose globally so other functions (loadLayout, resize handlers) can
+     trigger a re-measure without re-running the whole setup */
+  window.remeasureDashboardScale = applyScale;
 
   window.addEventListener("resize", () => {
     applyScale();
@@ -316,6 +311,9 @@ function removeMobileWidgetOverrides() {
   });
 
   applyScale();
+  /* Re-measure after widgets finish loading content (images, fonts) */
+  setTimeout(applyScale, 400);
+  setTimeout(applyScale, 1200);
 }
 
 function getDashboardScale() {
@@ -350,6 +348,8 @@ function setupLayoutEditor() {
   const widgets = [...document.querySelectorAll(".widget")];
 
   loadLayout();
+  /* Re-measure scaled height now that widgets have their real positions */
+  if (typeof remeasureDashboardScale === "function") remeasureDashboardScale();
 
   toggle.addEventListener("click", () => {
     layoutEditMode = !layoutEditMode;
@@ -483,70 +483,8 @@ function teardownMobileReorder() {
 }
 
 function saveMobileOrder() {
-  const dashboard = document.getElementById("dashboard");
-  if (!dashboard) return;
-  const order = {};
-  dashboard.querySelectorAll(".widget").forEach(w => {
-    if (w.dataset.widget) order[w.dataset.widget] = w.style.order || "";
-  });
-  localStorage.setItem("marineMobileOrder", JSON.stringify(order));
-}
-
-function saveMobileSize(widget) {
-  if (!widget.dataset.widget) return;
-  const sizes = JSON.parse(localStorage.getItem("marineMobileSizes") || "{}");
-  sizes[widget.dataset.widget] = {
-    h: widget.style.height || "",
-    w: widget.style.width  || ""
-  };
-  localStorage.setItem("marineMobileSizes", JSON.stringify(sizes));
-}
-
-function loadMobileSizes() {
-  const raw = localStorage.getItem("marineMobileSizes");
-  let sizes = {};
-
-  if (raw) {
-    try {
-      const saved = JSON.parse(raw);
-      if (saved.stations || saved.clock || saved.logo) {
-        localStorage.removeItem("marineMobileSizes");
-      } else {
-        sizes = saved;
-      }
-    } catch (e) {}
-  }
-
-  Object.entries(sizes).forEach(([key, val]) => {
-    const el = document.querySelector(`.widget[data-widget="${key}"]`);
-    if (!el) return;
-    if (val.h && parseInt(val.h) > 40) {
-      el.style.setProperty("height",     val.h, "important");
-      el.style.setProperty("min-height", val.h, "important");
-      el.style.setProperty("max-height", "none", "important");
-    }
-    if (val.w && parseInt(val.w) > 80) {
-      el.style.setProperty("width",     val.w, "important");
-      el.style.setProperty("max-width", "none", "important");
-    }
-  });
-}
-
-function loadMobileOrder() {
-  const raw = localStorage.getItem("marineMobileOrder");
-  if (!raw) return;
-  try {
-    const order = JSON.parse(raw);
-    /* Skip if it references old removed widgets */
-    if (order.stations || order.clock || order.logo) {
-      localStorage.removeItem("marineMobileOrder");
-      return;
-    }
-    Object.entries(order).forEach(([key, val]) => {
-      const el = document.querySelector(`.widget[data-widget="${key}"]`);
-      if (el && val) el.style.order = val;
-    });
-  } catch (e) {}
+  /* No-op: mobile now uses the same absolute-position layout system as
+     desktop (see saveLayout/loadLayout), so ordering is just position. */
 }
 
 function makeWidgetInteractive(widget) {
@@ -577,6 +515,7 @@ function makeWidgetInteractive(widget) {
   function onDragEnd() {
     dragStart = null;
     saveLayout();
+    if (typeof remeasureDashboardScale === "function") remeasureDashboardScale();
     window.removeEventListener("mousemove", onDragMove);
     window.removeEventListener("mouseup",   onDragEnd);
     window.removeEventListener("touchmove", onDragMove);
@@ -590,18 +529,15 @@ function makeWidgetInteractive(widget) {
     const dy = (y - resizeStart.startY) / resizeStart.scale;
     const newW = Math.max(120, resizeStart.width  + dx);
     const newH = Math.max(60,  resizeStart.height + dy);
-    widget.style.setProperty("width",     `${newW}px`, "important");
-    widget.style.setProperty("max-width", "none",       "important");
-    widget.style.setProperty("height",    `${newH}px`, "important");
-    widget.style.setProperty("min-height",`${newH}px`, "important");
-    widget.style.setProperty("max-height","none",       "important");
+    widget.style.width  = `${newW}px`;
+    widget.style.height = `${newH}px`;
     if (widget.dataset.widget === "tideChart" && tidePredictions.length) drawTide(tidePredictions);
   }
 
   function onResizeEnd() {
     resizeStart = null;
-    saveMobileSize(widget);
-    if (!isMobile()) saveLayout();
+    saveLayout();
+    if (typeof remeasureDashboardScale === "function") remeasureDashboardScale();
     if (widget.dataset.widget === "tideChart" && tidePredictions.length) drawTide(tidePredictions);
     window.removeEventListener("mousemove", onResizeMove);
     window.removeEventListener("mouseup",   onResizeEnd);
@@ -658,9 +594,10 @@ function makeWidgetInteractive(widget) {
 /* ==========================================================================
    SAVE / LOAD LAYOUT
    ========================================================================== */
-function saveLayout() {
-  if (isMobile()) return; /* mobile uses CSS flex, no JS layout */
+const MOBILE_STORAGE_KEY = STORAGE_KEY + "_mobile";
 
+function saveLayout() {
+  const key = isMobile() ? MOBILE_STORAGE_KEY : STORAGE_KEY;
   const layout = {};
   document.querySelectorAll(".widget").forEach(widget => {
     layout[widget.dataset.widget] = {
@@ -670,15 +607,14 @@ function saveLayout() {
       height: widget.style.height || `${widget.offsetHeight}px`
     };
   });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+  localStorage.setItem(key, JSON.stringify(layout));
 }
 
 function loadLayout() {
-  /* On mobile, skip desktop position/size layout entirely — CSS flex handles it */
-  if (isMobile()) return;
-
-  const raw = localStorage.getItem(STORAGE_KEY);
-  const layout = raw ? JSON.parse(raw) : DEFAULT_LAYOUT;
+  const key = isMobile() ? MOBILE_STORAGE_KEY : STORAGE_KEY;
+  const fallback = isMobile() ? DEFAULT_MOBILE_LAYOUT : DEFAULT_LAYOUT;
+  const raw = localStorage.getItem(key);
+  const layout = raw ? JSON.parse(raw) : fallback;
 
   try {
     Object.entries(layout).forEach(([key, value]) => {
