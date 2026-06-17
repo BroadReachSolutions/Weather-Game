@@ -1575,11 +1575,18 @@ body.layout-edit .widgetFrame {
   box-sizing: border-box;
   overflow-y: auto;
 }
+#layoutWidget .controlRow {
+  min-width: 0 !important;
+  width: 100% !important;
+}
 #layoutWidget .controlSelect,
 #layoutWidget .controlDate {
   font-size: 15px !important;
   padding: 7px 10px !important;
   width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
   box-sizing: border-box !important;
 }
 #layoutWidget .controlBtns { gap: 6px; }
