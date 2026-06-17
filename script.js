@@ -4,24 +4,26 @@
    ========================================================================== */
 
 const DASHBOARD_WIDTH = 1920;
-const MOBILE_DASHBOARD_WIDTH = 760;
+const MOBILE_DASHBOARD_WIDTH = 400; /* close to real phone width so scale ≈ 1, text renders near its literal size */
 
-/* Default layout for the mobile canvas (760px virtual width).
+/* Default layout for the mobile canvas (400px virtual width — close to
+   real phone width so the scale factor stays near 1 and text/UI render
+   at roughly their literal CSS px size instead of being shrunk down).
    Widgets stack vertically, full width, sensible default heights.
    User can drag/resize freely in Edit Layout mode — saved separately
    from the desktop layout. */
 const DEFAULT_MOBILE_LAYOUT = {
-  "layout":     { "left": "10px",  "top": "10px",  "width": "740px", "height": "110px" },
-  "wind":       { "left": "10px",  "top": "130px", "width": "740px", "height": "360px" },
-  "forecast":   { "left": "10px",  "top": "500px", "width": "740px", "height": "190px" },
-  "tideChart":  { "left": "10px",  "top": "700px", "width": "740px", "height": "220px" },
-  "game":       { "left": "10px",  "top": "930px", "width": "740px", "height": "220px" }
+  "layout":     { "left": "5px",  "top": "5px",   "width": "390px", "height": "120px" },
+  "wind":       { "left": "5px",  "top": "135px", "width": "390px", "height": "340px" },
+  "forecast":   { "left": "5px",  "top": "485px", "width": "390px", "height": "150px" },
+  "tideChart":  { "left": "5px",  "top": "645px", "width": "390px", "height": "180px" },
+  "game":       { "left": "5px",  "top": "835px", "width": "390px", "height": "200px" }
 };
 const DASHBOARD_HEIGHT = 1080;
 
 /* storage keys */
 const STORAGE_KEY = "marineDashboardLayoutV2";
-const MOBILE_STORAGE_KEY = STORAGE_KEY + "_mobile";
+const MOBILE_STORAGE_KEY = STORAGE_KEY + "_mobile_v2";
 
 const DEFAULT_MOBILE_SIZES = {
   forecast:  { h: "203px" },
@@ -135,6 +137,7 @@ let tideChartHighAlertOn = false;
 
 let tidePredictions = [];
 let layoutEditMode = false;
+let snapEnabled = true; /* widgets snap to grid + to each other's edges while editing layout */
 
 let tideViewMode = "live";
 let selectedTideDate = null;
@@ -342,8 +345,9 @@ function getDashboardScale() {
    LAYOUT EDITOR
    ========================================================================== */
 function setupLayoutEditor() {
-  const toggle = document.getElementById("layoutToggle");
-  const widgets = [...document.querySelectorAll(".widget")];
+  const toggle     = document.getElementById("layoutToggle");
+  const snapToggle = document.getElementById("snapToggle");
+  const widgets    = [...document.querySelectorAll(".widget")];
 
   loadLayout();
   /* Re-measure scaled height now that widgets have their real positions */
@@ -355,6 +359,8 @@ function setupLayoutEditor() {
     document.body.classList.toggle("layout-edit", layoutEditMode);
     toggle.classList.toggle("active", layoutEditMode);
     toggle.textContent = layoutEditMode ? "Done Editing" : "Edit Layout";
+
+    if (snapToggle) snapToggle.style.display = layoutEditMode ? "" : "none";
 
     applyAllWidgetSettings();
 
@@ -372,6 +378,14 @@ function setupLayoutEditor() {
     }
   });
 
+  if (snapToggle) {
+    snapToggle.addEventListener("click", () => {
+      snapEnabled = !snapEnabled;
+      snapToggle.classList.toggle("active", snapEnabled);
+      snapToggle.textContent = snapEnabled ? "Snap: On" : "Snap: Off";
+    });
+  }
+
   widgets.forEach(makeWidgetInteractive);
 }
 
@@ -384,6 +398,9 @@ function makeWidgetInteractive(widget) {
   let dragStart   = null;
   let resizeStart = null;
 
+  const SNAP_GRID = 10;        /* base grid snap, in canvas px */
+  const SNAP_EDGE = 14;        /* snap threshold for aligning to other widgets, in canvas px */
+
   /* ---- shared move/end handlers ---- */
   function getClientXY(e) {
     if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -391,13 +408,62 @@ function makeWidgetInteractive(widget) {
     return { x: e.clientX, y: e.clientY };
   }
 
+  /* Collect the left/right/top/bottom edges of every other widget,
+     used as snap targets while dragging/resizing this one. */
+  function getSnapEdges() {
+    const xs = [];
+    const ys = [];
+    document.querySelectorAll(".widget").forEach(w => {
+      if (w === widget) return;
+      const left   = parseFloat(w.style.left)   || w.offsetLeft;
+      const top    = parseFloat(w.style.top)    || w.offsetTop;
+      const width  = parseFloat(w.style.width)  || w.offsetWidth;
+      const height = parseFloat(w.style.height) || w.offsetHeight;
+      xs.push(left, left + width);
+      ys.push(top, top + height);
+    });
+    return { xs, ys };
+  }
+
+  function snapValue(value, candidates, threshold) {
+    let best = Math.round(value / SNAP_GRID) * SNAP_GRID; /* grid snap fallback */
+    let bestDist = Math.abs(value - best);
+    candidates.forEach(c => {
+      const d = Math.abs(value - c);
+      if (d < threshold && d < bestDist) {
+        best = c;
+        bestDist = d;
+      }
+    });
+    return best;
+  }
+
   function onDragMove(e) {
     if (!dragStart) return;
     const { x, y } = getClientXY(e);
     const dx = (x - dragStart.startX) / dragStart.scale;
     const dy = (y - dragStart.startY) / dragStart.scale;
-    widget.style.left = `${dragStart.left + dx}px`;
-    widget.style.top  = `${dragStart.top  + dy}px`;
+
+    let newLeft = dragStart.left + dx;
+    let newTop  = dragStart.top  + dy;
+
+    if (snapEnabled) {
+      const { xs, ys } = getSnapEdges();
+      const width  = widget.offsetWidth;
+      const height = widget.offsetHeight;
+      /* Try snapping both the left edge and the right edge of this
+         widget against other widgets' edges, same for top/bottom */
+      const snappedLeft  = snapValue(newLeft,            xs, SNAP_EDGE);
+      const snappedRight = snapValue(newLeft + width,     xs, SNAP_EDGE) - width;
+      const snappedTop   = snapValue(newTop,              ys, SNAP_EDGE);
+      const snappedBot   = snapValue(newTop + height,     ys, SNAP_EDGE) - height;
+
+      newLeft = Math.abs(snappedLeft - newLeft) <= Math.abs(snappedRight - newLeft) ? snappedLeft : snappedRight;
+      newTop  = Math.abs(snappedTop  - newTop)  <= Math.abs(snappedBot  - newTop)   ? snappedTop  : snappedBot;
+    }
+
+    widget.style.left = `${newLeft}px`;
+    widget.style.top  = `${newTop}px`;
   }
 
   function onDragEnd() {
@@ -415,8 +481,20 @@ function makeWidgetInteractive(widget) {
     const { x, y } = getClientXY(e);
     const dx = (x - resizeStart.startX) / resizeStart.scale;
     const dy = (y - resizeStart.startY) / resizeStart.scale;
-    const newW = Math.max(120, resizeStart.width  + dx);
-    const newH = Math.max(60,  resizeStart.height + dy);
+    let newW = Math.max(120, resizeStart.width  + dx);
+    let newH = Math.max(60,  resizeStart.height + dy);
+
+    if (snapEnabled) {
+      const { xs, ys } = getSnapEdges();
+      const left = parseFloat(widget.style.left) || widget.offsetLeft;
+      const top  = parseFloat(widget.style.top)  || widget.offsetTop;
+      /* Snap the moving (right/bottom) edge against other widgets' edges */
+      const snappedRight  = snapValue(left + newW, xs, SNAP_EDGE);
+      const snappedBottom = snapValue(top  + newH, ys, SNAP_EDGE);
+      newW = Math.max(120, snappedRight  - left);
+      newH = Math.max(60,  snappedBottom - top);
+    }
+
     widget.style.width  = `${newW}px`;
     widget.style.height = `${newH}px`;
     if (widget.dataset.widget === "tideChart" && tidePredictions.length) drawTide(tidePredictions);

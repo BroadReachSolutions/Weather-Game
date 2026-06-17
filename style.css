@@ -548,11 +548,11 @@ body.layout-edit .widgetControls {
 }
 
 .windReadingLine {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 700;
   color: var(--row1-color);
   font-family: var(--row1-font);
-  line-height: 1.2;
+  line-height: 1.25;
   white-space: nowrap;
 }
 
@@ -564,10 +564,10 @@ body.layout-edit .widgetControls {
 }
 
 .windReadingDir {
-  font-size: 16px;
+  font-size: 19px;
   color: var(--row2-color);
   font-family: var(--row2-font);
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .compassOuter {
@@ -589,7 +589,7 @@ body.layout-edit .widgetControls {
 
 .cardinal {
   position: absolute;
-  font-size: 18px;
+  font-size: 21px;
   font-weight: 700;
   color: var(--row2-color);
   font-family: var(--row2-font);
@@ -1521,9 +1521,9 @@ body.layout-edit .widgetFrame {
   flex-direction: column !important;
   justify-content: center !important;
 }
-.card .hour    { font-size: 14px !important; }
-.card .tempF   { font-size: 22px !important; }
-.card .humidity, .card .rain, .card .windMini, .card .dirMini { font-size: 11px !important; }
+.card .hour    { font-size: 16px !important; font-weight: 600 !important; }
+.card .tempF   { font-size: 26px !important; }
+.card .humidity, .card .rain, .card .windMini, .card .dirMini { font-size: 13px !important; }
 
 /* Tide status */
 .currentTide  { font-size: 16px !important; margin-top: 2px !important; }
@@ -1584,7 +1584,20 @@ body.layout-edit .widgetFrame {
 }
 #layoutWidget .controlBtns { gap: 6px; }
 #layoutWidget .ctrlBtn     { font-size: 12px !important; padding: 6px 8px !important; flex: 1; }
-#layoutWidget .ctrlBtnEdit { display: none !important; }
+#layoutWidget #layoutToggle { display: none !important; } /* mobile uses header Edit button instead */
+
+/* Snap toggle button — small pill style, only visible during edit mode (JS controls display) */
+.snapToggleBtn {
+  flex: 0 0 auto !important;
+  background: rgba(100,180,255,0.12) !important;
+  border: 1px solid rgba(100,180,255,0.3) !important;
+  color: #a8daff !important;
+}
+.snapToggleBtn.active {
+  background: rgba(100,220,150,0.18) !important;
+  border-color: rgba(100,220,150,0.45) !important;
+  color: #b8ffd0 !important;
+}
 
 /* Widget controls — only visible in edit mode */
 .widgetControls { display: none !important; }
