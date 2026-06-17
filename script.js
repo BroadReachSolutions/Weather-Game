@@ -6,18 +6,15 @@
 const DASHBOARD_WIDTH = 1920;
 const MOBILE_DASHBOARD_WIDTH = 400; /* close to real phone width so scale ≈ 1, text renders near its literal size */
 
-/* Default layout for the mobile canvas (400px virtual width — close to
-   real phone width so the scale factor stays near 1 and text/UI render
-   at roughly their literal CSS px size instead of being shrunk down).
-   Widgets stack vertically, full width, sensible default heights.
-   User can drag/resize freely in Edit Layout mode — saved separately
-   from the desktop layout. */
+/* Default layout for the mobile canvas (400px virtual width).
+   This is the user's custom-tuned layout, captured from their live
+   localStorage settings and baked in as the new default. */
 const DEFAULT_MOBILE_LAYOUT = {
-  "layout":     { "left": "5px",  "top": "5px",   "width": "390px", "height": "120px" },
-  "wind":       { "left": "5px",  "top": "135px", "width": "390px", "height": "340px" },
-  "forecast":   { "left": "5px",  "top": "485px", "width": "390px", "height": "150px" },
-  "tideChart":  { "left": "5px",  "top": "645px", "width": "390px", "height": "180px" },
-  "game":       { "left": "5px",  "top": "835px", "width": "390px", "height": "200px" }
+  "layout":     { "left": "0px",  "top": "1170px", "width": "390px", "height": "130px" },
+  "wind":       { "left": "5px",  "top": "390px",  "width": "390px", "height": "340px" },
+  "forecast":   { "left": "5px",  "top": "735px",  "width": "390px", "height": "195px" },
+  "tideChart":  { "left": "-5px", "top": "940px",  "width": "395px", "height": "210px" },
+  "game":       { "left": "0px",  "top": "0px",    "width": "395px", "height": "380px" }
 };
 const DASHBOARD_HEIGHT = 1080;
 
@@ -35,7 +32,7 @@ const SETTINGS_KEY = "marineDashboardWidgetSettingsV2";
 
 const DEFAULT_LAYOUT = {"layout":{"left":"10px","top":"10px","width":"620px","height":"120px"},"wind":{"left":"1254px","top":"5px","width":"653px","height":"392px"},"temp":{"left":"758px","top":"11px","width":"313px","height":"112px"},"tideStatus":{"left":"433px","top":"316px","width":"981px","height":"91px"},"forecast":{"left":"10px","top":"391px","width":"1900px","height":"270px"},"tideChart":{"left":"-8px","top":"661px","width":"1919px","height":"278px"}};
 
-const DEFAULT_SETTINGS = {"widgetSettings":{"layout":{},"wind":{"theme":"clean"},"temp":{"theme":"clean"},"tideStatus":{"theme":"clean"},"forecast":{"theme":"clean"},"tideChart":{"theme":"clean"}},"dashboardSettings":{"backgroundColor":"#07131c","backgroundHue":0}};
+const DEFAULT_SETTINGS = {"widgetSettings":{"layout":{},"wind":{"theme":"clean"},"temp":{"theme":"clean"},"tideStatus":{"theme":"clean"},"forecast":{"theme":"clean"},"tideChart":{"theme":"clean"},"game":{}},"dashboardSettings":{"backgroundColor":"#07131c","backgroundHue":0},"heroTitle":"","heroSubtitle":""};
 
 
 /* location defaults */
