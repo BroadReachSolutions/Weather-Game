@@ -136,6 +136,7 @@
       case "boom":
         return `
           <div class="osGaugeLabel">Boom Trim</div>
+          <button class="osSailsToggle" id="osSailsToggle">SAILS UP</button>
           <input type="range" id="osBoomSlider" class="osBoomSliderSmall" min="-90" max="90" step="1" value="25">
           <div class="osGaugeUnit" id="osBoomLabel">25°</div>
         `;
@@ -299,6 +300,14 @@
     if (label) label.textContent = Math.round(angle) + "°";
   }
 
+  function setSailsState(isUp) {
+    const toggle = document.getElementById("osSailsToggle");
+    if (toggle) {
+      toggle.textContent = isUp ? "SAILS DOWN" : "SAILS UP";
+      toggle.classList.toggle("up", isUp);
+    }
+  }
+
   function initInstrumentPanel(attempts) {
     const panel = document.getElementById(PANEL_ID);
     if (panel) {
@@ -317,6 +326,7 @@
     calculateApparentWind,
     setEngineState,
     setBoomLabel,
+    setSailsState,
     rebuild: buildPanel
   };
 })();

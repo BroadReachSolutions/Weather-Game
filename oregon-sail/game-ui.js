@@ -375,7 +375,7 @@
 
     if (boat.destination_lat != null) {
       showPendingPin(boat.destination_lat, boat.destination_lon, false);
-      if (boat.course_mode !== "idle") drawCourseLine(boat.destination_lat, boat.destination_lon);
+      if (boat.sailing_active || boat.engine_on) drawCourseLine(boat.destination_lat, boat.destination_lon);
     }
 
     map.on("click", (e) => {
@@ -499,7 +499,7 @@
        an unconfirmed pending pick and an already-set destination */
     const destLat = pendingDest ? pendingDest.lat : boat.destination_lat;
     const destLon = pendingDest ? pendingDest.lon : boat.destination_lon;
-    if (destLat != null && destLon != null && boat.course_mode !== "idle") {
+    if (destLat != null && destLon != null && (boat.sailing_active || boat.engine_on)) {
       drawCourseLine(destLat, destLon);
     } else {
       clearCourseLine();
@@ -542,6 +542,21 @@
      CONTROLS
      --------------------------------------------------------------- */
   function wireControls() {
+    /* Tab switching */
+    const tabBar = document.getElementById("osTabBar");
+    if (tabBar) {
+      tabBar.addEventListener("click", (e) => {
+        const tab = e.target.closest(".osTab");
+        if (!tab) return;
+        const target = tab.dataset.tab;
+        document.querySelectorAll(".osTab").forEach(t => t.classList.remove("active"));
+        document.querySelectorAll(".osTabPanel").forEach(p => p.classList.remove("active"));
+        tab.classList.add("active");
+        const panel = document.getElementById("osTabPanel-" + target);
+        if (panel) panel.classList.add("active");
+      });
+    }
+
     document.getElementById("osSetCourseBtn").addEventListener("click", async () => {
       if (!pendingDest) return;
       const { error } = await OS.setCourse(pendingDest.lat, pendingDest.lon, "sailing");
@@ -594,6 +609,18 @@
     }
 
     wireEngineControls();
+
+    const sailsToggle = document.getElementById("osSailsToggle");
+    if (sailsToggle) {
+      const isUp = !!(OS.boat && OS.boat.sailing_active);
+      if (window.OSInstruments) window.OSInstruments.setSailsState(isUp);
+      sailsToggle.addEventListener("click", async () => {
+        const newState = !(OS.boat && OS.boat.sailing_active);
+        await OS.setSailingActive(newState);
+        if (window.OSInstruments) window.OSInstruments.setSailsState(newState);
+        renderStatusLine(OS.boat);
+      });
+    }
   }
 
   /* ---------------------------------------------------------------

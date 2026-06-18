@@ -109,7 +109,8 @@ OS.setCourse = async function (destLat, destLon, mode) {
       destination_lat: destLat,
       destination_lon: destLon,
       course_bearing: bearing,
-      course_mode: mode || "sailing",
+      course_mode: mode || "sailing",   /* legacy field, kept in sync during transition */
+      sailing_active: true,              /* setting a course raises the sails by default */
       updated_at: new Date().toISOString()
     })
     .eq("id", OS.boat.id)

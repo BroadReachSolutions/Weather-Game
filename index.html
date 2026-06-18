@@ -324,9 +324,88 @@
                 <button class="osMapBtn osMapBtnSecondary" id="osCancelCourseBtn" style="display:none;">Cancel</button>
               </div>
 
-              <!-- Instrument panel (bottom half) — free-form draggable gauges -->
-              <div class="osInstrumentPanel" id="osInstrumentPanel">
-                <!-- Gauges are injected here by JS so positions can be saved/restored -->
+              <!-- Tab bar -->
+              <div class="osTabBar" id="osTabBar">
+                <button class="osTab active" data-tab="helm">Helm</button>
+                <button class="osTab" data-tab="nav">Nav Station</button>
+                <button class="osTab" data-tab="crew">Crew</button>
+                <button class="osTab" data-tab="mechanical">Mechanical</button>
+                <button class="osTab" data-tab="storage">Storage</button>
+                <button class="osTab osTabTba" data-tab="tba1">TBA</button>
+                <button class="osTab osTabTba" data-tab="tba2">TBA</button>
+                <button class="osTab osTabTba" data-tab="tba3">TBA</button>
+              </div>
+
+              <!-- TAB CONTENT PANELS -->
+
+              <!-- HELM — vessel controls and instrumentation -->
+              <div class="osTabPanel active" id="osTabPanel-helm">
+                <div class="osInstrumentPanel" id="osInstrumentPanel">
+                  <!-- Gauges injected by instruments.js -->
+                </div>
+              </div>
+
+              <!-- NAV STATION — course plotting, weather, DC panel -->
+              <div class="osTabPanel" id="osTabPanel-nav">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">🗺</div>
+                  <div class="osTabPlaceholderTitle">Nav Station</div>
+                  <div class="osTabPlaceholderText">Course plotting, weather radar, and DC power panel coming soon.</div>
+                </div>
+              </div>
+
+              <!-- CREW — captain and crew status -->
+              <div class="osTabPanel" id="osTabPanel-crew">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">👥</div>
+                  <div class="osTabPlaceholderTitle">Crew</div>
+                  <div class="osTabPlaceholderText">Captain and crew health, morale, and roster. Bigger crew = longer offline progress but more food and water use.</div>
+                </div>
+              </div>
+
+              <!-- MECHANICAL — engine systems, power, solar, batteries -->
+              <div class="osTabPanel" id="osTabPanel-mechanical">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">⚙️</div>
+                  <div class="osTabPlaceholderTitle">Mechanical</div>
+                  <div class="osTabPlaceholderText">Engine systems, battery bank, solar, wind generator, and power management. All electronics draw from your battery bank.</div>
+                </div>
+              </div>
+
+              <!-- STORAGE — inventory, supplies, spare gear -->
+              <div class="osTabPanel" id="osTabPanel-storage">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">📦</div>
+                  <div class="osTabPlaceholderTitle">Storage</div>
+                  <div class="osTabPlaceholderText">Food, water, first aid, spare sails, repair materials, and tools. Everything you bring adds weight.</div>
+                </div>
+              </div>
+
+              <!-- TBA 1 -->
+              <div class="osTabPanel" id="osTabPanel-tba1">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">🔒</div>
+                  <div class="osTabPlaceholderTitle">Coming Soon</div>
+                  <div class="osTabPlaceholderText">This tab is reserved for a future feature.</div>
+                </div>
+              </div>
+
+              <!-- TBA 2 -->
+              <div class="osTabPanel" id="osTabPanel-tba2">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">🔒</div>
+                  <div class="osTabPlaceholderTitle">Coming Soon</div>
+                  <div class="osTabPlaceholderText">This tab is reserved for a future feature.</div>
+                </div>
+              </div>
+
+              <!-- TBA 3 -->
+              <div class="osTabPanel" id="osTabPanel-tba3">
+                <div class="osTabPlaceholder">
+                  <div class="osTabPlaceholderIcon">🔒</div>
+                  <div class="osTabPlaceholderTitle">Coming Soon</div>
+                  <div class="osTabPlaceholderText">This tab is reserved for a future feature.</div>
+                </div>
               </div>
 
             </div>
