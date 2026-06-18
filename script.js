@@ -2657,23 +2657,27 @@ function drawTide(series) {
 
   /* ── Update status text ───────────────────────────────────────────── */
   if (nowValue != null) {
-    if (tideViewMode === "live") {
-      currentTideEl.innerText =
-        `Tide now at ${selectedStation.name}: ${nowValue > 0 ? "+" : ""}${nowValue.toFixed(2)} ft`;
-    } else {
-      currentTideEl.innerText =
-        `Tide for ${selectedTideDate} at ${selectedStation.name}: ${formatTideReadout(nowMs, nowValue)}`;
+    if (currentTideEl) {
+      if (tideViewMode === "live") {
+        currentTideEl.innerText =
+          `Tide now at ${selectedStation.name}: ${nowValue > 0 ? "+" : ""}${nowValue.toFixed(2)} ft`;
+      } else {
+        currentTideEl.innerText =
+          `Tide for ${selectedTideDate} at ${selectedStation.name}: ${formatTideReadout(nowMs, nowValue)}`;
+      }
     }
     const tideIsLow  = tideChartLowAlertOn  && nowValue <= LOW_TIDE_ALERT_FT;
     const tideIsHigh = tideChartHighAlertOn && nowValue >= HIGH_TIDE_ALERT_FT;
     const tideAlert  = tideIsLow || tideIsHigh;
-    currentTideEl.style.color    = (tideStatusColorAlert && tideAlert) ? "#ff6a6a" : "#dff6ff";
-    lowTideAlertEl.textContent   = tideIsLow  ? "⚠ LOW TIDE"  :
-                                   tideIsHigh ? "⚠ HIGH TIDE" : "";
+    if (currentTideEl) currentTideEl.style.color = (tideStatusColorAlert && tideAlert) ? "#ff6a6a" : "#dff6ff";
+    if (lowTideAlertEl) lowTideAlertEl.textContent = tideIsLow  ? "⚠ LOW TIDE"  :
+                                                       tideIsHigh ? "⚠ HIGH TIDE" : "";
   } else {
-    currentTideEl.innerText      = "";
-    currentTideEl.style.color    = "#dff6ff";
-    lowTideAlertEl.textContent   = "";
+    if (currentTideEl) {
+      currentTideEl.innerText   = "";
+      currentTideEl.style.color = "#dff6ff";
+    }
+    if (lowTideAlertEl) lowTideAlertEl.textContent = "";
   }
 }
 function setupTideInteraction() {
