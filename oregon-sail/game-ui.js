@@ -118,15 +118,19 @@
 
     /* Sail is drawn as a thin triangle from the mast out to the boom
        tip, billowing to whichever side the boom is trimmed toward.
-       Positive boomAngleDeg = boom swung to starboard (right). */
+       The boom pivots near the mast base and swings aft (toward the
+       stern, at the bottom of the icon) — at 0° it trails straight
+       back along the centerline; positive boomAngleDeg = boom swung
+       to starboard (right) as you'd see it from the cockpit. */
     const mastX = c, mastTopY = c - 13, mastBotY = c + 12;
+    const boomPivotY = c - 11;
     const boomLen = 21;
     const boomRad = (boomAngleDeg * Math.PI) / 180;
     const boomTipX = mastX + Math.sin(boomRad) * boomLen;
-    const boomTipY = (c - 11) - Math.cos(boomRad) * boomLen;
+    const boomTipY = boomPivotY + Math.cos(boomRad) * boomLen;
     /* Sail belly bulges away from the wind, perpendicular-ish to the boom */
     const bellyX = mastX + Math.sin(boomRad) * (boomLen * 0.45) + Math.cos(boomRad) * (boomAngleDeg >= 0 ? 4 : -4);
-    const bellyY = (c - 11) - Math.cos(boomRad) * (boomLen * 0.45);
+    const bellyY = boomPivotY + Math.cos(boomRad) * (boomLen * 0.45);
 
     return `
       <svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" style="overflow:visible;">
@@ -138,11 +142,11 @@
                    L ${c - 9} ${c - 5}
                    Z"
                 fill="#e8e4da" stroke="#1a2a35" stroke-width="1.4"/>
-          <path d="M ${mastX} ${c - 11} Q ${bellyX} ${bellyY} ${boomTipX} ${boomTipY} Z"
+          <path d="M ${mastX} ${boomPivotY} Q ${bellyX} ${bellyY} ${boomTipX} ${boomTipY} Z"
                 fill="#dfeaf2" stroke="#9fb8c8" stroke-width="0.8" opacity="0.92"/>
           <line x1="${mastX}" y1="${mastTopY}" x2="${mastX}" y2="${mastBotY}"
                 stroke="#5a4632" stroke-width="1.8"/>
-          <line x1="${mastX}" y1="${c - 11}" x2="${boomTipX}" y2="${boomTipY}"
+          <line x1="${mastX}" y1="${boomPivotY}" x2="${boomTipX}" y2="${boomTipY}"
                 stroke="#cfd8df" stroke-width="2.6" stroke-linecap="round"
                 class="osBoomLine" style="cursor:grab;"/>
         </g>
@@ -267,6 +271,58 @@
     }
   }
 
+  /* ---------------------------------------------------------------
+     NAUTICAL SCALE BAR (bottom-left of the map)
+     Leaflet's built-in scale control only does metric/imperial miles,
+     not nautical miles — sailors think in nm, so we build a small
+     custom control that picks a "nice" round nm distance and renders
+     a bar matching its real pixel width at the current zoom/latitude.
+     --------------------------------------------------------------- */
+  function addNauticalScaleControl(mapInstance) {
+    const ScaleControl = L.Control.extend({
+      options: { position: "bottomleft" },
+      onAdd: function () {
+        const div = L.DomUtil.create("div", "osNauticalScale");
+        div.innerHTML = `<div class="osNauticalScaleBar"></div><div class="osNauticalScaleLabel">—</div>`;
+        return div;
+      }
+    });
+    const control = new ScaleControl();
+    control.addTo(mapInstance);
+
+    /* "Nice" round nm steps to choose from at any zoom level */
+    const NICE_STEPS_NM = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+    const MAX_BAR_PX = 90;
+
+    function updateScale() {
+      const el = mapInstance.getContainer().querySelector(".osNauticalScale");
+      if (!el) return;
+      const bar = el.querySelector(".osNauticalScaleBar");
+      const label = el.querySelector(".osNauticalScaleLabel");
+
+      /* Real-world nm spanned by MAX_BAR_PX pixels at the map's current
+         view (measuring along a horizontal line near the map's center) */
+      const centerPt = mapInstance.latLngToContainerPoint(mapInstance.getCenter());
+      const p1 = mapInstance.containerPointToLatLng([centerPt.x, centerPt.y]);
+      const p2 = mapInstance.containerPointToLatLng([centerPt.x + MAX_BAR_PX, centerPt.y]);
+      const nmAtMaxWidth = OS.haversineNm(p1.lat, p1.lng, p2.lat, p2.lng);
+
+      /* Pick the largest "nice" step that still fits within MAX_BAR_PX */
+      let chosenNm = NICE_STEPS_NM[0];
+      for (const step of NICE_STEPS_NM) {
+        if (step <= nmAtMaxWidth) chosenNm = step;
+        else break;
+      }
+      const barPx = MAX_BAR_PX * (chosenNm / nmAtMaxWidth);
+
+      bar.style.width = Math.max(20, barPx) + "px";
+      label.textContent = chosenNm >= 1 ? `${chosenNm} nm` : `${(chosenNm * 1852).toFixed(0)} m`;
+    }
+
+    mapInstance.on("zoom move", updateScale);
+    updateScale();
+  }
+
   function initMap(boat) {
     const mapEl = document.getElementById("osMap");
     if (!mapEl || map) return;
@@ -284,6 +340,8 @@
       { maxZoom: 17, minZoom: 3 }
     ).addTo(map);
 
+    addNauticalScaleControl(map);
+
     const initialIcon = L.divIcon({
       className: "osBoatIcon",
       html: buildBoatIconHtml(boat.course_bearing || 0, currentBoomAngle, 0, currentWindArrowOffset),
@@ -296,6 +354,7 @@
 
     if (boat.destination_lat != null) {
       showPendingPin(boat.destination_lat, boat.destination_lon, false);
+      if (boat.course_mode !== "idle") drawCourseLine(boat.destination_lat, boat.destination_lon);
     }
 
     map.on("click", (e) => {
@@ -346,9 +405,13 @@
     map.on("mouseup touchend", endDrag);
   }
 
+  let courseLine = null;
+  let courseDistanceLabel = null;
+
   function handleMapTap(lat, lon) {
     pendingDest = { lat, lon };
     showPendingPin(lat, lon, true);
+    drawCourseLine(lat, lon);
 
     document.getElementById("osSetCourseBtn").style.display = "";
     document.getElementById("osCancelCourseBtn").style.display = "";
@@ -361,11 +424,48 @@
     }
     const icon = L.divIcon({
       className: isPending ? "osPinIconPending" : "osPinIcon",
-      html: "📍",
-      iconSize: [24, 24],
-      iconAnchor: [12, 24]
+      html: '<div class="osDiamondMarker"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
     });
     pendingPinMarker = L.marker([lat, lon], { icon }).addTo(map);
+  }
+
+  /* ---------------------------------------------------------------
+     COURSE LINE
+     A thin blue line from the boat's current (live-estimated)
+     position to the destination marker, with a small label showing
+     the distance in nautical miles — updates whenever the boat
+     moves or a new destination is picked.
+     --------------------------------------------------------------- */
+  function drawCourseLine(destLat, destLon) {
+    if (!map || !OS.boat) return;
+    clearCourseLine();
+
+    const boatPos = OS.estimateLiveLatLon(OS.boat, 4.5);
+    const nm = OS.haversineNm(boatPos.lat, boatPos.lon, destLat, destLon);
+
+    courseLine = L.polyline(
+      [[boatPos.lat, boatPos.lon], [destLat, destLon]],
+      { color: "#4fc3f7", weight: 2, opacity: 0.85, dashArray: "4,5" }
+    ).addTo(map);
+
+    const midLat = (boatPos.lat + destLat) / 2;
+    const midLon = (boatPos.lon + destLon) / 2;
+    courseDistanceLabel = L.marker([midLat, midLon], {
+      icon: L.divIcon({
+        className: "osCourseDistanceLabel",
+        html: `${nm.toFixed(1)} nm`,
+        iconSize: [60, 18],
+        iconAnchor: [30, 9]
+      }),
+      interactive: false
+    }).addTo(map);
+  }
+
+  function clearCourseLine() {
+    if (courseLine) { map.removeLayer(courseLine); courseLine = null; }
+    if (courseDistanceLabel) { map.removeLayer(courseDistanceLabel); courseDistanceLabel = null; }
   }
 
   function updateBoatMarkerPosition(boat) {
@@ -373,6 +473,16 @@
     const estimated = OS.estimateLiveLatLon(boat, 4.5);
     boatMarker.setLatLng([estimated.lat, estimated.lon]);
     refreshBoatIcon();
+
+    /* Keep the course line current as the boat moves — covers both
+       an unconfirmed pending pick and an already-set destination */
+    const destLat = pendingDest ? pendingDest.lat : boat.destination_lat;
+    const destLon = pendingDest ? pendingDest.lon : boat.destination_lon;
+    if (destLat != null && destLon != null && boat.course_mode !== "idle") {
+      drawCourseLine(destLat, destLon);
+    } else {
+      clearCourseLine();
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -445,6 +555,12 @@
       if (pendingPinMarker) {
         map.removeLayer(pendingPinMarker);
         pendingPinMarker = null;
+      }
+      clearCourseLine();
+      /* Restore the existing confirmed course's pin/line, if any */
+      if (OS.boat && OS.boat.destination_lat != null && OS.boat.course_mode !== "idle") {
+        showPendingPin(OS.boat.destination_lat, OS.boat.destination_lon, false);
+        drawCourseLine(OS.boat.destination_lat, OS.boat.destination_lon);
       }
       document.getElementById("osSetCourseBtn").style.display = "none";
       document.getElementById("osCancelCourseBtn").style.display = "none";

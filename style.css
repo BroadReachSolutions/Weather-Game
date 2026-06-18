@@ -1729,6 +1729,31 @@ body.layout-edit .widgetResize {
   border-color: rgba(125, 186, 220, 0.3) !important;
 }
 
+/* Custom nautical-mile scale bar, bottom-left of the game map */
+.osNauticalScale {
+  background: rgba(10, 25, 36, 0.82);
+  border: 1px solid rgba(125,186,220,0.3);
+  border-radius: 6px;
+  padding: 4px 8px 5px;
+  pointer-events: none;
+  margin: 0 0 8px 8px !important;
+}
+
+.osNauticalScaleBar {
+  height: 3px;
+  background: #eef7ff;
+  border-left: 2px solid #eef7ff;
+  border-right: 2px solid #eef7ff;
+  margin-bottom: 2px;
+}
+
+.osNauticalScaleLabel {
+  font-size: 10px;
+  color: #d0ecff;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .osBoatIcon {
   filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
 }
@@ -1742,10 +1767,19 @@ body.layout-edit .osWindArrowGroup {
 }
 
 .osPinIcon, .osPinIconPending {
-  font-size: 22px;
-  text-align: center;
-  line-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+}
+
+.osDiamondMarker {
+  width: 14px;
+  height: 14px;
+  background: #4fc3f7;
+  border: 2px solid #0a1924;
+  transform: rotate(45deg);
+  box-shadow: 0 0 6px rgba(79,195,247,0.7);
 }
 
 .osPinIconPending { animation: osPinBounce 0.6s ease infinite alternate; }
@@ -1753,6 +1787,19 @@ body.layout-edit .osWindArrowGroup {
 @keyframes osPinBounce {
   from { transform: translateY(0); }
   to   { transform: translateY(-4px); }
+}
+
+.osCourseDistanceLabel {
+  background: rgba(10, 25, 36, 0.85);
+  border: 1px solid rgba(79,195,247,0.4);
+  border-radius: 10px;
+  color: #d0ecff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .osMapBtn {
