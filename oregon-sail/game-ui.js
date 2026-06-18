@@ -91,6 +91,7 @@
     await syncLocationToBoat(boat, true); /* force initial sync regardless of distance */
 
     initMap(boat);
+    initDivider();
     renderResourceBar(boat);
     renderStatusLine(boat);
     wireControls();
@@ -428,6 +429,84 @@
 
   let courseLine = null;
   let courseDistanceLabel = null;
+
+  /* ---------------------------------------------------------------
+     DRAGGABLE DIVIDER
+     A thin grab-handle between the map and the tab content area.
+     Dragging it up/down adjusts the map's flex-basis (height) and
+     persists the split so it survives page reloads.
+     --------------------------------------------------------------- */
+  const DIVIDER_STORAGE_KEY = "osMapSplitPct";
+  const MAP_MIN_PCT = 15;   /* map can't shrink below 15% of container */
+  const MAP_MAX_PCT = 85;   /* map can't grow above 85% */
+
+  function loadSplit() {
+    const raw = localStorage.getItem(DIVIDER_STORAGE_KEY);
+    const val = raw != null ? parseFloat(raw) : 50;
+    return isNaN(val) ? 50 : Math.max(MAP_MIN_PCT, Math.min(MAP_MAX_PCT, val));
+  }
+
+  function applySplit(pct) {
+    const mapWrap = document.querySelector(".osMapWrap");
+    if (mapWrap) mapWrap.style.flex = `0 0 ${pct}%`;
+    if (map) setTimeout(() => map.invalidateSize(), 50);
+  }
+
+  function initDivider() {
+    const divider = document.getElementById("osDivider");
+    const box = document.getElementById("gameWidgetBox");
+    if (!divider || !box) return;
+
+    /* Restore saved split */
+    applySplit(loadSplit());
+
+    let dragging = false;
+    let startY = 0;
+    let startPct = 0;
+
+    function getY(e) {
+      return e.touches ? e.touches[0].clientY : e.clientY;
+    }
+
+    function onDown(e) {
+      e.preventDefault();
+      dragging = true;
+      startY = getY(e);
+      startPct = loadSplit();
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("touchend", onUp);
+    }
+
+    function onMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      const boxRect = box.getBoundingClientRect();
+      const dy = getY(e) - startY;
+      const deltaPct = (dy / boxRect.height) * 100;
+      const newPct = Math.max(MAP_MIN_PCT, Math.min(MAP_MAX_PCT, startPct + deltaPct));
+      applySplit(newPct);
+    }
+
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      /* Save the final split as percentage */
+      const mapWrap = document.querySelector(".osMapWrap");
+      if (mapWrap) {
+        const pct = parseFloat(mapWrap.style.flex.split(" ")[2]) || 50;
+        localStorage.setItem(DIVIDER_STORAGE_KEY, String(pct));
+      }
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+    }
+
+    divider.addEventListener("mousedown", onDown);
+    divider.addEventListener("touchstart", onDown, { passive: false });
+  }
 
   function handleMapTap(lat, lon) {
     pendingDest = { lat, lon };

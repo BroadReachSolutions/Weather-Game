@@ -1651,6 +1651,35 @@ body.layout-edit .widgetResize {
 
 
 /* Status line */
+/* Draggable map/gauge divider */
+.osDivider {
+  flex-shrink: 0;
+  height: 18px;            /* generous touch target */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  background: rgba(4, 10, 16, 0.5);
+  z-index: 10;
+  touch-action: none;
+}
+
+.osDivider:hover { background: rgba(79,195,247,0.08); }
+.osDivider:active { background: rgba(79,195,247,0.15); }
+
+.osDividerHandle {
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(125,186,220,0.4);
+  pointer-events: none;
+}
+
+.osDivider:hover .osDividerHandle,
+.osDivider:active .osDividerHandle {
+  background: rgba(79,195,247,0.8);
+}
+
 .osStatusLine {
   font-size: 13px;
   color: #9fc2d9;
@@ -1662,8 +1691,8 @@ body.layout-edit .widgetResize {
 /* Map */
 .osMapWrap {
   position: relative;
-  flex: 1 1 50%;
-  min-height: 140px;
+  flex: 0 0 50%;   /* JS overrides this with the saved split percentage */
+  min-height: 0;
 }
 
 #osMap {
