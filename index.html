@@ -435,6 +435,41 @@
     </div>
   </div>
 
+  <!-- First-run defaults: seeds localStorage with the designer's
+       preferred layout/settings so new players start with a clean,
+       tested UI instead of the raw zero state. Runs once and never
+       overwrites settings the player has already customised. -->
+  <script>
+  (function () {
+    var DEFAULTS_VERSION = "1";
+    if (localStorage.getItem("osDefaultsApplied") === DEFAULTS_VERSION) return;
+
+    var defaults = {
+      "marineDashboardLayoutV2_mobile_v2": "{\"layout\":{\"left\":\"5px\",\"top\":\"1670px\",\"width\":\"390px\",\"height\":\"130px\"},\"wind\":{\"left\":\"5px\",\"top\":\"850px\",\"width\":\"390px\",\"height\":\"400px\"},\"forecast\":{\"left\":\"5px\",\"top\":\"1260px\",\"width\":\"390px\",\"height\":\"195px\"},\"tideChart\":{\"left\":\"10px\",\"top\":\"1450px\",\"width\":\"395px\",\"height\":\"210px\"},\"game\":{\"left\":\"0px\",\"top\":\"0px\",\"width\":\"400px\",\"height\":\"830px\"}}",
+      "marineDashboardWidgetSettingsV2": "{\"widgetSettings\":{\"layout\":{},\"wind\":{\"theme\":\"clean\"},\"temp\":{\"theme\":\"clean\"},\"tideStatus\":{\"theme\":\"clean\"},\"forecast\":{\"theme\":\"clean\"},\"tideChart\":{\"theme\":\"clean\"},\"game\":{}},\"dashboardSettings\":{\"backgroundColor\":\"#07131c\",\"backgroundHue\":0},\"heroTitle\":\"\",\"heroSubtitle\":\"\"}",
+      "marineMobileOrder": "{\"layout\":\"\",\"wind\":\"\",\"temp\":\"\",\"tideStatus\":\"\",\"forecast\":\"\",\"tideChart\":\"\"}",
+      "marineMobileSizes": "{\"forecast\":{\"h\":\"203px\"},\"wind\":{\"h\":\"270px\"},\"tideChart\":{\"h\":\"225px\"}}",
+      "compassMapMode": "radar",
+      "compassStyle": "none",
+      "compassZoom": "17",
+      "showWindDir": "1",
+      "showWindKnots": "0",
+      "showWindKph": "0",
+      "osButtonPos_osRadarCenterBtn": "{\"left\":\"16.0833px\",\"top\":\"80.1333px\"}",
+      "osInstrumentLayout": "{\"water\":{\"left\":8,\"top\":8},\"fuel\":{\"left\":108,\"top\":8},\"food\":{\"left\":208,\"top\":8},\"hull\":{\"left\":8,\"top\":105,\"size\":92},\"sog\":{\"left\":108,\"top\":108},\"windex\":{\"left\":308,\"top\":8,\"size\":92},\"engine\":{\"left\":308,\"top\":107,\"size\":92},\"boom\":{\"left\":208,\"top\":107,\"size\":92}}",
+      "osBoomAngle": "-9"
+    };
+
+    Object.keys(defaults).forEach(function (k) {
+      if (localStorage.getItem(k) === null) {
+        localStorage.setItem(k, defaults[k]);
+      }
+    });
+
+    localStorage.setItem("osDefaultsApplied", DEFAULTS_VERSION);
+  })();
+  </script>
+
   <script src="script.js"></script>
 
   <!-- Oregon Sail game -->
