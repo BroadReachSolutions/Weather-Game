@@ -14,40 +14,52 @@
 
 (function () {
   const PANEL_ID = "osInstrumentPanel";
+  const NAV_PANEL_ID = "osNavGauges";
   const STORAGE_KEY = "osInstrumentLayout";
-  const GAUGE_SIZE = 92; /* default square gauge size, px, within the panel's own coordinate space */
+  const GAUGE_SIZE = 92;
 
-  /* ---------------------------------------------------------------
-     GAUGE DEFINITIONS
-     `owned` gauges render immediately. Locked/unowned gauges (for
-     the future instrument-upgrade system) simply aren't included
-     in this list yet — add an entry here once that gauge type is
-     unlockable, with an `owned: false` default and a settings UI
-     to grant it later.
-     --------------------------------------------------------------- */
-  const INSTRUMENT_DEFS = [
-    { id: "water",  label: "Water",  type: "percent", icon: "💧" },
-    { id: "fuel",   label: "Fuel",   type: "percent", icon: "⛽" },
-    { id: "food",   label: "Food",   type: "percent", icon: "🍞" },
-    { id: "hull",   label: "Hull",   type: "percent", icon: "🛟" },
-    { id: "sog",    label: "Speed",  type: "speed" },
-    { id: "windex", label: "Windex", type: "windex" },
-    { id: "engine", label: "Engine", type: "engine" },
+  /* Helm tab instruments — speed, windex, engine (1×2), boom */
+  const HELM_DEFS = [
+    { id: "sog",    label: "Speed",     type: "speed" },
+    { id: "windex", label: "Windex",    type: "windex" },
+    { id: "engine", label: "Engine",    type: "engine", w: 1, h: 2 },
     { id: "boom",   label: "Boom Trim", type: "boom" }
+  ];
+
+  /* Nav Station tab instruments — supplies. Moved here so the Helm
+     stays focused on vessel control, Nav Station on provisions/DC. */
+  const NAV_DEFS = [
+    { id: "water", label: "Water", type: "percent", icon: "💧" },
+    { id: "food",  label: "Food",  type: "percent", icon: "🍞" },
+    { id: "hull",  label: "Hull",  type: "percent", icon: "🛟" }
   ];
 
   let gaugeLayout = loadLayout();
   let panelEl = null;
+  let navPanelEl = null;
 
-  function defaultPositionFor(index) {
-    const cols = 3;
+  function defaultPositionFor(def, index, allDefs) {
     const gap = 8;
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    return {
-      left: gap + col * (GAUGE_SIZE + gap),
-      top: gap + row * (GAUGE_SIZE + gap)
+    /* Engine gauge is 1 wide × 2 tall — treat it as occupying 2 row slots.
+       We lay out manually to account for its double height. */
+    const positions = {
+      sog:    { left: gap,               top: gap },
+      windex: { left: gap + GAUGE_SIZE + gap, top: gap },
+      engine: { left: gap + (GAUGE_SIZE + gap) * 2, top: gap },
+      boom:   { left: gap,               top: gap + GAUGE_SIZE + gap }
     };
+    if (positions[def.id]) return positions[def.id];
+    /* Nav gauges: simple row */
+    const col = index % 3;
+    return { left: gap + col * (GAUGE_SIZE + gap), top: gap };
+  }
+
+  function gaugeWidth(def) {
+    return (def.w || 1) * GAUGE_SIZE + (def.w > 1 ? (def.w - 1) * 8 : 0);
+  }
+
+  function gaugeHeight(def) {
+    return (def.h || 1) * GAUGE_SIZE + (def.h > 1 ? (def.h - 1) * 8 : 0);
   }
 
   function loadLayout() {
@@ -61,32 +73,45 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(gaugeLayout));
   }
 
-  /* ---------------------------------------------------------------
-     BUILD PANEL
-     --------------------------------------------------------------- */
   function buildPanel() {
     panelEl = document.getElementById(PANEL_ID);
-    if (!panelEl) return;
-    panelEl.innerHTML = "";
+    navPanelEl = document.getElementById(NAV_PANEL_ID);
 
-    INSTRUMENT_DEFS.forEach((def, i) => {
-      const pos = gaugeLayout[def.id] || defaultPositionFor(i);
-      gaugeLayout[def.id] = pos;
+    if (panelEl) {
+      panelEl.innerHTML = "";
+      HELM_DEFS.forEach((def, i) => {
+        const pos = gaugeLayout[def.id] || defaultPositionFor(def, i, HELM_DEFS);
+        gaugeLayout[def.id] = pos;
+        const el = createGauge(def, pos);
+        panelEl.appendChild(el);
+        makeGaugeDraggable(el, def.id);
+      });
+    }
 
-      const gauge = document.createElement("div");
-      gauge.className = "osGauge osGauge-" + def.type;
-      gauge.dataset.gaugeId = def.id;
-      gauge.style.left = pos.left + "px";
-      gauge.style.top = pos.top + "px";
-      gauge.style.width = (pos.size || GAUGE_SIZE) + "px";
-      gauge.style.height = (pos.size || GAUGE_SIZE) + "px";
-      gauge.innerHTML = buildGaugeInnerHtml(def);
-      panelEl.appendChild(gauge);
-
-      makeGaugeDraggable(gauge, def.id);
-    });
+    if (navPanelEl) {
+      navPanelEl.innerHTML = "";
+      NAV_DEFS.forEach((def, i) => {
+        const pos = gaugeLayout[def.id] || defaultPositionFor(def, i, NAV_DEFS);
+        gaugeLayout[def.id] = pos;
+        const el = createGauge(def, pos);
+        navPanelEl.appendChild(el);
+        makeGaugeDraggable(el, def.id);
+      });
+    }
 
     saveLayout();
+  }
+
+  function createGauge(def, pos) {
+    const gauge = document.createElement("div");
+    gauge.className = "osGauge osGauge-" + def.type;
+    gauge.dataset.gaugeId = def.id;
+    gauge.style.left = pos.left + "px";
+    gauge.style.top = pos.top + "px";
+    gauge.style.width = (pos.size || gaugeWidth(def)) + "px";
+    gauge.style.height = (pos.sizeH || gaugeHeight(def)) + "px";
+    gauge.innerHTML = buildGaugeInnerHtml(def);
+    return gauge;
   }
 
   function buildGaugeInnerHtml(def) {
@@ -130,8 +155,27 @@
         return `
           <div class="osGaugeLabel">Engine</div>
           <button class="osEngineToggle" id="osEngineToggle">START</button>
-          <input type="range" id="osThrottleSlider" class="osThrottleSlider" min="-1" max="1" step="0.01" value="0" disabled>
-          <div class="osGaugeUnit" id="osThrottleLabel">0 RPM</div>
+          <div class="osThrottleWrap">
+            <div class="osThrottleTrack">
+              <div class="osThrottleZone osThrottleFwd">FWD</div>
+              <div class="osThrottleZone osThrottleNeutral">·</div>
+              <div class="osThrottleZone osThrottleRev">REV</div>
+            </div>
+            <input type="range" id="osThrottleSlider" class="osThrottleSlider"
+              min="-1" max="1" step="0.01" value="0"
+              orient="vertical" disabled>
+          </div>
+          <div class="osGaugeUnit" id="osThrottleLabel">Engine Off</div>
+          <div class="osEngineFuelRow">
+            <span class="osGaugeLabel">⛽ Fuel</span>
+            <div class="osGaugeCircle osGaugeCircleSmall">
+              <svg viewBox="0 0 36 36" class="osGaugeRing">
+                <path class="osGaugeRingBg" d="M18 2 a16 16 0 1 1 0 32 a16 16 0 1 1 0 -32" />
+                <path class="osGaugeRingFill" id="osGaugeRing_fuel" d="M18 2 a16 16 0 1 1 0 32 a16 16 0 1 1 0 -32" />
+              </svg>
+              <div class="osGaugeValue osGaugeValueSmall" id="osGaugeVal_fuel">—</div>
+            </div>
+          </div>
         `;
       case "boom":
         return `
@@ -209,7 +253,8 @@
       gaugeLayout[gaugeId] = {
         left: parseFloat(gauge.style.left),
         top: parseFloat(gauge.style.top),
-        size: parseFloat(gauge.style.width)
+        size: parseFloat(gauge.style.width),
+        sizeH: parseFloat(gauge.style.height)
       };
       saveLayout();
       window.removeEventListener("mousemove", onMove);
@@ -309,8 +354,9 @@
   }
 
   function initInstrumentPanel(attempts) {
-    const panel = document.getElementById(PANEL_ID);
-    if (panel) {
+    const helm = document.getElementById(PANEL_ID);
+    const nav = document.getElementById(NAV_PANEL_ID);
+    if (helm || nav) {
       buildPanel();
       return;
     }

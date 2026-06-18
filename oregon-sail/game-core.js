@@ -26,39 +26,37 @@ OS.getDeviceId = function () {
    --------------------------------------------------------------- */
 OS.boat = null; /* current boat row, kept in memory */
 
-OS.loadOrCreateBoat = async function () {
+/* Load an existing boat for this device — returns null if none exists yet.
+   Does NOT auto-create; that happens explicitly via OS.createBoat() after
+   the player completes the main menu setup. */
+OS.loadBoatOnly = async function () {
   const deviceId = OS.getDeviceId();
-
-  const { data: existing, error: fetchErr } = await sbClient
+  const { data, error } = await sbClient
     .from("boats")
     .select("*")
     .eq("device_id", deviceId)
     .maybeSingle();
+  if (error) { console.error("Oregon Sail: failed to fetch boat", error); return null; }
+  if (data) OS.boat = data;
+  return data || null;
+};
 
-  if (fetchErr) {
-    console.error("Oregon Sail: failed to fetch boat", fetchErr);
-    return null;
-  }
+/* Legacy alias — kept so any remaining call sites don't break */
+OS.loadOrCreateBoat = OS.loadBoatOnly;
 
-  if (existing) {
-    OS.boat = existing;
-    return existing;
-  }
-
-  /* First time on this device — create a new boat at the starting port */
-  const { data: created, error: insertErr } = await sbClient
+/* Create a brand-new boat row in Supabase with captain name, vessel name,
+   and the stats from the chosen boat preset (hull speed, sail area, etc).
+   Called once from the main menu when the player clicks Begin Voyage. */
+OS.createBoat = async function (fields) {
+  const deviceId = OS.getDeviceId();
+  const { data, error } = await sbClient
     .from("boats")
-    .insert({ device_id: deviceId })
+    .insert({ device_id: deviceId, ...fields })
     .select()
     .single();
-
-  if (insertErr) {
-    console.error("Oregon Sail: failed to create boat", insertErr);
-    return null;
-  }
-
-  OS.boat = created;
-  return created;
+  if (error) { console.error("Oregon Sail: failed to create boat", error); return null; }
+  OS.boat = data;
+  return data;
 };
 
 OS.refreshBoat = async function () {

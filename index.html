@@ -313,6 +313,46 @@
             <div class="widgetHandle"></div>
             <div class="gameWidgetBox" id="gameWidgetBox">
 
+              <!-- ═══ MAIN MENU OVERLAY ═══
+                   Shown on first launch or when no boat exists.
+                   Dismissed once the player completes setup. -->
+              <div class="osMainMenu" id="osMainMenu" style="display:none;">
+                <div class="osMainMenuInner">
+                  <div class="osMainMenuLogo">⛵</div>
+                  <div class="osMainMenuTitle">Oregon Sail</div>
+                  <div class="osMainMenuSub">Maine → Oregon · An offshore passage game</div>
+
+                  <!-- Boat selection (one boat for now, more later) -->
+                  <div class="osBoatCards" id="osBoatCards">
+                    <div class="osBoatCard selected" data-boat-type="cruiser">
+                      <div class="osBoatCardIcon">🛥</div>
+                      <div class="osBoatCardName">Island Packet 380</div>
+                      <div class="osBoatCardStats">
+                        <span>Hull speed 7.2 kt</span>
+                        <span>Rated wind 15 mph</span>
+                        <span>2 reef points</span>
+                      </div>
+                      <div class="osBoatCardDesc">A blue-water cruiser built for offshore passages. Stiff, seaworthy, forgiving in heavy weather.</div>
+                    </div>
+                  </div>
+
+                  <!-- Captain setup -->
+                  <div class="osMenuFields">
+                    <div class="osMenuField">
+                      <label class="osMenuLabel">Captain's Name</label>
+                      <input type="text" id="osCaptainName" class="osMenuInput" placeholder="e.g. Sarah Morgan" maxlength="30">
+                    </div>
+                    <div class="osMenuField">
+                      <label class="osMenuLabel">Vessel Name</label>
+                      <input type="text" id="osVesselName" class="osMenuInput" placeholder="e.g. Sea Breeze" maxlength="30">
+                    </div>
+                  </div>
+
+                  <button class="osBeginBtn" id="osBeginBtn">Begin Voyage ⛵</button>
+                  <div class="osMenuError" id="osMenuError"></div>
+                </div>
+              </div>
+
               <!-- Status line -->
               <div class="osStatusLine" id="osStatusLine">Loading your vessel…</div>
 
@@ -350,12 +390,17 @@
                 </div>
               </div>
 
-              <!-- NAV STATION — course plotting, weather, DC panel -->
+              <!-- NAV STATION — supply gauges + future nav features -->
               <div class="osTabPanel" id="osTabPanel-nav">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">🗺</div>
-                  <div class="osTabPlaceholderTitle">Nav Station</div>
-                  <div class="osTabPlaceholderText">Course plotting, weather radar, and DC power panel coming soon.</div>
+                <div class="osNavStationLayout">
+                  <div class="osNavGauges" id="osNavGauges">
+                    <!-- Water, Food, Hull gauges injected by instruments.js -->
+                  </div>
+                  <div class="osTabPlaceholder osTabPlaceholderSmall">
+                    <div class="osTabPlaceholderIcon">🗺</div>
+                    <div class="osTabPlaceholderTitle">Nav Station</div>
+                    <div class="osTabPlaceholderText">Course plotting, weather radar, and DC power panel coming soon.</div>
+                  </div>
                 </div>
               </div>
 

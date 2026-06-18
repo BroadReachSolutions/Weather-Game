@@ -76,19 +76,105 @@
   }
 
   /* ---------------------------------------------------------------
+     MAIN MENU
+     Shown when no boat exists yet (first launch or fresh account).
+     Player names their captain and vessel, picks a boat type, then
+     we create the boat in Supabase and dismiss into normal gameplay.
+     --------------------------------------------------------------- */
+
+  /* Boat type presets — one for now, easily extended later.
+     Stats here feed directly into the Supabase boat row on creation. */
+  const BOAT_PRESETS = {
+    cruiser: {
+      hull_speed_kt: 7.2,
+      rated_wind_mph: 15,
+      reef_wind_limits_mph: [25, 30, 35],
+      reef_speed_penalty: [1.0, 0.85, 0.65],
+      boat_weight_class: "medium",
+      sail_area_sqft: 610
+    }
+  };
+
+  function showMainMenu() {
+    const menu = document.getElementById("osMainMenu");
+    if (menu) menu.style.display = "flex";
+  }
+
+  function hideMainMenu() {
+    const menu = document.getElementById("osMainMenu");
+    if (menu) menu.style.display = "none";
+  }
+
+  function wireMainMenu() {
+    const beginBtn = document.getElementById("osBeginBtn");
+    const errorEl = document.getElementById("osMenuError");
+    if (!beginBtn) return;
+
+    /* Boat card selection */
+    document.querySelectorAll(".osBoatCard").forEach(card => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".osBoatCard").forEach(c => c.classList.remove("selected"));
+        card.classList.add("selected");
+      });
+    });
+
+    beginBtn.addEventListener("click", async () => {
+      const captainName = document.getElementById("osCaptainName").value.trim();
+      const vesselName = document.getElementById("osVesselName").value.trim();
+      const selectedCard = document.querySelector(".osBoatCard.selected");
+      const boatType = selectedCard ? selectedCard.dataset.boatType : "cruiser";
+
+      if (!captainName) { errorEl.textContent = "Please enter your captain's name."; return; }
+      if (!vesselName)  { errorEl.textContent = "Please name your vessel."; return; }
+
+      errorEl.textContent = "";
+      beginBtn.textContent = "Setting sail…";
+      beginBtn.disabled = true;
+
+      const preset = BOAT_PRESETS[boatType] || BOAT_PRESETS.cruiser;
+      const boat = await OS.createBoat({
+        captain_name: captainName,
+        vessel_name: vesselName,
+        ...preset
+      });
+
+      if (!boat) {
+        errorEl.textContent = "Couldn't connect to the server — check your connection.";
+        beginBtn.textContent = "Begin Voyage ⛵";
+        beginBtn.disabled = false;
+        return;
+      }
+
+      hideMainMenu();
+      await initGameplay(boat);
+    });
+  }
+
+  /* ---------------------------------------------------------------
      INIT
      --------------------------------------------------------------- */
   async function initOregonSail() {
+    wireMainMenu();
+
     const statusLine = document.getElementById("osStatusLine");
     statusLine.textContent = "Loading your vessel…";
 
-    const boat = await OS.loadOrCreateBoat();
+    /* Try to load an existing boat for this device */
+    const boat = await OS.loadBoatOnly();
+
     if (!boat) {
-      statusLine.textContent = "Couldn't connect — check your connection and reload.";
+      /* No boat yet — show the main menu so the player can set up */
+      statusLine.textContent = "Welcome to Oregon Sail";
+      showMainMenu();
       return;
     }
 
-    await syncLocationToBoat(boat, true); /* force initial sync regardless of distance */
+    hideMainMenu();
+    await initGameplay(boat);
+  }
+
+  async function initGameplay(boat) {
+    await syncLocationToBoat(boat, true);
 
     initMap(boat);
     initDivider();
@@ -98,17 +184,12 @@
     updateSpeedAndWindex();
     if (typeof updateRadarCenterBtnVisibility === "function") updateRadarCenterBtnVisibility();
 
-    /* Smoothly re-render position + status every few seconds using
-       client-side interpolation between server ticks */
     liveUpdateInterval = setInterval(() => {
       if (!OS.boat) return;
       updateBoatMarkerPosition(OS.boat);
       updateSpeedAndWindex();
     }, 4000);
 
-    /* Pull the true server state periodically in case another
-       device/tab or the backend tick changed it, and keep the
-       dashboard's weather/tide/station data following the boat */
     setInterval(async () => {
       await OS.refreshBoat();
       renderResourceBar(OS.boat);

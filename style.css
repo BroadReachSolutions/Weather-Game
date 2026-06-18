@@ -1637,6 +1637,147 @@ body.layout-edit .widgetResize {
 }
 
 /* ═══ GAME WIDGET — Oregon Sail ═══ */
+
+/* ─── Main Menu Overlay ───────────────────────────────────────── */
+.osMainMenu {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: linear-gradient(170deg, #07131c 0%, #0d2035 60%, #091828 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  overflow-y: auto;
+}
+
+.osMainMenuInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 20px;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+}
+
+.osMainMenuLogo { font-size: 48px; line-height: 1; }
+
+.osMainMenuTitle {
+  font-size: 26px;
+  font-weight: 800;
+  color: #eef7ff;
+  letter-spacing: 0.5px;
+}
+
+.osMainMenuSub {
+  font-size: 12px;
+  color: rgba(159,194,217,0.7);
+  letter-spacing: 0.5px;
+}
+
+/* Boat cards */
+.osBoatCards {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.osBoatCard {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(125,186,220,0.25);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.osBoatCard.selected {
+  background: rgba(79,195,247,0.12);
+  border-color: rgba(79,195,247,0.6);
+}
+
+.osBoatCardIcon { font-size: 22px; margin-bottom: 4px; }
+
+.osBoatCardName {
+  font-size: 14px;
+  font-weight: 700;
+  color: #d0ecff;
+  margin-bottom: 4px;
+}
+
+.osBoatCardStats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: rgba(159,194,217,0.7);
+  margin-bottom: 6px;
+}
+
+.osBoatCardDesc {
+  font-size: 11px;
+  color: rgba(159,194,217,0.6);
+  line-height: 1.5;
+}
+
+/* Captain fields */
+.osMenuFields { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+
+.osMenuField { text-align: left; }
+
+.osMenuLabel {
+  display: block;
+  font-size: 11px;
+  color: #7db8d8;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.osMenuInput {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(125,186,220,0.35);
+  background: rgba(255,255,255,0.07);
+  color: #eef7ff;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.osMenuInput:focus {
+  outline: none;
+  border-color: rgba(79,195,247,0.7);
+  background: rgba(255,255,255,0.1);
+}
+
+.osBeginBtn {
+  width: 100%;
+  padding: 14px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, #1976d2, #1565c0);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+}
+
+.osBeginBtn:disabled { opacity: 0.6; cursor: wait; }
+.osBeginBtn:active { opacity: 0.85; }
+
+.osMenuError {
+  font-size: 12px;
+  color: #ff8a80;
+  min-height: 16px;
+  text-align: center;
+}
+
 .gameWidgetBox {
   width: 100%;
   height: 100%;
@@ -1809,6 +1950,12 @@ body.layout-edit .osGauge {
   cursor: move;
 }
 
+/* Engine gauge is taller (1×2) — needs to stretch its throttle area */
+.osGauge-engine {
+  justify-content: flex-start;
+  gap: 5px;
+}
+
 .osGaugeLabel {
   font-size: 10px;
   color: #9fc2d9;
@@ -1912,9 +2059,50 @@ body.layout-edit .osGauge {
 }
 
 /* Engine gauge */
+/* Nav Station gauge panel */
+.osNavStationLayout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.osNavGauges {
+  position: relative;
+  height: 220px;
+  flex-shrink: 0;
+  overflow: auto;
+}
+
+.osTabPlaceholderSmall {
+  flex: 1;
+  padding: 16px;
+  opacity: 0.5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.osTabPlaceholderSmall .osTabPlaceholderIcon { font-size: 22px; }
+
+.osTabPlaceholderSmall .osTabPlaceholderTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #d0ecff;
+}
+
+.osTabPlaceholderSmall .osTabPlaceholderText {
+  font-size: 11px;
+  color: #9fc2d9;
+  max-width: 220px;
+  line-height: 1.4;
+}
+
 .osEngineToggle {
   width: 100%;
-  padding: 6px 4px;
+  padding: 5px 4px;
   border-radius: 6px;
   border: 1px solid rgba(125,186,220,0.35);
   background: rgba(255,255,255,0.06);
@@ -1922,6 +2110,7 @@ body.layout-edit .osGauge {
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .osEngineToggle.running {
@@ -1948,29 +2137,61 @@ body.layout-edit .osGauge {
   color: #d0f0ff;
 }
 
+/* Vertical throttle — forward at top, neutral in middle, reverse at bottom */
+.osThrottleWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  position: relative;
+}
+
+.osThrottleTrack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 9px;
+  color: rgba(159,194,217,0.5);
+  gap: 4px;
+  pointer-events: none;
+}
+
+.osThrottleZone { letter-spacing: 0.5px; }
+.osThrottleFwd { color: rgba(105,240,174,0.7); }
+.osThrottleRev { color: rgba(255,140,80,0.7); }
+
 .osThrottleSlider {
-  width: 100%;
-  height: 18px;
-  -webkit-appearance: none;
-  appearance: none;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  -webkit-appearance: slider-vertical;
+  appearance: auto;
+  width: 28px;
+  height: 100%;
+  min-height: 60px;
   background: transparent;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .osThrottleSlider::-webkit-slider-runnable-track {
-  height: 5px;
+  width: 5px;
   border-radius: 3px;
-  background: linear-gradient(90deg, rgba(255,140,80,0.3), rgba(255,255,255,0.1), rgba(100,220,150,0.3));
+  background: linear-gradient(to bottom,
+    rgba(105,240,174,0.35) 0%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,140,80,0.35) 100%);
 }
 
 .osThrottleSlider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #4fc3f7;
   border: 2px solid #0a1924;
-  margin-top: -6px;
+  margin-left: -8px;
   cursor: pointer;
 }
 
@@ -1979,19 +2200,51 @@ body.layout-edit .osGauge {
 }
 
 .osThrottleSlider::-moz-range-track {
-  height: 5px;
+  width: 5px;
   border-radius: 3px;
-  background: linear-gradient(90deg, rgba(255,140,80,0.3), rgba(255,255,255,0.1), rgba(100,220,150,0.3));
+  background: linear-gradient(to bottom,
+    rgba(105,240,174,0.35) 0%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,140,80,0.35) 100%);
 }
 
 .osThrottleSlider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #4fc3f7;
   border: 2px solid #0a1924;
   cursor: pointer;
 }
+
+/* Fuel ring inside engine gauge */
+.osEngineFuelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.osGaugeCircleSmall {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.osGaugeValueSmall {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #eef7ff;
+}
+
 
 /* Boom trim gauge (small version inside the instrument panel) */
 .osBoomSliderSmall {
