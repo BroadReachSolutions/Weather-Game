@@ -102,35 +102,49 @@
      --------------------------------------------------------------- */
   /* ---------------------------------------------------------------
      BOAT ICON SVG
-     A top-down hull silhouette with a mast/boom (rotatable for trim)
-     and a small wind-direction arrow. All rotations are in degrees,
-     0° = pointing up (north) within the icon's own local space —
-     Leaflet's divIcon doesn't rotate with the map, so we rotate the
-     hull to match heading, and rotate the boom/arrow independently.
+     A top-down hull silhouette with a mast/boom/sail (rotatable for
+     trim) and a small wind-direction arrow. All rotations are in
+     degrees, 0° = pointing up (north) within the icon's own local
+     space — Leaflet's divIcon doesn't rotate with the map, so we
+     rotate the hull to match heading, and rotate the boom/arrow
+     independently.
      --------------------------------------------------------------- */
-  const BOAT_ICON_SIZE = 46;
+  const BOAT_ICON_SIZE = 64;
 
   function buildBoatIconHtml(headingDeg, boomAngleDeg, windArrowDeg, windArrowOffset) {
     const s = BOAT_ICON_SIZE;
     const c = s / 2;
     const offset = windArrowOffset || { x: 0, y: -s * 0.85 };
 
+    /* Sail is drawn as a thin triangle from the mast out to the boom
+       tip, billowing to whichever side the boom is trimmed toward.
+       Positive boomAngleDeg = boom swung to starboard (right). */
+    const mastX = c, mastTopY = c - 13, mastBotY = c + 12;
+    const boomLen = 21;
+    const boomRad = (boomAngleDeg * Math.PI) / 180;
+    const boomTipX = mastX + Math.sin(boomRad) * boomLen;
+    const boomTipY = (c - 11) - Math.cos(boomRad) * boomLen;
+    /* Sail belly bulges away from the wind, perpendicular-ish to the boom */
+    const bellyX = mastX + Math.sin(boomRad) * (boomLen * 0.45) + Math.cos(boomRad) * (boomAngleDeg >= 0 ? 4 : -4);
+    const bellyY = (c - 11) - Math.cos(boomRad) * (boomLen * 0.45);
+
     return `
       <svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" style="overflow:visible;">
         <g transform="rotate(${headingDeg} ${c} ${c})">
-          <path d="M ${c} ${c - 16}
-                   L ${c + 7} ${c - 4}
-                   L ${c + 6} ${c + 13}
-                   Q ${c} ${c + 17} ${c - 6} ${c + 13}
-                   L ${c - 7} ${c - 4}
+          <path d="M ${c} ${c - 20}
+                   L ${c + 9} ${c - 5}
+                   L ${c + 8} ${c + 17}
+                   Q ${c} ${c + 22} ${c - 8} ${c + 17}
+                   L ${c - 9} ${c - 5}
                    Z"
                 fill="#e8e4da" stroke="#1a2a35" stroke-width="1.4"/>
-          <line x1="${c}" y1="${c - 13}" x2="${c}" y2="${c + 12}"
-                stroke="#5a4632" stroke-width="1.6"/>
-          <g transform="rotate(${boomAngleDeg} ${c} ${c - 11})">
-            <line x1="${c}" y1="${c - 11}" x2="${c}" y2="${c + 9}"
-                  stroke="#cfd8df" stroke-width="2.4" stroke-linecap="round"/>
-          </g>
+          <path d="M ${mastX} ${c - 11} Q ${bellyX} ${bellyY} ${boomTipX} ${boomTipY} Z"
+                fill="#dfeaf2" stroke="#9fb8c8" stroke-width="0.8" opacity="0.92"/>
+          <line x1="${mastX}" y1="${mastTopY}" x2="${mastX}" y2="${mastBotY}"
+                stroke="#5a4632" stroke-width="1.8"/>
+          <line x1="${mastX}" y1="${c - 11}" x2="${boomTipX}" y2="${boomTipY}"
+                stroke="#cfd8df" stroke-width="2.6" stroke-linecap="round"
+                class="osBoomLine" style="cursor:grab;"/>
         </g>
         <g class="osWindArrowGroup" data-base-x="${offset.x}" data-base-y="${offset.y}"
            transform="translate(${c + offset.x} ${c + offset.y}) rotate(${windArrowDeg})">
@@ -151,8 +165,66 @@
     localStorage.setItem("osWindArrowOffset", JSON.stringify(offset));
   }
 
-  let currentBoomAngle = 0; /* relative to boat centerline, degrees, set by trim slider */
+  function loadBoomAngle() {
+    const raw = localStorage.getItem("osBoomAngle");
+    const val = raw != null ? parseFloat(raw) : 25;
+    return isNaN(val) ? 25 : val;
+  }
+
+  function saveBoomAngle(angle) {
+    localStorage.setItem("osBoomAngle", String(angle));
+  }
+
+  let currentBoomAngle = loadBoomAngle(); /* relative to boat centerline, -90..90 degrees */
   let currentWindArrowOffset = loadWindArrowOffset();
+
+  /* ---------------------------------------------------------------
+     POINT OF SAIL
+     Calculates the angle between the boat's heading and the true
+     wind, classifies it into a named point of sail, and judges how
+     well the current boom trim matches the ideal trim for that
+     point of sail. windAngle is 0-180, where 0 = wind dead ahead
+     (head to wind) and 180 = wind dead behind (dead run).
+     --------------------------------------------------------------- */
+  const POINTS_OF_SAIL = [
+    { max: 45,  name: "No-Go Zone",   idealBoom: null, color: "#ff6b6b" },
+    { max: 60,  name: "Close-Hauled", idealBoom: 15,   color: "#69f0ae" },
+    { max: 80,  name: "Close Reach",  idealBoom: 28,   color: "#69f0ae" },
+    { max: 120, name: "Beam Reach",   idealBoom: 45,   color: "#69f0ae" },
+    { max: 150, name: "Broad Reach",  idealBoom: 65,   color: "#69f0ae" },
+    { max: 181, name: "Running",      idealBoom: 85,   color: "#69f0ae" }
+  ];
+
+  function angleDiff180(a, b) {
+    let d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  }
+
+  function calculatePointOfSail(headingDeg, windFromDeg) {
+    /* windFromDeg is the compass direction the wind is COMING FROM.
+       The angle relevant to point-of-sail is how far that is from
+       directly behind the boat's heading. */
+    const windAngle = angleDiff180(headingDeg, windFromDeg);
+    const pos = POINTS_OF_SAIL.find(p => windAngle <= p.max) || POINTS_OF_SAIL[POINTS_OF_SAIL.length - 1];
+
+    /* Which side is the wind coming over? Determines which way the
+       boom should be let out (boom swings away from the wind). */
+    let relative = ((windFromDeg - headingDeg) + 360) % 360; /* 0-360, 0=ahead, 180=behind */
+    const windOnPort = relative > 180; /* wind from the left = boom goes right (starboard) */
+    const idealBoomSigned = pos.idealBoom == null ? 0 : (windOnPort ? pos.idealBoom : -pos.idealBoom);
+
+    return { windAngle, ...pos, idealBoomSigned, windOnPort };
+  }
+
+  function trimQuality(actualBoomAngle, idealBoomSigned, isNoGoZone) {
+    if (isNoGoZone) return { label: "Can't sail this close to the wind", pct: 0 };
+    const diff = Math.abs(actualBoomAngle - idealBoomSigned);
+    if (diff <= 6)  return { label: "Perfectly trimmed",  pct: 100 };
+    if (diff <= 14) return { label: "Well trimmed",       pct: 80 };
+    if (diff <= 25) return { label: "Loosely trimmed",    pct: 55 };
+    if (diff <= 40) return { label: "Poorly trimmed",     pct: 30 };
+    return { label: "Stalled / luffing", pct: 10 };
+  }
 
   function refreshBoatIcon() {
     if (!boatMarker) return;
@@ -171,6 +243,28 @@
       iconAnchor: [BOAT_ICON_SIZE / 2, BOAT_ICON_SIZE / 2]
     });
     boatMarker.setIcon(icon);
+    renderSailingInfo(heading, windDeg);
+  }
+
+  function renderSailingInfo(heading, windDeg) {
+    const pos = calculatePointOfSail(heading, windDeg);
+    const trim = trimQuality(currentBoomAngle, pos.idealBoomSigned, pos.name === "No-Go Zone");
+
+    const posLabel = document.getElementById("osPointOfSail");
+    const trimLabel = document.getElementById("osTrimQuality");
+    const trimBar = document.getElementById("osTrimQualityFill");
+
+    if (posLabel) {
+      posLabel.textContent = pos.name;
+      posLabel.style.color = pos.name === "No-Go Zone" ? "#ff6b6b" : "#9fc2d9";
+    }
+    if (trimLabel) trimLabel.textContent = trim.label;
+    if (trimBar) {
+      trimBar.style.width = trim.pct + "%";
+      trimBar.style.background = trim.pct >= 80 ? "linear-gradient(90deg,#4fc3f7,#69f0ae)" :
+                                  trim.pct >= 50 ? "linear-gradient(90deg,#ffca4f,#ffb84f)" :
+                                  "linear-gradient(90deg,#ff6b6b,#ff8a80)";
+    }
   }
 
   function initMap(boat) {
@@ -320,6 +414,9 @@
     const controls = document.getElementById("osCourseControls");
     controls.style.display = (boat.course_mode === "idle") ? "none" : "flex";
 
+    const trimPanel = document.getElementById("osSailTrimPanel");
+    if (trimPanel) trimPanel.style.display = (boat.course_mode === "sailing") ? "block" : "none";
+
     document.querySelectorAll(".osModeBtn[data-mode]").forEach(btn => {
       btn.classList.toggle("active", btn.dataset.mode === boat.course_mode);
     });
@@ -365,6 +462,18 @@
       const estimated = OS.estimateLiveLatLon(OS.boat, 4.5);
       map.setView([estimated.lat, estimated.lon], map.getZoom(), { animate: true });
     });
+
+    const boomSlider = document.getElementById("osBoomSlider");
+    if (boomSlider) {
+      boomSlider.value = currentBoomAngle;
+      boomSlider.addEventListener("input", () => {
+        currentBoomAngle = parseInt(boomSlider.value, 10);
+        refreshBoatIcon(); /* live preview while dragging */
+      });
+      boomSlider.addEventListener("change", () => {
+        saveBoomAngle(currentBoomAngle);
+      });
+    }
   }
 
   async function switchMode(mode) {
