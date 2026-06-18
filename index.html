@@ -313,31 +313,10 @@
             <div class="widgetHandle"></div>
             <div class="gameWidgetBox" id="gameWidgetBox">
 
-              <!-- Resource bar -->
-              <div class="osResourceBar" id="osResourceBar">
-                <div class="osResource" data-resource="food">
-                  <span class="osResourceIcon">🍞</span>
-                  <div class="osResourceTrack"><div class="osResourceFill" id="osFoodFill"></div></div>
-                </div>
-                <div class="osResource" data-resource="water">
-                  <span class="osResourceIcon">💧</span>
-                  <div class="osResourceTrack"><div class="osResourceFill" id="osWaterFill"></div></div>
-                </div>
-                <div class="osResource" data-resource="fuel">
-                  <span class="osResourceIcon">⛽</span>
-                  <div class="osResourceTrack"><div class="osResourceFill" id="osFuelFill"></div></div>
-                </div>
-                <div class="osResource" data-resource="hull">
-                  <span class="osResourceIcon">🛟</span>
-                  <div class="osResourceTrack"><div class="osResourceFill" id="osHullFill"></div></div>
-                </div>
-                <div class="osMoney" id="osMoney">$200</div>
-              </div>
-
               <!-- Status line -->
               <div class="osStatusLine" id="osStatusLine">Loading your vessel…</div>
 
-              <!-- Map for course setting -->
+              <!-- Map for course setting (top half) -->
               <div class="osMapWrap">
                 <div id="osMap"></div>
                 <button class="osCenterBtn" id="osCenterBtn" title="Center on my vessel">⛵</button>
@@ -345,32 +324,9 @@
                 <button class="osMapBtn osMapBtnSecondary" id="osCancelCourseBtn" style="display:none;">Cancel</button>
               </div>
 
-              <!-- Course mode controls -->
-              <div class="osCourseControls" id="osCourseControls" style="display:none;">
-                <button class="osModeBtn active" id="osModeSail" data-mode="sailing">⛵ Sail</button>
-                <button class="osModeBtn" id="osModeMotor" data-mode="motoring">🛥 Motor</button>
-                <button class="osModeBtn osAnchorBtn" id="osModeAnchor">⚓ Anchor</button>
-              </div>
-
-              <!-- Point of sail + boom trim -->
-              <div class="osSailTrimPanel" id="osSailTrimPanel">
-                <div class="osSailTrimRow">
-                  <span class="osSailTrimLabel">Point of Sail</span>
-                  <span class="osSailTrimValue" id="osPointOfSail">—</span>
-                </div>
-                <div class="osSailTrimRow">
-                  <span class="osSailTrimLabel">Trim</span>
-                  <span class="osSailTrimValue" id="osTrimQuality">—</span>
-                </div>
-                <div class="osTrimQualityTrack">
-                  <div class="osTrimQualityFill" id="osTrimQualityFill"></div>
-                </div>
-                <input type="range" id="osBoomSlider" class="osBoomSlider" min="-90" max="90" value="25" step="1">
-                <div class="osBoomSliderLabels">
-                  <span>⟲ Port</span>
-                  <span>Boom Trim</span>
-                  <span>Starboard ⟳</span>
-                </div>
+              <!-- Instrument panel (bottom half) — free-form draggable gauges -->
+              <div class="osInstrumentPanel" id="osInstrumentPanel">
+                <!-- Gauges are injected here by JS so positions can be saved/restored -->
               </div>
 
             </div>
@@ -401,6 +357,7 @@
   <script src="oregon-sail/supabase-config.js"></script>
   <script src="oregon-sail/game-core.js"></script>
   <script src="oregon-sail/game-ui.js"></script>
+  <script src="oregon-sail/instruments.js"></script>
   <script src="oregon-sail/draggable-buttons.js"></script>
 
   <script>

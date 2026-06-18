@@ -133,6 +133,53 @@ OS.dropAnchor = async function () {
 };
 
 /* ---------------------------------------------------------------
+   ENGINE CONTROL — independent of sailing. Throttle is 800 (idle)
+   to 3200 (max) RPM, set as a -1..1 slider value mapped by the UI.
+   --------------------------------------------------------------- */
+OS.setEngine = async function (engineOn, throttleRpm, gear) {
+  if (!OS.boat) return;
+  const update = { engine_on: engineOn, updated_at: new Date().toISOString() };
+  if (throttleRpm != null) update.throttle_rpm = throttleRpm;
+  if (gear != null) update.engine_gear = gear;
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update(update)
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (!error && data) OS.boat = data;
+  return { data, error };
+};
+
+/* ---------------------------------------------------------------
+   SAILING STATE — boom trim + sails up/down, independent of engine.
+   --------------------------------------------------------------- */
+OS.setBoomAngle = async function (angle) {
+  if (!OS.boat) return;
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ boom_angle: angle, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (!error && data) OS.boat = data;
+  return { data, error };
+};
+
+OS.setSailingActive = async function (active) {
+  if (!OS.boat) return;
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ sailing_active: active, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (!error && data) OS.boat = data;
+  return { data, error };
+};
+
+/* ---------------------------------------------------------------
    LIVE POSITION INTERPOLATION
    The backend only moves the boat once per tick (every 10 min).
    To make the app feel alive while open, we estimate the boat's

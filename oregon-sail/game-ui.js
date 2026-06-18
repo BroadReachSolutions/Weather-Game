@@ -58,6 +58,24 @@
   }
 
   /* ---------------------------------------------------------------
+     SPEED + WINDEX
+     Speed over ground currently comes from the boat's last recorded
+     speed_over_ground_kt (written by the backend tick). The windex
+     needs that same speed plus heading and true wind to compute
+     apparent wind via vector math (see instruments.js).
+     --------------------------------------------------------------- */
+  function updateSpeedAndWindex() {
+    if (!OS.boat || typeof window.OSInstruments === "undefined") return;
+    const sog = OS.boat.speed_over_ground_kt || 0;
+    window.OSInstruments.setSpeedGauge(sog);
+
+    const heading = OS.boat.course_bearing != null ? OS.boat.course_bearing : 0;
+    const trueWindDeg = typeof window.getLastWindDeg === "function" ? window.getLastWindDeg() : 0;
+    const trueWindKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
+    window.OSInstruments.setWindexGauge(heading, sog, trueWindDeg, trueWindKt);
+  }
+
+  /* ---------------------------------------------------------------
      INIT
      --------------------------------------------------------------- */
   async function initOregonSail() {
@@ -76,6 +94,7 @@
     renderResourceBar(boat);
     renderStatusLine(boat);
     wireControls();
+    updateSpeedAndWindex();
     if (typeof updateRadarCenterBtnVisibility === "function") updateRadarCenterBtnVisibility();
 
     /* Smoothly re-render position + status every few seconds using
@@ -83,6 +102,7 @@
     liveUpdateInterval = setInterval(() => {
       if (!OS.boat) return;
       updateBoatMarkerPosition(OS.boat);
+      updateSpeedAndWindex();
     }, 4000);
 
     /* Pull the true server state periodically in case another
@@ -93,6 +113,7 @@
       renderResourceBar(OS.boat);
       renderStatusLine(OS.boat);
       updateBoatMarkerPosition(OS.boat);
+      updateSpeedAndWindex();
       await syncLocationToBoat(OS.boat, false);
     }, 30000);
   }
@@ -486,23 +507,15 @@
   }
 
   /* ---------------------------------------------------------------
-     RESOURCE BAR
+     RESOURCE GAUGES (water/fuel/food/hull) — feeds the instrument
+     panel's percent-ring gauges instead of the old fill bars.
      --------------------------------------------------------------- */
   function renderResourceBar(boat) {
-    if (!boat) return;
-    setFill("osFoodFill", boat.food);
-    setFill("osWaterFill", boat.water);
-    setFill("osFuelFill", boat.fuel);
-    setFill("osHullFill", boat.hull_health);
-    document.getElementById("osMoney").textContent = "$" + Math.round(boat.money);
-  }
-
-  function setFill(id, pct) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const clamped = Math.max(0, Math.min(100, pct));
-    el.style.width = clamped + "%";
-    el.classList.toggle("osLow", clamped <= 20);
+    if (!boat || typeof window.OSInstruments === "undefined") return;
+    window.OSInstruments.setPercentGauge("food", boat.food);
+    window.OSInstruments.setPercentGauge("water", boat.water);
+    window.OSInstruments.setPercentGauge("fuel", boat.fuel);
+    window.OSInstruments.setPercentGauge("hull", boat.hull_health);
   }
 
   /* ---------------------------------------------------------------
@@ -512,24 +525,17 @@
     const el = document.getElementById("osStatusLine");
     if (!boat) return;
 
-    const modeLabels = {
-      idle: "Anchored at port — set a course to begin",
-      sailing: "⛵ Sailing toward destination",
-      motoring: "🛥 Motoring toward destination",
-      anchored: "⚓ Anchored"
-    };
+    const parts = [];
+    if (boat.sailing_active) parts.push("⛵ Sailing");
+    if (boat.engine_on) parts.push(`🛥 Engine ${Math.round(boat.throttle_rpm || 800)} RPM`);
+    if (!boat.sailing_active && !boat.engine_on) parts.push("⚓ Idle — set sails or start the engine");
 
-    el.textContent = modeLabels[boat.course_mode] || boat.course_mode;
+    if (boat.destination_lat != null) {
+      const dist = OS.haversineNm(boat.lat, boat.lon, boat.destination_lat, boat.destination_lon);
+      parts.push(`${dist.toFixed(1)} nm to destination`);
+    }
 
-    const controls = document.getElementById("osCourseControls");
-    controls.style.display = (boat.course_mode === "idle") ? "none" : "flex";
-
-    const trimPanel = document.getElementById("osSailTrimPanel");
-    if (trimPanel) trimPanel.style.display = (boat.course_mode === "sailing") ? "block" : "none";
-
-    document.querySelectorAll(".osModeBtn[data-mode]").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.mode === boat.course_mode);
-    });
+    el.textContent = parts.join(" · ");
   }
 
   /* ---------------------------------------------------------------
@@ -538,8 +544,7 @@
   function wireControls() {
     document.getElementById("osSetCourseBtn").addEventListener("click", async () => {
       if (!pendingDest) return;
-      const mode = document.querySelector(".osModeBtn[data-mode].active")?.dataset.mode || "sailing";
-      const { error } = await OS.setCourse(pendingDest.lat, pendingDest.lon, mode);
+      const { error } = await OS.setCourse(pendingDest.lat, pendingDest.lon, "sailing");
       if (!error) {
         showPendingPin(pendingDest.lat, pendingDest.lon, false);
         renderStatusLine(OS.boat);
@@ -558,19 +563,12 @@
       }
       clearCourseLine();
       /* Restore the existing confirmed course's pin/line, if any */
-      if (OS.boat && OS.boat.destination_lat != null && OS.boat.course_mode !== "idle") {
+      if (OS.boat && OS.boat.destination_lat != null) {
         showPendingPin(OS.boat.destination_lat, OS.boat.destination_lon, false);
         drawCourseLine(OS.boat.destination_lat, OS.boat.destination_lon);
       }
       document.getElementById("osSetCourseBtn").style.display = "none";
       document.getElementById("osCancelCourseBtn").style.display = "none";
-    });
-
-    document.getElementById("osModeSail").addEventListener("click", () => switchMode("sailing"));
-    document.getElementById("osModeMotor").addEventListener("click", () => switchMode("motoring"));
-    document.getElementById("osModeAnchor").addEventListener("click", async () => {
-      await OS.dropAnchor();
-      renderStatusLine(OS.boat);
     });
 
     document.getElementById("osCenterBtn").addEventListener("click", () => {
@@ -579,23 +577,73 @@
       map.setView([estimated.lat, estimated.lon], map.getZoom(), { animate: true });
     });
 
+    /* Boom trim slider lives inside the instrument gauge now, but
+       keeps the same element id so this wiring still works */
     const boomSlider = document.getElementById("osBoomSlider");
     if (boomSlider) {
       boomSlider.value = currentBoomAngle;
       boomSlider.addEventListener("input", () => {
         currentBoomAngle = parseInt(boomSlider.value, 10);
         refreshBoatIcon(); /* live preview while dragging */
+        if (window.OSInstruments) window.OSInstruments.setBoomLabel(currentBoomAngle);
       });
-      boomSlider.addEventListener("change", () => {
+      boomSlider.addEventListener("change", async () => {
         saveBoomAngle(currentBoomAngle);
+        await OS.setBoomAngle(currentBoomAngle);
       });
     }
+
+    wireEngineControls();
   }
 
-  async function switchMode(mode) {
-    if (!OS.boat || OS.boat.destination_lat == null) return;
-    await OS.setCourse(OS.boat.destination_lat, OS.boat.destination_lon, mode);
-    renderStatusLine(OS.boat);
+  /* ---------------------------------------------------------------
+     ENGINE CONTROLS
+     RPM range 800 (idle) – 3200 (max), independent of sailing.
+     Throttle slider is -1..1: negative = reverse, 0 = idle/neutral
+     forward boundary, positive = forward throttle up to max RPM.
+     --------------------------------------------------------------- */
+  function rpmFromThrottleValue(val) {
+    /* val 0..1 maps idle(800)..max(3200) for forward;
+       val -1..0 maps idle(800)..max(3200) for reverse (same RPM range,
+       direction comes from engine_gear, not RPM sign) */
+    const mag = Math.abs(val);
+    return 800 + mag * (3200 - 800);
+  }
+
+  function wireEngineControls() {
+    const toggle = document.getElementById("osEngineToggle");
+    const throttle = document.getElementById("osThrottleSlider");
+    if (!toggle || !throttle) return;
+
+    let engineOn = !!(OS.boat && OS.boat.engine_on);
+    if (window.OSInstruments) window.OSInstruments.setEngineState(engineOn, OS.boat?.throttle_rpm || 800);
+    throttle.disabled = !engineOn;
+
+    toggle.addEventListener("click", async () => {
+      engineOn = !engineOn;
+      const gear = engineOn ? "forward" : "neutral";
+      const rpm = engineOn ? 800 : 800;
+      await OS.setEngine(engineOn, rpm, gear);
+      throttle.value = 0;
+      throttle.disabled = !engineOn;
+      if (window.OSInstruments) window.OSInstruments.setEngineState(engineOn, rpm);
+      renderStatusLine(OS.boat);
+    });
+
+    throttle.addEventListener("input", () => {
+      if (!engineOn) return;
+      const val = parseFloat(throttle.value);
+      const rpm = rpmFromThrottleValue(val);
+      if (window.OSInstruments) window.OSInstruments.setEngineState(true, rpm);
+    });
+
+    throttle.addEventListener("change", async () => {
+      if (!engineOn) return;
+      const val = parseFloat(throttle.value);
+      const rpm = rpmFromThrottleValue(val);
+      const gear = val < -0.02 ? "reverse" : val > 0.02 ? "forward" : "neutral";
+      await OS.setEngine(true, rpm, gear);
+    });
   }
 
   /* ---------------------------------------------------------------

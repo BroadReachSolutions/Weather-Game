@@ -1649,56 +1649,6 @@ body.layout-edit .widgetResize {
   z-index: 1;
 }
 
-/* Resource bar */
-.osResourceBar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  flex-shrink: 0;
-}
-
-.osResource {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-.osResourceIcon {
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.osResourceTrack {
-  flex: 1;
-  height: 8px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 4px;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.osResourceFill {
-  height: 100%;
-  background: linear-gradient(90deg, #4fc3f7, #00e5ff);
-  border-radius: 4px;
-  transition: width 0.4s ease;
-  width: 100%;
-}
-
-.osResourceFill.osLow {
-  background: linear-gradient(90deg, #ff5252, #ff8a80);
-}
-
-.osMoney {
-  font-size: 13px;
-  font-weight: 700;
-  color: #69f0ae;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
 
 /* Status line */
 .osStatusLine {
@@ -1712,14 +1662,247 @@ body.layout-edit .widgetResize {
 /* Map */
 .osMapWrap {
   position: relative;
-  flex: 1;
-  min-height: 160px;
+  flex: 1 1 50%;
+  min-height: 140px;
 }
 
 #osMap {
   width: 100%;
   height: 100%;
   background: #0a1924;
+}
+
+/* ═══ INSTRUMENT PANEL ═══ */
+.osInstrumentPanel {
+  position: relative;
+  flex: 1 1 50%;
+  min-height: 180px;
+  background: rgba(4, 12, 18, 0.4);
+  border-top: 1px solid rgba(125,186,220,0.15);
+  overflow: auto;
+}
+
+.osGauge {
+  position: absolute;
+  background: rgba(15, 30, 42, 0.85);
+  border: 1px solid rgba(125,186,220,0.25);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  box-sizing: border-box;
+  touch-action: none;
+  user-select: none;
+}
+
+body.layout-edit .osGauge {
+  outline: 2px dashed rgba(140,200,230,0.5);
+  cursor: move;
+}
+
+.osGaugeLabel {
+  font-size: 10px;
+  color: #9fc2d9;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.osGaugeUnit {
+  font-size: 9px;
+  color: rgba(159,194,217,0.7);
+  white-space: nowrap;
+}
+
+/* Percent ring gauges (water/fuel/food/hull) */
+.osGaugeCircle {
+  position: relative;
+  width: 52px;
+  height: 52px;
+}
+
+.osGaugeRing {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.osGaugeRingBg {
+  fill: none;
+  stroke: rgba(255,255,255,0.1);
+  stroke-width: 3;
+}
+
+.osGaugeRingFill {
+  fill: none;
+  stroke: #4fc3f7;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s ease, stroke 0.4s ease;
+}
+
+.osGaugeRingFill.osLow {
+  stroke: #ff6b6b;
+}
+
+.osGaugeValue {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #eef7ff;
+}
+
+/* Speed gauge */
+.osGaugeBigValue {
+  font-size: 26px;
+  font-weight: 700;
+  color: #69f0ae;
+  line-height: 1;
+}
+
+/* Windex gauge */
+.osWindexFace {
+  width: 66px;
+  height: 66px;
+}
+
+.osWindexSvg {
+  width: 100%;
+  height: 100%;
+}
+
+.osWindexRing {
+  fill: rgba(255,255,255,0.04);
+  stroke: rgba(125,186,220,0.4);
+  stroke-width: 1;
+}
+
+.osWindexTick {
+  stroke: rgba(159,194,217,0.5);
+  stroke-width: 1;
+}
+
+.osWindexBoatShape {
+  fill: #e8e4da;
+  stroke: #1a2a35;
+  stroke-width: 0.8;
+}
+
+.osWindexArrowLine {
+  stroke: #4fc3f7;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.osWindexArrowHead {
+  fill: #4fc3f7;
+}
+
+/* Engine gauge */
+.osEngineToggle {
+  width: 100%;
+  padding: 6px 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(125,186,220,0.35);
+  background: rgba(255,255,255,0.06);
+  color: #d0ecff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.osEngineToggle.running {
+  background: rgba(105,240,174,0.25);
+  border-color: rgba(105,240,174,0.5);
+  color: #b8ffd0;
+}
+
+.osThrottleSlider {
+  width: 100%;
+  height: 18px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.osThrottleSlider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255,140,80,0.3), rgba(255,255,255,0.1), rgba(100,220,150,0.3));
+}
+
+.osThrottleSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  border: 2px solid #0a1924;
+  margin-top: -6px;
+  cursor: pointer;
+}
+
+.osThrottleSlider:disabled::-webkit-slider-thumb {
+  background: rgba(150,150,150,0.5);
+}
+
+.osThrottleSlider::-moz-range-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255,140,80,0.3), rgba(255,255,255,0.1), rgba(100,220,150,0.3));
+}
+
+.osThrottleSlider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  border: 2px solid #0a1924;
+  cursor: pointer;
+}
+
+/* Boom trim gauge (small version inside the instrument panel) */
+.osBoomSliderSmall {
+  width: 100%;
+  height: 18px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.osBoomSliderSmall::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(100,180,255,0.25), rgba(255,255,255,0.12), rgba(100,180,255,0.25));
+}
+
+.osBoomSliderSmall::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  border: 2px solid #0a1924;
+  margin-top: -6px;
+  cursor: pointer;
+}
+
+.osBoomSliderSmall::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4fc3f7;
+  border: 2px solid #0a1924;
+  cursor: pointer;
 }
 
 /* Leaflet overrides to match the app's dark theme */
@@ -1887,121 +2070,3 @@ body.layout-edit .osRadarCenterBtn {
   touch-action: none;
 }
 
-/* Course mode controls */
-.osCourseControls {
-  display: flex;
-  gap: 6px;
-  padding: 8px 10px;
-  flex-shrink: 0;
-}
-
-.osModeBtn {
-  flex: 1;
-  padding: 8px 6px;
-  border-radius: 8px;
-  border: 1px solid rgba(125,186,220,0.3);
-  background: rgba(255,255,255,0.06);
-  color: #d0ecff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.osModeBtn.active {
-  background: rgba(100,180,255,0.3);
-  border-color: rgba(100,180,255,0.6);
-  color: #fff;
-}
-
-.osModeBtn.osAnchorBtn.active {
-  background: rgba(255,200,80,0.25);
-  border-color: rgba(255,200,80,0.5);
-}
-
-/* Point of sail + boom trim panel */
-.osSailTrimPanel {
-  padding: 6px 10px 10px;
-  flex-shrink: 0;
-}
-
-.osSailTrimRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  padding: 2px 0;
-}
-
-.osSailTrimLabel {
-  color: #7db8d8;
-}
-
-.osSailTrimValue {
-  font-weight: 700;
-  color: #9fc2d9;
-}
-
-.osTrimQualityTrack {
-  height: 6px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 3px;
-  overflow: hidden;
-  margin: 6px 0 8px;
-}
-
-.osTrimQualityFill {
-  height: 100%;
-  width: 0%;
-  border-radius: 3px;
-  background: linear-gradient(90deg,#4fc3f7,#69f0ae);
-  transition: width 0.3s ease, background 0.3s ease;
-}
-
-.osBoomSlider {
-  width: 100%;
-  height: 22px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-.osBoomSlider::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, rgba(100,180,255,0.25), rgba(255,255,255,0.12), rgba(100,180,255,0.25));
-}
-
-.osBoomSlider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #4fc3f7;
-  border: 2px solid #0a1924;
-  margin-top: -7px;
-  cursor: pointer;
-}
-
-.osBoomSlider::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, rgba(100,180,255,0.25), rgba(255,255,255,0.12), rgba(100,180,255,0.25));
-}
-
-.osBoomSlider::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #4fc3f7;
-  border: 2px solid #0a1924;
-  cursor: pointer;
-}
-
-.osBoomSliderLabels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: rgba(159,194,217,0.7);
-  margin-top: 2px;
-}
