@@ -11,6 +11,48 @@
   let pendingDest = null; /* { lat, lon } picked but not yet confirmed */
   let liveUpdateInterval = null;
 
+  let lastSyncedLat = null;
+  let lastSyncedLon = null;
+  const MIN_SYNC_DISTANCE_NM = 1; /* only re-fetch weather/stations if boat moved at least this far */
+
+  /* ---------------------------------------------------------------
+     BOAT-DRIVEN LOCATION SYNC
+     The dashboard's weather, forecast, tide chart, and station list
+     all read from the global userLat/userLon (defined in script.js).
+     Once a boat exists, we override those with the boat's live
+     position instead of phone GPS or a saved address — so every
+     widget reflects conditions *at the boat*, not at the player.
+     --------------------------------------------------------------- */
+  async function syncLocationToBoat(boat, force) {
+    if (!boat) return;
+    const estimated = OS.estimateLiveLatLon(boat, 4.5);
+
+    if (!force && lastSyncedLat != null) {
+      const movedNm = OS.haversineNm(lastSyncedLat, lastSyncedLon, estimated.lat, estimated.lon);
+      if (movedNm < MIN_SYNC_DISTANCE_NM) return; /* hasn't moved far enough to matter */
+    }
+
+    lastSyncedLat = estimated.lat;
+    lastSyncedLon = estimated.lon;
+
+    /* Override the dashboard's location globals (declared in script.js) */
+    window.userLat = estimated.lat;
+    window.userLon = estimated.lon;
+    /* Also clear any saved marina address override so it doesn't win
+       over the boat's position in the dashboard's priority logic */
+    window.marineLocationLat = null;
+    window.marineLocationLon = null;
+
+    if (typeof window.fetchAllNoaaStations === "function" && !window.allNoaaStations) {
+      window.allNoaaStations = await window.fetchAllNoaaStations();
+    }
+    if (typeof window.updateNearbyStations === "function") {
+      await window.updateNearbyStations(estimated.lat, estimated.lon);
+    } else if (typeof window.refreshAll === "function") {
+      await window.refreshAll();
+    }
+  }
+
   /* ---------------------------------------------------------------
      INIT
      --------------------------------------------------------------- */
@@ -23,6 +65,8 @@
       statusLine.textContent = "Couldn't connect — check your connection and reload.";
       return;
     }
+
+    await syncLocationToBoat(boat, true); /* force initial sync regardless of distance */
 
     initMap(boat);
     renderResourceBar(boat);
@@ -38,12 +82,14 @@
     }, 4000);
 
     /* Pull the true server state periodically in case another
-       device/tab or the backend tick changed it */
+       device/tab or the backend tick changed it, and keep the
+       dashboard's weather/tide/station data following the boat */
     setInterval(async () => {
       await OS.refreshBoat();
       renderResourceBar(OS.boat);
       renderStatusLine(OS.boat);
       updateBoatMarkerPosition(OS.boat);
+      await syncLocationToBoat(OS.boat, false);
     }, 30000);
   }
 
