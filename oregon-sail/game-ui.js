@@ -182,6 +182,7 @@
     renderStatusLine(boat);
     wireControls();
     updateSpeedAndWindex();
+    initTrack();
     if (typeof updateRadarCenterBtnVisibility === "function") updateRadarCenterBtnVisibility();
 
     liveUpdateInterval = setInterval(() => {
@@ -197,6 +198,8 @@
       updateBoatMarkerPosition(OS.boat);
       updateSpeedAndWindex();
       await syncLocationToBoat(OS.boat, false);
+      /* Record track point from server-confirmed position */
+      maybeRecordTrackPoint(OS.boat.lat, OS.boat.lon);
     }, 30000);
   }
 
@@ -649,14 +652,98 @@
     if (courseDistanceLabel) { map.removeLayer(courseDistanceLabel); courseDistanceLabel = null; }
   }
 
+  /* ---------------------------------------------------------------
+     TRACK LINE
+     Records a breadcrumb trail of where the boat has been.
+     Points are sampled from the server-confirmed position (not
+     the client-interpolated one) so the track reflects actual
+     ticks, not animation frames. A new point is only stored when
+     the boat has moved at least MIN_TRACK_NM from the last one.
+     Stored in localStorage per-boat so it survives page reloads.
+     --------------------------------------------------------------- */
+  const MIN_TRACK_NM = 1;
+  let trackLine = null;      /* Leaflet polyline */
+  let trackVisible = true;
+
+  function trackKey() {
+    return OS.boat ? "osTrack_" + OS.boat.id : null;
+  }
+
+  function loadTrackPoints() {
+    const key = trackKey();
+    if (!key) return [];
+    try { return JSON.parse(localStorage.getItem(key) || "[]"); }
+    catch (e) { return []; }
+  }
+
+  function saveTrackPoints(pts) {
+    const key = trackKey();
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(pts));
+  }
+
+  function maybeRecordTrackPoint(lat, lon) {
+    const pts = loadTrackPoints();
+    if (pts.length > 0) {
+      const last = pts[pts.length - 1];
+      const dist = OS.haversineNm(last[0], last[1], lat, lon);
+      if (dist < MIN_TRACK_NM) return; /* hasn't moved far enough */
+    }
+    pts.push([lat, lon]);
+    saveTrackPoints(pts);
+    renderTrackLine(pts);
+  }
+
+  function renderTrackLine(pts) {
+    if (!map) return;
+    if (trackLine) { map.removeLayer(trackLine); trackLine = null; }
+    if (pts.length < 2 || !trackVisible) return;
+    trackLine = L.polyline(pts, {
+      color: "#e53935",
+      weight: 2.5,
+      opacity: 0.75,
+      lineJoin: "round"
+    }).addTo(map);
+  }
+
+  function initTrack() {
+    const pts = loadTrackPoints();
+    if (pts.length > 0) renderTrackLine(pts);
+
+    /* Record the boat's current confirmed position immediately,
+       then again whenever the server state refreshes (every 30s) */
+    if (OS.boat) maybeRecordTrackPoint(OS.boat.lat, OS.boat.lon);
+
+    const toggleBtn = document.getElementById("osTrackToggleBtn");
+    const toggleLabel = document.getElementById("osTrackToggleLabel");
+    const clearBtn = document.getElementById("osClearTrackBtn");
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", () => {
+        trackVisible = !trackVisible;
+        toggleLabel.textContent = trackVisible ? "Hide Track" : "Show Track";
+        toggleBtn.classList.toggle("active", trackVisible);
+        const pts = loadTrackPoints();
+        renderTrackLine(pts);
+      });
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        if (!confirm("Clear your entire track history?")) return;
+        saveTrackPoints([]);
+        if (trackLine) { map.removeLayer(trackLine); trackLine = null; }
+      });
+    }
+  }
+
   function updateBoatMarkerPosition(boat) {
     if (!boatMarker) return;
     const estimated = OS.estimateLiveLatLon(boat, 4.5);
     boatMarker.setLatLng([estimated.lat, estimated.lon]);
     refreshBoatIcon();
 
-    /* Keep the course line current as the boat moves — covers both
-       an unconfirmed pending pick and an already-set destination */
+    /* Keep the course line current as the boat moves */
     const destLat = pendingDest ? pendingDest.lat : boat.destination_lat;
     const destLon = pendingDest ? pendingDest.lon : boat.destination_lon;
     if (destLat != null && destLon != null && (boat.sailing_active || boat.engine_on)) {

@@ -2066,6 +2066,48 @@ body.layout-edit .osGauge {
   height: 100%;
 }
 
+/* Track controls row */
+.osNavControls {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(125,186,220,0.1);
+}
+
+.osNavControlBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(125,186,220,0.3);
+  background: rgba(255,255,255,0.06);
+  color: #d0ecff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.osNavControlBtn.active {
+  background: rgba(229,57,53,0.2);
+  border-color: rgba(229,57,53,0.5);
+  color: #ff8a80;
+}
+
+.osNavControlBtnDanger {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+}
+
+.osNavControlBtnDanger:active {
+  background: rgba(229,57,53,0.2);
+}
+
+.osNavControlIcon { font-size: 14px; }
+
 .osNavGauges {
   position: relative;
   height: 220px;
