@@ -46,6 +46,22 @@ let compassZoom = parseInt(localStorage.getItem("compassZoom") || "6");
 let compassMapMode = "radar";
 let compassSize = 190;
 let compassStyle = "none";
+
+/* ---------------------------------------------------------------
+   Oregon Sail integration hook.
+   `let` variables at top-level script scope do NOT become window
+   properties, so external scripts (game-ui.js) can't just assign
+   window.userLat = x and expect loadWeather()/updateNearbyStations()
+   to see it — those functions close over the real lexical bindings
+   above. This setter runs *inside* this script's scope so it
+   actually updates the variables those functions read.
+   --------------------------------------------------------------- */
+window.setLocationFromBoat = function (lat, lon) {
+  userLat = lat;
+  userLon = lon;
+  marineLocationLat = null;
+  marineLocationLon = null;
+};
 let cardinalOffset = 20;
 let showWindMph = true;
 let showWindKph = false;

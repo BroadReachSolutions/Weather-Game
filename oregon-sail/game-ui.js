@@ -35,13 +35,17 @@
     lastSyncedLat = estimated.lat;
     lastSyncedLon = estimated.lon;
 
-    /* Override the dashboard's location globals (declared in script.js) */
-    window.userLat = estimated.lat;
-    window.userLon = estimated.lon;
-    /* Also clear any saved marina address override so it doesn't win
-       over the boat's position in the dashboard's priority logic */
-    window.marineLocationLat = null;
-    window.marineLocationLon = null;
+    /* script.js declares userLat/userLon/marineLocationLat/marineLocationLon
+       with `let` at top-level script scope, which does NOT create real
+       window properties — so we can't just assign window.userLat = x and
+       expect script.js's own functions to see it. script.js exposes a
+       real setter (window.setLocationFromBoat) that updates its actual
+       lexical variables from inside its own scope. */
+    if (typeof window.setLocationFromBoat === "function") {
+      window.setLocationFromBoat(estimated.lat, estimated.lon);
+    } else {
+      console.warn("Oregon Sail: setLocationFromBoat not found — is script.js loaded before game-ui.js?");
+    }
 
     if (typeof window.fetchAllNoaaStations === "function" && !window.allNoaaStations) {
       window.allNoaaStations = await window.fetchAllNoaaStations();
