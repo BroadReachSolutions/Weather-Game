@@ -2,7 +2,7 @@
   "name": "Marine Dashboard",
   "short_name": "Marine",
   "description": "St Augustine Sailing mobile marine weather dashboard",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#0a1628",
   "theme_color": "#0a1628",

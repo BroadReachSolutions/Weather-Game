@@ -100,6 +100,79 @@
   /* ---------------------------------------------------------------
      MAP
      --------------------------------------------------------------- */
+  /* ---------------------------------------------------------------
+     BOAT ICON SVG
+     A top-down hull silhouette with a mast/boom (rotatable for trim)
+     and a small wind-direction arrow. All rotations are in degrees,
+     0° = pointing up (north) within the icon's own local space —
+     Leaflet's divIcon doesn't rotate with the map, so we rotate the
+     hull to match heading, and rotate the boom/arrow independently.
+     --------------------------------------------------------------- */
+  const BOAT_ICON_SIZE = 46;
+
+  function buildBoatIconHtml(headingDeg, boomAngleDeg, windArrowDeg, windArrowOffset) {
+    const s = BOAT_ICON_SIZE;
+    const c = s / 2;
+    const offset = windArrowOffset || { x: 0, y: -s * 0.85 };
+
+    return `
+      <svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" style="overflow:visible;">
+        <g transform="rotate(${headingDeg} ${c} ${c})">
+          <path d="M ${c} ${c - 16}
+                   L ${c + 7} ${c - 4}
+                   L ${c + 6} ${c + 13}
+                   Q ${c} ${c + 17} ${c - 6} ${c + 13}
+                   L ${c - 7} ${c - 4}
+                   Z"
+                fill="#e8e4da" stroke="#1a2a35" stroke-width="1.4"/>
+          <line x1="${c}" y1="${c - 13}" x2="${c}" y2="${c + 12}"
+                stroke="#5a4632" stroke-width="1.6"/>
+          <g transform="rotate(${boomAngleDeg} ${c} ${c - 11})">
+            <line x1="${c}" y1="${c - 11}" x2="${c}" y2="${c + 9}"
+                  stroke="#cfd8df" stroke-width="2.4" stroke-linecap="round"/>
+          </g>
+        </g>
+        <g class="osWindArrowGroup" data-base-x="${offset.x}" data-base-y="${offset.y}"
+           transform="translate(${c + offset.x} ${c + offset.y}) rotate(${windArrowDeg})">
+          <line x1="0" y1="10" x2="0" y2="-10" stroke="#4fc3f7" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M -5 -5 L 0 -12 L 5 -5 Z" fill="#4fc3f7"/>
+        </g>
+      </svg>
+    `;
+  }
+
+  function loadWindArrowOffset() {
+    const raw = localStorage.getItem("osWindArrowOffset");
+    if (!raw) return { x: 0, y: -BOAT_ICON_SIZE * 0.85 };
+    try { return JSON.parse(raw); } catch (e) { return { x: 0, y: -BOAT_ICON_SIZE * 0.85 }; }
+  }
+
+  function saveWindArrowOffset(offset) {
+    localStorage.setItem("osWindArrowOffset", JSON.stringify(offset));
+  }
+
+  let currentBoomAngle = 0; /* relative to boat centerline, degrees, set by trim slider */
+  let currentWindArrowOffset = loadWindArrowOffset();
+
+  function refreshBoatIcon() {
+    if (!boatMarker) return;
+    const heading = (OS.boat && OS.boat.course_bearing != null) ? OS.boat.course_bearing : 0;
+    const windDeg = typeof window.getLastWindDeg === "function" ? window.getLastWindDeg() : 0;
+    /* Wind arrow shows TRUE wind direction in world space, so we
+       counter-rotate by the icon's heading rotation (since the whole
+       divIcon doesn't rotate with the map, but the hull <g> inside it
+       does — the arrow group is a sibling, untouched by that rotation,
+       so it already reflects world-relative direction directly). */
+    const html = buildBoatIconHtml(heading, currentBoomAngle, windDeg, currentWindArrowOffset);
+    const icon = L.divIcon({
+      className: "osBoatIcon",
+      html,
+      iconSize: [BOAT_ICON_SIZE, BOAT_ICON_SIZE],
+      iconAnchor: [BOAT_ICON_SIZE / 2, BOAT_ICON_SIZE / 2]
+    });
+    boatMarker.setIcon(icon);
+  }
+
   function initMap(boat) {
     const mapEl = document.getElementById("osMap");
     if (!mapEl || map) return;
@@ -117,14 +190,15 @@
       { maxZoom: 17, minZoom: 3 }
     ).addTo(map);
 
-    const boatIcon = L.divIcon({
+    const initialIcon = L.divIcon({
       className: "osBoatIcon",
-      html: "⛵",
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
+      html: buildBoatIconHtml(boat.course_bearing || 0, currentBoomAngle, 0, currentWindArrowOffset),
+      iconSize: [BOAT_ICON_SIZE, BOAT_ICON_SIZE],
+      iconAnchor: [BOAT_ICON_SIZE / 2, BOAT_ICON_SIZE / 2]
     });
 
-    boatMarker = L.marker([boat.lat, boat.lon], { icon: boatIcon }).addTo(map);
+    boatMarker = L.marker([boat.lat, boat.lon], { icon: initialIcon }).addTo(map);
+    setupWindArrowDrag();
 
     if (boat.destination_lat != null) {
       showPendingPin(boat.destination_lat, boat.destination_lon, false);
@@ -133,6 +207,49 @@
     map.on("click", (e) => {
       handleMapTap(e.latlng.lat, e.latlng.lng);
     });
+  }
+
+  /* ---------------------------------------------------------------
+     WIND ARROW DRAG (edit mode only)
+     The arrow's position relative to the boat icon can be dragged
+     when the dashboard is in Edit Layout mode. Direction always
+     reflects real wind — only the placement is adjustable.
+     --------------------------------------------------------------- */
+  function setupWindArrowDrag() {
+    if (!map) return;
+    let dragging = false;
+    let dragStartPx = null;
+    let dragStartOffset = null;
+
+    map.on("mousedown touchstart", (e) => {
+      if (!document.body.classList.contains("layout-edit")) return;
+      const target = e.originalEvent.target;
+      if (!target.closest(".osWindArrowGroup")) return;
+
+      dragging = true;
+      dragStartPx = map.mouseEventToContainerPoint(e.originalEvent.touches ? e.originalEvent.touches[0] : e.originalEvent);
+      dragStartOffset = { ...currentWindArrowOffset };
+      map.dragging.disable(); /* don't pan the map while dragging the arrow */
+      if (e.originalEvent.preventDefault) e.originalEvent.preventDefault();
+    });
+
+    map.on("mousemove touchmove", (e) => {
+      if (!dragging) return;
+      const ev = e.originalEvent.touches ? e.originalEvent.touches[0] : e.originalEvent;
+      const pt = map.mouseEventToContainerPoint(ev);
+      const dx = pt.x - dragStartPx.x;
+      const dy = pt.y - dragStartPx.y;
+      currentWindArrowOffset = { x: dragStartOffset.x + dx, y: dragStartOffset.y + dy };
+      refreshBoatIcon();
+    });
+
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      map.dragging.enable();
+      saveWindArrowOffset(currentWindArrowOffset);
+    }
+    map.on("mouseup touchend", endDrag);
   }
 
   function handleMapTap(lat, lon) {
@@ -161,6 +278,7 @@
     if (!boatMarker) return;
     const estimated = OS.estimateLiveLatLon(boat, 4.5);
     boatMarker.setLatLng([estimated.lat, estimated.lon]);
+    refreshBoatIcon();
   }
 
   /* ---------------------------------------------------------------
@@ -218,6 +336,7 @@
       if (!error) {
         showPendingPin(pendingDest.lat, pendingDest.lon, false);
         renderStatusLine(OS.boat);
+        refreshBoatIcon();
         document.getElementById("osSetCourseBtn").style.display = "none";
         document.getElementById("osCancelCourseBtn").style.display = "none";
       }

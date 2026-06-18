@@ -1,11 +1,11 @@
-const CACHE_VERSION = 'marine-mobile-v2';
+const CACHE_VERSION = 'marine-mobile-v3-ghpages';
 const APP_SHELL = [
-  '/',
-  '/index.html',
-  '/script.js',
-  '/style.css',
-  '/manifest.json',
-  '/staugustine-sailing-logo.png',
+  './',
+  './index.html',
+  './script.js',
+  './style.css',
+  './manifest.json',
+  './staugustine-sailing-logo.png',
 ];
 
 self.addEventListener('install', event => {

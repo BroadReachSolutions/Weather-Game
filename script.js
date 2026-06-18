@@ -62,6 +62,12 @@ window.setLocationFromBoat = function (lat, lon) {
   marineLocationLat = null;
   marineLocationLon = null;
 };
+
+/* Same window-binding problem as above — lastWindDeg/lastWindMph are
+   `let` at top level, so external scripts need a real getter rather
+   than reading window.lastWindDeg directly (which would be undefined). */
+window.getLastWindDeg = function () { return lastWindDeg; };
+window.getLastWindMph = function () { return lastWindMph; };
 let cardinalOffset = 20;
 let showWindMph = true;
 let showWindKph = false;

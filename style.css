@@ -1728,7 +1728,19 @@ body.layout-edit .widgetResize {
   border-color: rgba(125, 186, 220, 0.3) !important;
 }
 
-.osBoatIcon, .osPinIcon, .osPinIconPending {
+.osBoatIcon {
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+}
+
+.osBoatIcon svg { display: block; overflow: visible; }
+
+/* Make the wind arrow group grabbable in edit mode */
+body.layout-edit .osWindArrowGroup {
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.osPinIcon, .osPinIconPending {
   font-size: 22px;
   text-align: center;
   line-height: 28px;
