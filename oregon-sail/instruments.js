@@ -188,11 +188,16 @@
       if (!dragState) return;
       e.preventDefault();
       const { x, y } = getXY(e);
-      const panelRect = panelEl.getBoundingClientRect();
+      /* Use clientWidth/clientHeight (content box, excludes any
+         scrollbar) rather than getBoundingClientRect (full border
+         box) — otherwise the right/bottom edge clamp falls short by
+         however wide the scrollbar track is. */
+      const maxLeft = panelEl.clientWidth - gauge.offsetWidth;
+      const maxTop = panelEl.clientHeight - gauge.offsetHeight;
       let newLeft = dragState.left + (x - dragState.startX);
       let newTop = dragState.top + (y - dragState.startY);
-      newLeft = Math.max(0, Math.min(panelRect.width - gauge.offsetWidth, newLeft));
-      newTop = Math.max(0, Math.min(panelRect.height - gauge.offsetHeight, newTop));
+      newLeft = Math.max(0, Math.min(maxLeft, newLeft));
+      newTop = Math.max(0, Math.min(maxTop, newTop));
       gauge.style.left = newLeft + "px";
       gauge.style.top = newTop + "px";
     }
