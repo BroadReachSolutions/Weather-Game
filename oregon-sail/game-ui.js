@@ -294,7 +294,7 @@
      the next sync — fixed by checking distance every sim tick instead. */
   let lastGroundTextureLat = null;
   let lastGroundTextureLon = null;
-  const GROUND_TEXTURE_REFRESH_NM = 2;
+  const GROUND_TEXTURE_REFRESH_NM = 6; /* grid covers ~20nm radius; refresh well before reaching the edge, but not so often we re-fetch 25 tiles constantly */
 
   function maybeRefreshGroundTexture(lat, lon) {
     if (typeof window.OSHelm3D === "undefined") return;

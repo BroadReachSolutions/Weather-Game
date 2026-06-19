@@ -136,7 +136,10 @@
      true north so it stays consistent with the boat's real heading.
      --------------------------------------------------------------- */
   function buildGroundPlane() {
-    const geo = new THREE.PlaneGeometry(400, 400);
+    /* Plane sized to roughly match the real-world area the tile grid
+       covers (see updateGroundTexture) — large enough that sailing
+       toward land shows it well before you'd reach the plane's edge. */
+    const geo = new THREE.PlaneGeometry(900, 900);
     const mat = new THREE.MeshBasicMaterial({ color: 0x3a5f6b, transparent: true, opacity: 0.0 });
     groundMesh = new THREE.Mesh(geo, mat);
     groundMesh.rotation.x = -Math.PI / 2;
@@ -144,31 +147,79 @@
     scene.add(groundMesh);
   }
 
+  /* ---------------------------------------------------------------
+     GROUND TEXTURE — stitches a grid of real ArcGIS satellite tiles
+     into one canvas texture covering roughly a 25-mile radius around
+     the boat (a 5×5 grid at zoom 11, ~15km/tile ≈ 75km / 47mi across).
+     Refresh is distance-triggered from game-ui.js, not time-based —
+     re-fetching 25 tiles every second would hammer the tile server.
+     --------------------------------------------------------------- */
+  const GROUND_TILE_ZOOM = 11;
+  const GROUND_TILE_GRID = 5; /* 5x5 tiles, odd number so boat sits on the center tile */
+  const GROUND_TILE_PX = 256; /* ArcGIS tile pixel size */
+
+  function lonToTileX(lon, zoom) {
+    return Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
+  }
+  function latToTileY(lat, zoom) {
+    const latRad = (lat * Math.PI) / 180;
+    return Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * Math.pow(2, zoom));
+  }
+
+  let groundTextureLoadToken = 0; /* guards against a slow earlier load overwriting a newer one */
+
   function updateGroundTexture(lat, lon) {
     if (!groundMesh) return;
-    /* Same ArcGIS World Imagery tile source as the chart plotter,
-       fetched at a fixed mid-zoom so it covers a reasonable area
-       around the boat without constant re-fetching on every move. */
-    const zoom = 13;
-    const tileX = Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
-    const latRad = (lat * Math.PI) / 180;
-    const tileY = Math.floor(
-      (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * Math.pow(2, zoom)
-    );
-    const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${tileY}/${tileX}`;
+    const myToken = ++groundTextureLoadToken;
 
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin("anonymous");
-    loader.load(url, (texture) => {
+    const centerX = lonToTileX(lon, GROUND_TILE_ZOOM);
+    const centerY = latToTileY(lat, GROUND_TILE_ZOOM);
+    const half = Math.floor(GROUND_TILE_GRID / 2);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = GROUND_TILE_GRID * GROUND_TILE_PX;
+    canvas.height = GROUND_TILE_GRID * GROUND_TILE_PX;
+    const ctx = canvas.getContext("2d");
+    /* Fallback fill while tiles load in, in case some fail */
+    ctx.fillStyle = "#1f6f8b";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    let loaded = 0;
+    const total = GROUND_TILE_GRID * GROUND_TILE_GRID;
+
+    function finalize() {
+      if (myToken !== groundTextureLoadToken) return; /* a newer call superseded this one */
+      const texture = new THREE.CanvasTexture(canvas);
       texture.wrapS = THREE.ClampToEdgeWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
       groundMesh.material.map = texture;
-      groundMesh.material.opacity = 0.9;
+      groundMesh.material.opacity = 0.92;
       groundMesh.material.needsUpdate = true;
-    }, undefined, () => {
-      /* Tile fetch failed (offline, rate-limited, etc) — keep the
-         plain water-blue fallback, not a hard error for the player */
-    });
+    }
+
+    for (let row = 0; row < GROUND_TILE_GRID; row++) {
+      for (let col = 0; col < GROUND_TILE_GRID; col++) {
+        const tx = centerX - half + col;
+        const ty = centerY - half + row;
+        const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${GROUND_TILE_ZOOM}/${ty}/${tx}`;
+
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          if (myToken !== groundTextureLoadToken) return;
+          ctx.drawImage(img, col * GROUND_TILE_PX, row * GROUND_TILE_PX, GROUND_TILE_PX, GROUND_TILE_PX);
+          loaded++;
+          if (loaded === total) finalize();
+        };
+        img.onerror = () => {
+          /* Missing tile (open ocean sometimes 404s, or offline) —
+             leave the fallback fill for that cell, don't block the rest */
+          loaded++;
+          if (loaded === total) finalize();
+        };
+        img.src = url;
+      }
+    }
   }
 
   /* ---------------------------------------------------------------
