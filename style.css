@@ -1830,16 +1830,53 @@ body.layout-edit .widgetResize {
 }
 
 /* Map */
+/* Chart plotter tile — hosts the relocated Leaflet map inside Nav Station */
+.osChartPlotterTile {
+  flex-shrink: 0;
+  height: 220px;
+  border-bottom: 1px solid rgba(125,186,220,0.15);
+}
+
 .osMapWrap {
   position: relative;
-  flex: 0 0 50%;   /* JS overrides this with the saved split percentage */
-  min-height: 0;
+  width: 100%;
+  height: 100%;
 }
 
 #osMap {
   width: 100%;
   height: 100%;
   background: #0a1924;
+}
+
+/* 3D Helm view — replaces the satellite map as the primary Helm visual */
+.osHelmViewWrap {
+  position: relative;
+  flex: 0 0 50%;   /* JS overrides this with the saved split percentage */
+  min-height: 0;
+  background: #7ec8e3;
+  overflow: hidden;
+}
+
+#osHelm3D {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.osHelm3DHint {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 25, 36, 0.6);
+  color: rgba(255,255,255,0.85);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  pointer-events: none;
+  letter-spacing: 0.3px;
 }
 
 /* ═══ TAB SYSTEM ═══ */

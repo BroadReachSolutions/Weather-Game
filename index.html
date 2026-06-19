@@ -46,6 +46,10 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Three.js (3D helm view) -->
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
   <!-- Supabase client SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
@@ -357,14 +361,12 @@
               <div class="osStatusLine" id="osStatusLine">Loading your vessel…</div>
 
               <!-- Map for course setting (top half) -->
-              <div class="osMapWrap">
-                <div id="osMap"></div>
-                <button class="osCenterBtn" id="osCenterBtn" title="Center on my vessel">⛵</button>
-                <button class="osMapBtn" id="osSetCourseBtn" style="display:none;">Set Course Here</button>
-                <button class="osMapBtn osMapBtnSecondary" id="osCancelCourseBtn" style="display:none;">Cancel</button>
+              <div class="osHelmViewWrap" id="osHelmViewWrap">
+                <canvas id="osHelm3D"></canvas>
+                <div class="osHelm3DHint" id="osHelm3DHint">Drag to look around</div>
               </div>
 
-              <!-- Drag divider — pull up/down to resize map vs gauge area -->
+              <!-- Drag divider — pull up/down to resize 3D view vs gauge area -->
               <div class="osDivider" id="osDivider">
                 <div class="osDividerHandle"></div>
               </div>
@@ -390,9 +392,20 @@
                 </div>
               </div>
 
-              <!-- NAV STATION — supply gauges + future nav features -->
+              <!-- NAV STATION — chart plotter, supply gauges, track controls -->
               <div class="osTabPanel" id="osTabPanel-nav">
                 <div class="osNavStationLayout">
+
+                  <!-- Chart plotter — the satellite map, course setting, lives here now -->
+                  <div class="osChartPlotterTile">
+                    <div class="osMapWrap" id="osMapWrap">
+                      <div id="osMap"></div>
+                      <button class="osCenterBtn" id="osCenterBtn" title="Center on my vessel">⛵</button>
+                      <button class="osMapBtn" id="osSetCourseBtn" style="display:none;">Set Course Here</button>
+                      <button class="osMapBtn osMapBtnSecondary" id="osCancelCourseBtn" style="display:none;">Cancel</button>
+                    </div>
+                  </div>
+
                   <div class="osNavGauges" id="osNavGauges">
                     <!-- Water, Food, Hull gauges injected by instruments.js -->
                   </div>
@@ -533,6 +546,7 @@
   <script src="oregon-sail/game-core.js"></script>
   <script src="oregon-sail/game-ui.js"></script>
   <script src="oregon-sail/instruments.js"></script>
+  <script src="oregon-sail/helm3d.js"></script>
   <script src="oregon-sail/draggable-buttons.js"></script>
 
   <script>

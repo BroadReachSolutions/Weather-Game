@@ -185,6 +185,11 @@
     initTrack();
     if (typeof updateRadarCenterBtnVisibility === "function") updateRadarCenterBtnVisibility();
 
+    if (typeof window.OSHelm3D !== "undefined") {
+      window.OSHelm3D.init();
+      window.OSHelm3D.updateGroundTexture(boat.lat, boat.lon);
+    }
+
     liveUpdateInterval = setInterval(() => {
       if (!OS.boat) return;
       updateBoatMarkerPosition(OS.boat);
@@ -200,6 +205,9 @@
       await syncLocationToBoat(OS.boat, false);
       /* Record track point from server-confirmed position */
       maybeRecordTrackPoint(OS.boat.lat, OS.boat.lon);
+      if (typeof window.OSHelm3D !== "undefined") {
+        window.OSHelm3D.updateGroundTexture(OS.boat.lat, OS.boat.lon);
+      }
     }, 30000);
   }
 
@@ -375,6 +383,39 @@
                                   trim.pct >= 50 ? "linear-gradient(90deg,#ffca4f,#ffb84f)" :
                                   "linear-gradient(90deg,#ff6b6b,#ff8a80)";
     }
+
+    feed3DState(heading, windDeg, pos, trim);
+  }
+
+  /* ---------------------------------------------------------------
+     3D HELM VIEW — feed live physics state so the boat heels,
+     pitches, and trims its sail to match real conditions. Uses the
+     exact same point-of-sail/trim-quality math the rest of the game
+     already computes — this is a renderer for existing data, not a
+     second physics system.
+     --------------------------------------------------------------- */
+  let pointOfSailFactorMap = {
+    "No-Go Zone": 0, "Close-Hauled": 0.7, "Close Reach": 0.9,
+    "Beam Reach": 1.0, "Broad Reach": 0.9, "Running": 0.75
+  };
+
+  function feed3DState(heading, windDeg, pos, trim) {
+    if (typeof window.OSHelm3D === "undefined") return;
+    const windSpeedKt = typeof window.getLastWindMph === "function"
+      ? window.getLastWindMph() * 0.868976 : 0;
+    const isSailing = !!(OS.boat && OS.boat.sailing_active);
+
+    window.OSHelm3D.setState({
+      windSpeedKt,
+      trimFactor: trim.pct / 100,
+      pointOfSailFactor: pointOfSailFactorMap[pos.name] != null ? pointOfSailFactorMap[pos.name] : 0,
+      boomAngleDeg: currentBoomAngle,
+      isSailing,
+      /* Simple estimate matching the same formula the tick function
+         uses server-side, since we don't have a live wave-height
+         feed on the client */
+      waveHeightFt: Math.max(0.5, (windSpeedKt / 10) * 1.8)
+    });
   }
 
   /* ---------------------------------------------------------------
@@ -531,9 +572,11 @@
   }
 
   function applySplit(pct) {
-    const mapWrap = document.querySelector(".osMapWrap");
-    if (mapWrap) mapWrap.style.flex = `0 0 ${pct}%`;
-    if (map) setTimeout(() => map.invalidateSize(), 50);
+    const helmWrap = document.querySelector(".osHelmViewWrap");
+    if (helmWrap) helmWrap.style.flex = `0 0 ${pct}%`;
+    if (typeof window.OSHelm3D !== "undefined") {
+      setTimeout(() => window.OSHelm3D.resize(), 50);
+    }
   }
 
   function initDivider() {
@@ -801,6 +844,13 @@
         tab.classList.add("active");
         const panel = document.getElementById("osTabPanel-" + target);
         if (panel) panel.classList.add("active");
+
+        /* The chart plotter map lives in the Nav Station tab, which is
+           display:none while inactive — Leaflet renders incorrectly if
+           sized while hidden, so nudge it once the tab becomes visible */
+        if (target === "nav" && map) {
+          setTimeout(() => map.invalidateSize(), 50);
+        }
       });
     }
 
