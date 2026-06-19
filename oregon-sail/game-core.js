@@ -130,12 +130,36 @@ OS.setCourse = async function (destLat, destLon, mode) {
       course_bearing: bearing,
       course_mode: mode || "sailing",   /* legacy field, kept in sync during transition */
       sailing_active: true,              /* setting a course raises the sails by default */
+      autopilot_on: true,                /* tapping a destination engages autopilot */
       updated_at: new Date().toISOString()
     })
     .eq("id", OS.boat.id)
     .select()
     .single();
 
+  if (!error && data) OS.boat = data;
+  return { data, error };
+};
+
+/* ---------------------------------------------------------------
+   MANUAL STEERING — grabbing the wheel disengages autopilot and
+   gives the player direct rudder control. rudder_angle is -45..45,
+   negative = port, positive = starboard.
+   --------------------------------------------------------------- */
+OS.setRudder = async function (angle) {
+  if (!OS.boat) return;
+  OS.boat.rudder_angle = angle; /* update immediately for responsive UI; persisted on release */
+  return { data: OS.boat, error: null };
+};
+
+OS.setAutopilot = async function (on) {
+  if (!OS.boat) return;
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ autopilot_on: on, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
   if (!error && data) OS.boat = data;
   return { data, error };
 };

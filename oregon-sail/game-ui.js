@@ -255,6 +255,7 @@
        simulation "moving" the boat between server syncs */
     boat.lat = result.lat;
     boat.lon = result.lon;
+    boat.course_bearing = result.heading;
     boat.speed_over_ground_kt = result.speedKt;
     boat.fuel = Math.max(0, boat.fuel - result.fuelUsed);
     boat.food = Math.max(0, boat.food - result.foodUsed);
@@ -274,6 +275,10 @@
     updateSpeedAndWindex();
     renderResourceBar(boat);
 
+    if (window.OSInstruments) {
+      window.OSInstruments.setWheelState(boat.rudder_angle || 0, boat.autopilot_on);
+    }
+
     /* Track recording uses the same 1nm-sampling logic, fed by the
        simulated position now instead of only the server-confirmed one */
     maybeRecordTrackPoint(boat.lat, boat.lon);
@@ -290,6 +295,9 @@
     await OS.pushSimulatedState({
       lat: OS.boat.lat,
       lon: OS.boat.lon,
+      course_bearing: OS.boat.course_bearing,
+      rudder_angle: OS.boat.rudder_angle,
+      autopilot_on: OS.boat.autopilot_on,
       fuel: OS.boat.fuel,
       food: OS.boat.food,
       water: OS.boat.water,
@@ -503,6 +511,7 @@
       pointOfSailFactor: pointOfSailFactorMap[pos.name] != null ? pointOfSailFactorMap[pos.name] : 0,
       boomAngleDeg: currentBoomAngle,
       isSailing,
+      reefLevel: OS.boat ? (OS.boat.reef_level || 0) : 0,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
          feed on the client */
@@ -996,6 +1005,7 @@
     }
 
     wireEngineControls();
+    wireWheelControls();
 
     const sailsToggle = document.getElementById("osSailsToggle");
     if (sailsToggle) {
@@ -1006,6 +1016,77 @@
         await OS.setSailingActive(newState);
         if (window.OSInstruments) window.OSInstruments.setSailsState(newState);
         renderStatusLine(OS.boat);
+      });
+    }
+  }
+
+  /* ---------------------------------------------------------------
+     WHEEL / RUDDER CONTROLS
+     Dragging the wheel left/right sets rudder_angle directly and
+     disengages autopilot (grabbing the helm takes manual control).
+     Tapping the AUTO badge re-engages autopilot, steering back
+     toward the destination instead of following the rudder.
+     --------------------------------------------------------------- */
+  function wireWheelControls() {
+    const face = document.getElementById("osWheelFace");
+    const badge = document.getElementById("osAutopilotBadge");
+    if (!face) return;
+
+    if (window.OSInstruments) {
+      window.OSInstruments.setWheelState(OS.boat ? OS.boat.rudder_angle || 0 : 0, OS.boat ? OS.boat.autopilot_on : true);
+    }
+
+    let dragging = false;
+    let startX = 0;
+    let startRudder = 0;
+
+    function getX(e) {
+      return e.touches ? e.touches[0].clientX : e.clientX;
+    }
+
+    function onDown(e) {
+      e.preventDefault();
+      dragging = true;
+      startX = getX(e);
+      startRudder = (OS.boat && OS.boat.rudder_angle) || 0;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("touchend", onUp);
+    }
+
+    function onMove(e) {
+      if (!dragging || !OS.boat) return;
+      e.preventDefault();
+      const dx = getX(e) - startX;
+      /* ~2px of drag per degree of rudder, clamped to -45..45 */
+      const newRudder = Math.max(-45, Math.min(45, startRudder + dx / 2));
+      OS.boat.rudder_angle = newRudder;
+      OS.boat.autopilot_on = false; /* grabbing the wheel takes manual control */
+      if (window.OSInstruments) window.OSInstruments.setWheelState(newRudder, false);
+    }
+
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+      if (OS.boat) {
+        OS.setAutopilot(false); /* persist the disengage; rudder angle syncs on the 10-min timer */
+      }
+    }
+
+    face.addEventListener("mousedown", onDown);
+    face.addEventListener("touchstart", onDown, { passive: false });
+
+    if (badge) {
+      badge.addEventListener("click", async () => {
+        if (!OS.boat) return;
+        await OS.setAutopilot(true);
+        OS.boat.rudder_angle = 0;
+        if (window.OSInstruments) window.OSInstruments.setWheelState(0, true);
       });
     }
   }

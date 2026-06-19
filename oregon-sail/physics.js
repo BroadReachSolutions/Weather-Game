@@ -122,6 +122,54 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
+  function bearingDeg(lat1, lon1, lat2, lon2) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const toDeg = (r) => (r * 180) / Math.PI;
+    const dLon = toRad(lon2 - lon1);
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+              Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+
+  function shortestAngleDelta(from, to) {
+    let delta = ((to - from + 540) % 360) - 180;
+    return delta;
+  }
+
+  /* ---------------------------------------------------------------
+     STEERING
+     Two modes:
+     - Autopilot ON: heading eases toward the bearing to the
+       destination (like a real autopilot holding a course)
+     - Autopilot OFF: rudder_angle directly drives the turn rate.
+       No steerage without speed — a becalmed boat with the wheel
+       hard over doesn't spin in place, matching real sailing.
+     Returns the new heading after elapsedHours of turning.
+     --------------------------------------------------------------- */
+  const AUTOPILOT_TURN_RATE_DEG_PER_HOUR = 90; /* how fast autopilot corrects course */
+  const MAX_TURN_RATE_DEG_PER_HOUR_PER_KT = 25; /* rudder turn authority, scales with speed */
+
+  function updateHeading(boat, speedKt, elapsedHours) {
+    const currentHeading = boat.course_bearing ?? 0;
+
+    if (boat.autopilot_on && boat.destination_lat != null) {
+      const targetBearing = bearingDeg(boat.lat, boat.lon, boat.destination_lat, boat.destination_lon);
+      const delta = shortestAngleDelta(currentHeading, targetBearing);
+      const maxStep = AUTOPILOT_TURN_RATE_DEG_PER_HOUR * elapsedHours;
+      const step = Math.max(-maxStep, Math.min(maxStep, delta));
+      return (currentHeading + step + 360) % 360;
+    }
+
+    /* Manual steering: turn rate depends on both rudder deflection
+       and boat speed — no way on, no steerage */
+    const rudder = boat.rudder_angle ?? 0; /* -45..45, negative = port */
+    const speedFactor = Math.min(1, Math.abs(speedKt) / 3); /* full authority by ~3kt */
+    const turnRateDegPerHour = (rudder / 45) * MAX_TURN_RATE_DEG_PER_HOUR_PER_KT * Math.max(0.15, speedFactor);
+    const newHeading = (currentHeading + turnRateDegPerHour * elapsedHours + 360) % 360;
+    return newHeading;
+  }
+
   /* ---------------------------------------------------------------
      ADVANCE — the core simulation step. Given the boat's current
      state, the wind, and an elapsed time in hours, returns the new
@@ -134,14 +182,25 @@
     const sail = calculateSailSpeed(boat, windSpeedMph, windDirDeg);
     const engineKt = calculateEngineSpeed(boat);
     const hullSpeed = boat.hull_speed_kt ?? 6.5;
-    const speedKt = combineSpeed(sail.speedKt, engineKt, hullSpeed);
+    let speedKt = combineSpeed(sail.speedKt, engineKt, hullSpeed);
+
+    /* Testing easter egg: captain "Sonic" sailing vessel "Sonic"
+       gets a 100x speed multiplier for rapid playtesting */
+    const isSonic = (boat.captain_name || "").trim().toLowerCase() === "sonic" &&
+                     (boat.vessel_name || "").trim().toLowerCase() === "sonic";
+    if (isSonic) speedKt *= 100;
+
+    /* Steer before moving, so this tick's movement reflects the
+       updated heading (autopilot correction or manual rudder turn) */
+    const newHeading = updateHeading(boat, speedKt, elapsedHours);
+    boat.course_bearing = newHeading;
 
     const nmMoved = speedKt * elapsedHours;
 
     let newLat = boat.lat;
     let newLon = boat.lon;
-    if (boat.course_bearing != null && nmMoved !== 0) {
-      const bearingRad = (boat.course_bearing * Math.PI) / 180;
+    if (nmMoved !== 0) {
+      const bearingRad = (newHeading * Math.PI) / 180;
       const dLat = (nmMoved / 60) * Math.cos(bearingRad);
       const dLon = (nmMoved / 60) * Math.sin(bearingRad) / Math.cos((boat.lat * Math.PI) / 180);
       newLat = boat.lat + dLat;
@@ -155,6 +214,7 @@
     return {
       lat: newLat,
       lon: newLon,
+      heading: newHeading,
       speedKt,
       sailSpeedKt: sail.speedKt,
       engineKt,
@@ -176,6 +236,8 @@
     combineSpeed,
     calculateFuelBurnPerHour,
     haversineNm,
+    bearingDeg,
+    updateHeading,
     advance
   };
 })();

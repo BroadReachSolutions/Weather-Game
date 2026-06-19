@@ -23,7 +23,8 @@
     { id: "sog",    label: "Speed",     type: "speed" },
     { id: "windex", label: "Windex",    type: "windex" },
     { id: "engine", label: "Engine",    type: "engine", w: 1, h: 2 },
-    { id: "boom",   label: "Boom Trim", type: "boom" }
+    { id: "boom",   label: "Boom Trim", type: "boom" },
+    { id: "wheel",  label: "Helm",      type: "wheel", w: 2, h: 2 }
   ];
 
   /* Nav Station tab instruments — supplies. Moved here so the Helm
@@ -40,13 +41,14 @@
 
   function defaultPositionFor(def, index, allDefs) {
     const gap = 8;
-    /* Engine gauge is 1 wide × 2 tall — treat it as occupying 2 row slots.
-       We lay out manually to account for its double height. */
+    /* Engine gauge is 1 wide × 2 tall, wheel is 2x2 — laid out manually
+       to account for their non-1x1 footprints. */
     const positions = {
       sog:    { left: gap,               top: gap },
       windex: { left: gap + GAUGE_SIZE + gap, top: gap },
       engine: { left: gap + (GAUGE_SIZE + gap) * 2, top: gap },
-      boom:   { left: gap,               top: gap + GAUGE_SIZE + gap }
+      boom:   { left: gap,               top: gap + GAUGE_SIZE + gap },
+      wheel:  { left: gap + GAUGE_SIZE + gap, top: gap + GAUGE_SIZE + gap }
     };
     if (positions[def.id]) return positions[def.id];
     /* Nav gauges: simple row */
@@ -183,6 +185,38 @@
           <button class="osSailsToggle" id="osSailsToggle">SAILS UP</button>
           <input type="range" id="osBoomSlider" class="osBoomSliderSmall" min="-90" max="90" step="1" value="25">
           <div class="osGaugeUnit" id="osBoomLabel">25°</div>
+        `;
+      case "wheel":
+        return `
+          <div class="osWheelHeader">
+            <span class="osGaugeLabel">Helm</span>
+            <button class="osAutopilotBadge" id="osAutopilotBadge">AUTO</button>
+          </div>
+          <div class="osWheelFace" id="osWheelFace">
+            <svg viewBox="0 0 100 100" class="osWheelSvg" id="osWheelSvg">
+              <circle cx="50" cy="50" r="42" class="osWheelRim"/>
+              <circle cx="50" cy="50" r="10" class="osWheelHub"/>
+              <g id="osWheelSpokes">
+                <line x1="50" y1="8"  x2="50" y2="36" class="osWheelSpoke"/>
+                <line x1="50" y1="92" x2="50" y2="64" class="osWheelSpoke"/>
+                <line x1="8"  y1="50" x2="36" y2="50" class="osWheelSpoke"/>
+                <line x1="92" y1="50" x2="64" y2="50" class="osWheelSpoke"/>
+                <line x1="20" y1="20" x2="39" y2="39" class="osWheelSpoke"/>
+                <line x1="80" y1="80" x2="61" y2="61" class="osWheelSpoke"/>
+                <line x1="80" y1="20" x2="61" y2="39" class="osWheelSpoke"/>
+                <line x1="20" y1="80" x2="39" y2="61" class="osWheelSpoke"/>
+              </g>
+            </svg>
+          </div>
+          <div class="osRudderRow">
+            <span class="osRudderLabelEnd">P</span>
+            <div class="osRudderTrack">
+              <div class="osRudderCenterMark"></div>
+              <div class="osRudderDot" id="osRudderDot"></div>
+            </div>
+            <span class="osRudderLabelEnd">S</span>
+          </div>
+          <div class="osGaugeUnit" id="osRudderLabel">Center</div>
         `;
       default:
         return `<div class="osGaugeLabel">${def.label}</div>`;
@@ -353,6 +387,33 @@
     }
   }
 
+  /* rudderAngle: -45 (full port) .. 45 (full starboard). autopilotOn:
+     when true, the wheel visually centers and dims since the autopilot
+     is holding course rather than the player steering directly. */
+  function setWheelState(rudderAngle, autopilotOn) {
+    const spokes = document.getElementById("osWheelSpokes");
+    const dot = document.getElementById("osRudderDot");
+    const label = document.getElementById("osRudderLabel");
+    const badge = document.getElementById("osAutopilotBadge");
+    const face = document.getElementById("osWheelFace");
+
+    if (spokes) spokes.setAttribute("transform", `rotate(${rudderAngle * 2} 50 50)`);
+
+    if (dot) {
+      const pct = (rudderAngle + 45) / 90; /* 0..1 */
+      dot.style.left = (pct * 100) + "%";
+    }
+
+    if (label) {
+      const rounded = Math.round(rudderAngle);
+      label.textContent = Math.abs(rounded) <= 2 ? "Center" :
+        (rounded < 0 ? `Port ${Math.abs(rounded)}°` : `Starboard ${rounded}°`);
+    }
+
+    if (badge) badge.classList.toggle("active", !!autopilotOn);
+    if (face) face.classList.toggle("autopilot", !!autopilotOn);
+  }
+
   function initInstrumentPanel(attempts) {
     const helm = document.getElementById(PANEL_ID);
     const nav = document.getElementById(NAV_PANEL_ID);
@@ -373,6 +434,7 @@
     setEngineState,
     setBoomLabel,
     setSailsState,
+    setWheelState,
     rebuild: buildPanel
   };
 })();
