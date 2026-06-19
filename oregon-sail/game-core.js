@@ -71,6 +71,27 @@ OS.refreshBoat = async function () {
 };
 
 /* ---------------------------------------------------------------
+   PUSH SIMULATED STATE
+   The client now runs the live simulation while the app is open
+   (see game-ui.js's simulation loop). Every 10 minutes we push that
+   simulated state up to Supabase, stamping last_tick_at so the
+   server's own cron tick — which keeps the boat moving while the
+   app is closed — knows this boat was just updated by the client
+   and can skip redundantly re-simulating the same time window.
+   --------------------------------------------------------------- */
+OS.pushSimulatedState = async function (fields) {
+  if (!OS.boat) return;
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ ...fields, last_tick_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) { console.error("Oregon Sail: failed to push simulated state", error); return; }
+  if (data) OS.boat = data;
+};
+
+/* ---------------------------------------------------------------
    COURSE SETTING
    Player picks a destination port; we calculate bearing and store
    it. The backend tick function does the actual moving.

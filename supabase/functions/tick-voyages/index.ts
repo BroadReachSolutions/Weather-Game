@@ -40,8 +40,24 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 
+  /* If the player's phone/browser is open, its client-side simulation
+     loop pushes fresh state every 10 min (see game-ui.js's
+     syncStateToServer + OS.pushSimulatedState). That push stamps
+     last_tick_at. If it's recent, the client is actively keeping this
+     boat up to date — skip it here to avoid double-applying the same
+     time window's movement/consumption. If last_tick_at is stale (or
+     missing), the app is closed and this tick is the only thing
+     moving the boat, so we proceed normally. */
+  const SKIP_IF_TICKED_WITHIN_MS = 8 * 60 * 1000; /* 8 min, just under the 10-min cycle */
+  const now = Date.now();
+  const dueBoats = boats.filter((boat) => {
+    if (!boat.last_tick_at) return true;
+    const lastTickMs = new Date(boat.last_tick_at).getTime();
+    return (now - lastTickMs) > SKIP_IF_TICKED_WITHIN_MS;
+  });
+
   const results = [];
-  for (const boat of boats) {
+  for (const boat of dueBoats) {
     try {
       const outcome = await tickBoat(supabase, boat);
       results.push({ boat_id: boat.id, ...outcome });
@@ -50,7 +66,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ ticked: results.length, results }), {
+  return new Response(JSON.stringify({ ticked: results.length, skipped: boats.length - dueBoats.length, results }), {
     headers: { "Content-Type": "application/json" }
   });
 });

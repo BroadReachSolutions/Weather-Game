@@ -25,15 +25,20 @@
      --------------------------------------------------------------- */
   async function syncLocationToBoat(boat, force) {
     if (!boat) return;
-    const estimated = OS.estimateLiveLatLon(boat, 4.5);
+    /* The simulation loop keeps boat.lat/lon continuously accurate now,
+       so we can use them directly instead of the old dead-reckoning
+       estimate (which assumed constant speed/heading since the last
+       server tick — no longer needed since the client IS the live sim). */
+    const lat = boat.lat;
+    const lon = boat.lon;
 
     if (!force && lastSyncedLat != null) {
-      const movedNm = OS.haversineNm(lastSyncedLat, lastSyncedLon, estimated.lat, estimated.lon);
+      const movedNm = OS.haversineNm(lastSyncedLat, lastSyncedLon, lat, lon);
       if (movedNm < MIN_SYNC_DISTANCE_NM) return; /* hasn't moved far enough to matter */
     }
 
-    lastSyncedLat = estimated.lat;
-    lastSyncedLon = estimated.lon;
+    lastSyncedLat = lat;
+    lastSyncedLon = lon;
 
     /* script.js declares userLat/userLon/marineLocationLat/marineLocationLon
        with `let` at top-level script scope, which does NOT create real
@@ -42,7 +47,7 @@
        real setter (window.setLocationFromBoat) that updates its actual
        lexical variables from inside its own scope. */
     if (typeof window.setLocationFromBoat === "function") {
-      window.setLocationFromBoat(estimated.lat, estimated.lon);
+      window.setLocationFromBoat(lat, lon);
     } else {
       console.warn("Oregon Sail: setLocationFromBoat not found — is script.js loaded before game-ui.js?");
     }
@@ -51,7 +56,7 @@
       window.allNoaaStations = await window.fetchAllNoaaStations();
     }
     if (typeof window.updateNearbyStations === "function") {
-      await window.updateNearbyStations(estimated.lat, estimated.lon);
+      await window.updateNearbyStations(lat, lon);
     } else if (typeof window.refreshAll === "function") {
       await window.refreshAll();
     }
@@ -190,25 +195,112 @@
       window.OSHelm3D.updateGroundTexture(boat.lat, boat.lon);
     }
 
-    liveUpdateInterval = setInterval(() => {
-      if (!OS.boat) return;
-      updateBoatMarkerPosition(OS.boat);
-      updateSpeedAndWindex();
-    }, 4000);
+    startSimulationLoop();
 
+    /* Weather refresh — flat 10-minute timer now, matching the
+       server tick interval, instead of the old distance-triggered
+       check. The boat's position is whatever the simulation loop
+       has advanced it to at that moment. */
     setInterval(async () => {
-      await OS.refreshBoat();
-      renderResourceBar(OS.boat);
-      renderStatusLine(OS.boat);
-      updateBoatMarkerPosition(OS.boat);
+      if (!OS.boat) return;
+      await syncLocationToBoat(OS.boat, true); /* force=true: always refresh on this timer */
+    }, 10 * 60 * 1000);
+
+    /* Push the client's simulated state to the server every 10 min,
+       so the server's own tick (which keeps the boat moving while
+       the app is closed) picks up from where the client left off
+       instead of fighting it. */
+    setInterval(syncStateToServer, 10 * 60 * 1000);
+  }
+
+  /* ---------------------------------------------------------------
+     CLIENT SIMULATION LOOP
+     Advances the boat's position and resource consumption smoothly
+     in real time using the shared physics module (oregon-sail/physics.js
+     — the same formulas the server tick uses), instead of jumping
+     once every 10 minutes. The server's own cron tick keeps running
+     independently so the voyage still progresses while the app is
+     closed; syncStateToServer() periodically reconciles the two.
+     --------------------------------------------------------------- */
+  const SIM_TICK_MS = 1000; /* advance the simulation once per second */
+  let simIntervalId = null;
+  let lastSimTime = null;
+
+  function startSimulationLoop() {
+    lastSimTime = Date.now();
+    simIntervalId = setInterval(simulationStep, SIM_TICK_MS);
+  }
+
+  function simulationStep() {
+    if (!OS.boat || typeof window.OSPhysics === "undefined") return;
+    const now = Date.now();
+    const elapsedHours = (now - lastSimTime) / 3600000;
+    lastSimTime = now;
+    if (elapsedHours <= 0 || elapsedHours > 0.1) return; /* skip absurd gaps (tab was backgrounded) */
+
+    const boat = OS.boat;
+    const isMoving = boat.sailing_active || boat.engine_on;
+    if (!isMoving) {
+      updateBoatMarkerPosition(boat);
       updateSpeedAndWindex();
-      await syncLocationToBoat(OS.boat, false);
-      /* Record track point from server-confirmed position */
-      maybeRecordTrackPoint(OS.boat.lat, OS.boat.lon);
-      if (typeof window.OSHelm3D !== "undefined") {
-        window.OSHelm3D.updateGroundTexture(OS.boat.lat, OS.boat.lon);
+      return;
+    }
+
+    const windDeg = typeof window.getLastWindDeg === "function" ? window.getLastWindDeg() : 0;
+    const windKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
+
+    const result = window.OSPhysics.advance(boat, windKt, windDeg, elapsedHours);
+
+    /* Mutate the in-memory boat state directly — this is the client
+       simulation "moving" the boat between server syncs */
+    boat.lat = result.lat;
+    boat.lon = result.lon;
+    boat.speed_over_ground_kt = result.speedKt;
+    boat.fuel = Math.max(0, boat.fuel - result.fuelUsed);
+    boat.food = Math.max(0, boat.food - result.foodUsed);
+    boat.water = Math.max(0, boat.water - result.waterUsed);
+    boat.total_nm_traveled = (boat.total_nm_traveled || 0) + Math.abs(result.nmMoved);
+
+    /* Arrived at destination? */
+    if (boat.destination_lat != null) {
+      const distToDest = window.OSPhysics.haversineNm(boat.lat, boat.lon, boat.destination_lat, boat.destination_lon);
+      if (distToDest < 2) {
+        boat.sailing_active = false;
+        renderStatusLine(boat);
       }
-    }, 30000);
+    }
+
+    updateBoatMarkerPosition(boat);
+    updateSpeedAndWindex();
+    renderResourceBar(boat);
+
+    /* Track recording uses the same 1nm-sampling logic, fed by the
+       simulated position now instead of only the server-confirmed one */
+    maybeRecordTrackPoint(boat.lat, boat.lon);
+  }
+
+  /* ---------------------------------------------------------------
+     SERVER SYNC
+     Pushes the client's simulated state up to Supabase every 10 min
+     so the server's own tick (for when the app is closed) continues
+     from an accurate position instead of replaying from a stale one.
+     --------------------------------------------------------------- */
+  async function syncStateToServer() {
+    if (!OS.boat) return;
+    await OS.pushSimulatedState({
+      lat: OS.boat.lat,
+      lon: OS.boat.lon,
+      fuel: OS.boat.fuel,
+      food: OS.boat.food,
+      water: OS.boat.water,
+      hull_health: OS.boat.hull_health,
+      sailing_active: OS.boat.sailing_active,
+      speed_over_ground_kt: OS.boat.speed_over_ground_kt,
+      total_nm_traveled: OS.boat.total_nm_traveled
+    });
+    if (typeof window.OSHelm3D !== "undefined") {
+      window.OSHelm3D.updateGroundTexture(OS.boat.lat, OS.boat.lon);
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -669,7 +761,7 @@
     if (!map || !OS.boat) return;
     clearCourseLine();
 
-    const boatPos = OS.estimateLiveLatLon(OS.boat, 4.5);
+    const boatPos = { lat: OS.boat.lat, lon: OS.boat.lon };
     const nm = OS.haversineNm(boatPos.lat, boatPos.lon, destLat, destLon);
 
     courseLine = L.polyline(
@@ -782,8 +874,7 @@
 
   function updateBoatMarkerPosition(boat) {
     if (!boatMarker) return;
-    const estimated = OS.estimateLiveLatLon(boat, 4.5);
-    boatMarker.setLatLng([estimated.lat, estimated.lon]);
+    boatMarker.setLatLng([boat.lat, boat.lon]);
     refreshBoatIcon();
 
     /* Keep the course line current as the boat moves */
@@ -885,8 +976,7 @@
 
     document.getElementById("osCenterBtn").addEventListener("click", () => {
       if (!map || !OS.boat) return;
-      const estimated = OS.estimateLiveLatLon(OS.boat, 4.5);
-      map.setView([estimated.lat, estimated.lon], map.getZoom(), { animate: true });
+      map.setView([OS.boat.lat, OS.boat.lon], map.getZoom(), { animate: true });
     });
 
     /* Boom trim slider lives inside the instrument gauge now, but
