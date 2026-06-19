@@ -24,10 +24,12 @@
 
   let currentHeelDeg = 0;   /* side-to-side tilt from wind force on sails */
   let currentPitchDeg = 0;  /* bow-up/down from waves */
+  let currentHeadingDeg = null; /* boat's facing direction, null until first state arrives */
   let waveClock = 0;
 
   const HEEL_SMOOTHING = 0.06;
   const PITCH_SMOOTHING = 0.08;
+  const HEADING_SMOOTHING = 0.15;
 
   /* ---------------------------------------------------------------
      SCENE SETUP
@@ -443,6 +445,14 @@
      wrapping back around so the field feels continuous */
   function animateWindLines(elapsedFactor) {
     if (!windLinesGroup) return;
+    /* Orient the whole field to blow toward where the wind is actually
+       going (windDeg is the compass direction it's coming FROM, so it
+       blows toward windDeg+180). This was previously fixed along a
+       single world axis regardless of real wind direction. */
+    if (window.OSHelm3DState && typeof window.OSHelm3DState.windDeg === "number") {
+      const towardDeg = (window.OSHelm3DState.windDeg + 180) % 360;
+      windLinesGroup.rotation.y = (towardDeg * Math.PI) / 180;
+    }
     windLinesGroup.children.forEach((line) => {
       line.position.z -= windStreakSpeed * 0.01 * elapsedFactor;
       if (line.position.z < -40) line.position.z = 40;
@@ -492,9 +502,22 @@
       const targetPitch = Math.sin(waveClock * 0.7) * Math.min(8, effectiveWaveHeight * 1.2);
       currentPitchDeg += (targetPitch - currentPitchDeg) * PITCH_SMOOTHING;
 
+      /* Heading — the boat's actual facing direction. This was missing
+         entirely before (only heel/pitch were applied), which is why
+         turning the wheel never visibly turned the boat. Smoothed with
+         proper angle-wrapping so it doesn't spin the long way around
+         when crossing the 0/360 boundary (e.g. 350° -> 10°). */
+      if (typeof s.heading === "number") {
+        if (currentHeadingDeg == null) currentHeadingDeg = s.heading;
+        let delta = ((s.heading - currentHeadingDeg + 540) % 360) - 180;
+        currentHeadingDeg = (currentHeadingDeg + delta * HEADING_SMOOTHING + 360) % 360;
+      }
+
       if (boatGroup) {
         /* Heel to whichever side the wind is pushing from (boom side) */
         const heelSign = (s.boomAngleDeg || 0) >= 0 ? -1 : 1;
+        boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
+        boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
         boatGroup.rotation.z = (currentHeelDeg * heelSign * Math.PI) / 180;
         boatGroup.rotation.x = (currentPitchDeg * Math.PI) / 180;
         boatGroup.position.y = 0.3 + Math.sin(waveClock * 0.7) * Math.min(0.4, effectiveWaveHeight * 0.08);
@@ -521,7 +544,46 @@
     }
 
     controls.update();
+    updateCompassOverlay();
     renderer.render(scene, camera);
+  }
+
+  /* ---------------------------------------------------------------
+     COMPASS OVERLAY — shows two lines on a top-down compass rose:
+     where the boat is actually facing (its real course_bearing) and
+     where the camera is currently looking, since orbiting can point
+     the camera anywhere regardless of the boat's heading.
+     --------------------------------------------------------------- */
+  function updateCompassOverlay() {
+    const boatLine = document.getElementById("osHelmCompassBoatLine");
+    const camLine = document.getElementById("osHelmCompassCamLine");
+    if (!boatLine || !camLine || !camera || !controls) return;
+
+    /* Boat heading: currentHeadingDeg is compass-style (0=N, 90=E).
+       The compass SVG's "up" tick mark is N at (50,14), so we just
+       rotate a line of that same length by the heading. */
+    const r = 36;
+    if (currentHeadingDeg != null) {
+      const rad = (currentHeadingDeg * Math.PI) / 180;
+      const x = 50 + Math.sin(rad) * r;
+      const y = 50 - Math.cos(rad) * r;
+      boatLine.setAttribute("x2", x.toFixed(1));
+      boatLine.setAttribute("y2", y.toFixed(1));
+    }
+
+    /* Camera direction: derive compass bearing from the camera's
+       position relative to its orbit target (where it's looking
+       FROM, reversed, since we want which way it's looking AT) */
+    const dx = controls.target.x - camera.position.x;
+    const dz = controls.target.z - camera.position.z;
+    /* Three.js world: -Z is "north" in our scene's initial camera
+       setup (camera starts at +Z looking toward origin) */
+    const camBearingRad = Math.atan2(dx, -dz);
+    const camBearingDeg = ((camBearingRad * 180) / Math.PI + 360) % 360;
+    const camX = 50 + Math.sin(camBearingRad) * r;
+    const camY = 50 - Math.cos(camBearingRad) * r;
+    camLine.setAttribute("x2", camX.toFixed(1));
+    camLine.setAttribute("y2", camY.toFixed(1));
   }
 
   function onResize() {

@@ -364,6 +364,22 @@
               <div class="osHelmViewWrap" id="osHelmViewWrap">
                 <canvas id="osHelm3D"></canvas>
                 <div class="osHelm3DHint" id="osHelm3DHint">Drag to look around</div>
+                <div class="osHelmCompass" id="osHelmCompass">
+                  <svg viewBox="0 0 100 100" class="osHelmCompassSvg">
+                    <circle cx="50" cy="50" r="46" class="osHelmCompassRing"/>
+                    <text x="50" y="12" class="osHelmCompassTick">N</text>
+                    <text x="92" y="53" class="osHelmCompassTick">E</text>
+                    <text x="50" y="94" class="osHelmCompassTick">S</text>
+                    <text x="8"  y="53" class="osHelmCompassTick">W</text>
+                    <line id="osHelmCompassBoatLine" x1="50" y1="50" x2="50" y2="14" class="osHelmCompassBoatLine"/>
+                    <line id="osHelmCompassCamLine" x1="50" y1="50" x2="50" y2="14" class="osHelmCompassCamLine"/>
+                    <circle cx="50" cy="50" r="3" class="osHelmCompassHub"/>
+                  </svg>
+                  <div class="osHelmCompassLegend">
+                    <span class="osHelmCompassLegendItem"><span class="osHelmCompassSwatch osHelmCompassSwatchBoat"></span>Boat</span>
+                    <span class="osHelmCompassLegendItem"><span class="osHelmCompassSwatch osHelmCompassSwatchCam"></span>Camera</span>
+                  </div>
+                </div>
               </div>
 
               <!-- Drag divider — pull up/down to resize 3D view vs gauge area -->

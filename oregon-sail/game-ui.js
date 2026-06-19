@@ -529,6 +529,8 @@
     const isSailing = !!(OS.boat && OS.boat.sailing_active);
 
     window.OSHelm3D.setState({
+      heading,
+      windDeg,
       windSpeedKt,
       trimFactor: trim.pct / 100,
       pointOfSailFactor: pointOfSailFactorMap[pos.name] != null ? pointOfSailFactorMap[pos.name] : 0,
