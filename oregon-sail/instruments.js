@@ -20,11 +20,11 @@
 
   /* Helm tab instruments — speed, windex, engine (1×2), boom */
   const HELM_DEFS = [
-    { id: "sog",    label: "Speed",     type: "speed" },
-    { id: "windex", label: "Windex",    type: "windex" },
-    { id: "engine", label: "Engine",    type: "engine", w: 1, h: 2 },
-    { id: "boom",   label: "Boom Trim", type: "boom" },
-    { id: "wheel",  label: "Helm",      type: "wheel", w: 2, h: 2 }
+    { id: "sog",      label: "Speed",     type: "speed" },
+    { id: "windex",   label: "Windex",    type: "windex" },
+    { id: "engine",   label: "Engine",    type: "engine", w: 1, h: 2 },
+    { id: "sailtrim", label: "Sail Trim", type: "sailtrim", w: 1, h: 2 },
+    { id: "wheel",    label: "Helm",      type: "wheel", w: 2, h: 2 }
   ];
 
   /* Nav Station tab instruments — supplies. Moved here so the Helm
@@ -41,14 +41,14 @@
 
   function defaultPositionFor(def, index, allDefs) {
     const gap = 8;
-    /* Engine gauge is 1 wide × 2 tall, wheel is 2x2 — laid out manually
-       to account for their non-1x1 footprints. */
+    /* Engine, sailtrim, and wheel are non-1x1 — laid out manually to
+       account for their footprints. */
     const positions = {
-      sog:    { left: gap,               top: gap },
-      windex: { left: gap + GAUGE_SIZE + gap, top: gap },
-      engine: { left: gap + (GAUGE_SIZE + gap) * 2, top: gap },
-      boom:   { left: gap,               top: gap + GAUGE_SIZE + gap },
-      wheel:  { left: gap + GAUGE_SIZE + gap, top: gap + GAUGE_SIZE + gap }
+      sog:      { left: gap,               top: gap },
+      windex:   { left: gap + GAUGE_SIZE + gap, top: gap },
+      engine:   { left: gap + (GAUGE_SIZE + gap) * 2, top: gap },
+      sailtrim: { left: gap + (GAUGE_SIZE + gap) * 3, top: gap },
+      wheel:    { left: gap + GAUGE_SIZE + gap, top: gap + GAUGE_SIZE + gap }
     };
     if (positions[def.id]) return positions[def.id];
     /* Nav gauges: simple row */
@@ -179,18 +179,44 @@
             </div>
           </div>
         `;
-      case "boom":
+      case "sailtrim":
         return `
-          <div class="osGaugeLabel">Boom Trim</div>
-          <button class="osSailsToggle" id="osSailsToggle">SAILS UP</button>
-          <input type="range" id="osBoomSlider" class="osBoomSliderSmall" min="-90" max="90" step="1" value="25">
-          <div class="osGaugeUnit" id="osBoomLabel">25°</div>
+          <div class="osSailTrimHeader">
+            <span class="osGaugeLabel">Sail Trim</span>
+            <button class="osSailsToggle" id="osSailsToggle">SAILS UP</button>
+          </div>
+
+          <div class="osSailTrimSection">
+            <div class="osSailTrimSubLabel">Boom</div>
+            <input type="range" id="osBoomSlider" class="osBoomSliderSmall" min="-90" max="90" step="1" value="25">
+            <div class="osGaugeUnit" id="osBoomLabel">25°</div>
+          </div>
+
+          <div class="osSailTrimSection">
+            <div class="osSailTrimSubLabel">Main Reef</div>
+            <div class="osReefButtons">
+              <button class="osReefBtn active" data-reef="0">Full</button>
+              <button class="osReefBtn" data-reef="1">Reef 1</button>
+              <button class="osReefBtn" data-reef="2">Reef 2</button>
+            </div>
+          </div>
+
+          <div class="osSailTrimSection">
+            <div class="osSailTrimSubLabel">Jib Furl</div>
+            <input type="range" id="osJibFurlSlider" class="osBoomSliderSmall" min="0" max="100" step="1" value="100">
+            <div class="osGaugeUnit" id="osJibFurlLabel">Full Jib</div>
+          </div>
+
+          <div class="osSailAreaReadout" id="osSailAreaReadout">— sq ft exposed</div>
         `;
       case "wheel":
         return `
           <div class="osWheelHeader">
             <span class="osGaugeLabel">Helm</span>
-            <button class="osAutopilotBadge" id="osAutopilotBadge">AUTO</button>
+            <div class="osHelmModeToggle">
+              <button class="osHelmModeBtn" id="osManualBtn">MANUAL</button>
+              <button class="osHelmModeBtn" id="osAutoBtn">AUTO</button>
+            </div>
           </div>
           <div class="osWheelFace" id="osWheelFace">
             <svg viewBox="0 0 100 100" class="osWheelSvg" id="osWheelSvg">
@@ -379,6 +405,25 @@
     if (label) label.textContent = Math.round(angle) + "°";
   }
 
+  function setReefButtons(reefLevel) {
+    document.querySelectorAll(".osReefBtn").forEach(btn => {
+      btn.classList.toggle("active", parseInt(btn.dataset.reef, 10) === reefLevel);
+    });
+  }
+
+  function setJibFurlLabel(pct) {
+    const label = document.getElementById("osJibFurlLabel");
+    if (!label) return;
+    const rounded = Math.round(pct);
+    label.textContent = rounded <= 2 ? "Furled" : rounded >= 98 ? "Full Jib" : rounded + "% Jib";
+  }
+
+  function setSailAreaReadout(exposedSqFt, totalSqFt) {
+    const el = document.getElementById("osSailAreaReadout");
+    if (!el) return;
+    el.textContent = `${Math.round(exposedSqFt)} / ${Math.round(totalSqFt)} sq ft exposed`;
+  }
+
   function setSailsState(isUp) {
     const toggle = document.getElementById("osSailsToggle");
     if (toggle) {
@@ -394,7 +439,8 @@
     const spokes = document.getElementById("osWheelSpokes");
     const dot = document.getElementById("osRudderDot");
     const label = document.getElementById("osRudderLabel");
-    const badge = document.getElementById("osAutopilotBadge");
+    const manualBtn = document.getElementById("osManualBtn");
+    const autoBtn = document.getElementById("osAutoBtn");
     const face = document.getElementById("osWheelFace");
 
     if (spokes) spokes.setAttribute("transform", `rotate(${rudderAngle * 2} 50 50)`);
@@ -410,7 +456,8 @@
         (rounded < 0 ? `Port ${Math.abs(rounded)}°` : `Starboard ${rounded}°`);
     }
 
-    if (badge) badge.classList.toggle("active", !!autopilotOn);
+    if (manualBtn) manualBtn.classList.toggle("active", !autopilotOn);
+    if (autoBtn) autoBtn.classList.toggle("active", !!autopilotOn);
     if (face) face.classList.toggle("autopilot", !!autopilotOn);
   }
 
@@ -433,6 +480,9 @@
     calculateApparentWind,
     setEngineState,
     setBoomLabel,
+    setReefButtons,
+    setJibFurlLabel,
+    setSailAreaReadout,
     setSailsState,
     setWheelState,
     rebuild: buildPanel

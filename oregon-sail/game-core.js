@@ -121,23 +121,25 @@ OS.bearingDeg = function (lat1, lon1, lat2, lon2) {
 OS.setCourse = async function (destLat, destLon, mode) {
   if (!OS.boat) return;
   const bearing = OS.bearingDeg(OS.boat.lat, OS.boat.lon, destLat, destLon);
+  const update = {
+    destination_lat: destLat,
+    destination_lon: destLon,
+    course_bearing: bearing,
+    course_mode: mode || "sailing",   /* legacy field, kept in sync during transition */
+    sailing_active: true,              /* setting a course raises the sails by default */
+    autopilot_on: true,                /* tapping a destination engages autopilot */
+    updated_at: new Date().toISOString()
+  };
+  Object.assign(OS.boat, update); /* in-memory first — see note in setEngine */
 
   const { data, error } = await sbClient
     .from("boats")
-    .update({
-      destination_lat: destLat,
-      destination_lon: destLon,
-      course_bearing: bearing,
-      course_mode: mode || "sailing",   /* legacy field, kept in sync during transition */
-      sailing_active: true,              /* setting a course raises the sails by default */
-      autopilot_on: true,                /* tapping a destination engages autopilot */
-      updated_at: new Date().toISOString()
-    })
+    .update(update)
     .eq("id", OS.boat.id)
     .select()
     .single();
 
-  if (!error && data) OS.boat = data;
+  if (error) console.error("Oregon Sail: setCourse failed", error);
   return { data, error };
 };
 
@@ -154,25 +156,29 @@ OS.setRudder = async function (angle) {
 
 OS.setAutopilot = async function (on) {
   if (!OS.boat) return;
+  OS.boat.autopilot_on = on; /* in-memory first — see note in setEngine */
+
   const { data, error } = await sbClient
     .from("boats")
     .update({ autopilot_on: on, updated_at: new Date().toISOString() })
     .eq("id", OS.boat.id)
     .select()
     .single();
-  if (!error && data) OS.boat = data;
+  if (error) console.error("Oregon Sail: setAutopilot failed", error);
   return { data, error };
 };
 
 OS.dropAnchor = async function () {
   if (!OS.boat) return;
+  OS.boat.course_mode = "anchored"; /* in-memory first — see note in setEngine */
+
   const { data, error } = await sbClient
     .from("boats")
     .update({ course_mode: "anchored", updated_at: new Date().toISOString() })
     .eq("id", OS.boat.id)
     .select()
     .single();
-  if (!error && data) OS.boat = data;
+  if (error) console.error("Oregon Sail: dropAnchor failed", error);
   return { data, error };
 };
 
@@ -186,13 +192,20 @@ OS.setEngine = async function (engineOn, throttleRpm, gear) {
   if (throttleRpm != null) update.throttle_rpm = throttleRpm;
   if (gear != null) update.engine_gear = gear;
 
+  /* Apply immediately in-memory so the client simulation's current
+     lat/lon/fuel/etc aren't lost — only merge the fields we actually
+     changed, don't replace OS.boat wholesale with the server's
+     response (which reflects whatever lat/lon was there as of the
+     last 10-min sync, not the client's live simulated position). */
+  Object.assign(OS.boat, update);
+
   const { data, error } = await sbClient
     .from("boats")
     .update(update)
     .eq("id", OS.boat.id)
     .select()
     .single();
-  if (!error && data) OS.boat = data;
+  if (error) console.error("Oregon Sail: setEngine failed", error);
   return { data, error };
 };
 
@@ -201,25 +214,62 @@ OS.setEngine = async function (engineOn, throttleRpm, gear) {
    --------------------------------------------------------------- */
 OS.setBoomAngle = async function (angle) {
   if (!OS.boat) return;
+  OS.boat.boom_angle = angle; /* in-memory first, see note in setEngine */
+
   const { data, error } = await sbClient
     .from("boats")
     .update({ boom_angle: angle, updated_at: new Date().toISOString() })
     .eq("id", OS.boat.id)
     .select()
     .single();
-  if (!error && data) OS.boat = data;
+  if (error) console.error("Oregon Sail: setBoomAngle failed", error);
+  return { data, error };
+};
+
+/* Main sail reef level: 0 = full sail, 1 = first reef, 2 = second reef.
+   Each step reduces main sail area (see physics.js effectiveAreaRatio)
+   and raises the safe wind ceiling before risking overpowered damage. */
+OS.setReefLevel = async function (level) {
+  if (!OS.boat) return;
+  OS.boat.reef_level = level; /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ reef_level: level, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setReefLevel failed", error);
+  return { data, error };
+};
+
+/* Jib furl percentage: 0 = fully furled (no jib drive), 100 = full
+   jib out. Continuous, unlike the main's two reef steps. */
+OS.setJibFurl = async function (pct) {
+  if (!OS.boat) return;
+  OS.boat.jib_furl_pct = pct; /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ jib_furl_pct: pct, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setJibFurl failed", error);
   return { data, error };
 };
 
 OS.setSailingActive = async function (active) {
   if (!OS.boat) return;
+  OS.boat.sailing_active = active; /* in-memory first, see note in setEngine */
+
   const { data, error } = await sbClient
     .from("boats")
     .update({ sailing_active: active, updated_at: new Date().toISOString() })
     .eq("id", OS.boat.id)
     .select()
     .single();
-  if (!error && data) OS.boat = data;
+  if (error) console.error("Oregon Sail: setSailingActive failed", error);
   return { data, error };
 };
 

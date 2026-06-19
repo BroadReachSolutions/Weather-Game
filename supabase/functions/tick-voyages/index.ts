@@ -119,13 +119,24 @@ function calculateSailSpeed(boat, windSpeedMph, windFromDeg) {
   const reefLimits = boat.reef_wind_limits_mph ?? [25, 30, 35];
   const reefPenalties = boat.reef_speed_penalty ?? [1.0, 0.85, 0.65];
   const currentCeiling = reefLimits[reefLevel] ?? reefLimits[reefLimits.length - 1];
-  const reefPenalty = reefPenalties[reefLevel] ?? 1.0;
 
   const overpowered = windSpeedMph > currentCeiling;
   const overFactor = overpowered ? (windSpeedMph - currentCeiling) / currentCeiling : 0;
 
+  /* Effective sail area: main scaled by its reef factor, jib scaled
+     continuously by how much is furled in. Mirrors the client-side
+     physics.js formula exactly — keep both in sync. */
+  const mainArea = boat.main_sail_area_sqft ?? 245;
+  const jibArea = boat.jib_sail_area_sqft ?? 105;
+  const totalFullArea = mainArea + jibArea;
+  const mainReefFactor = reefPenalties[reefLevel] ?? 1.0;
+  const jibFurlFactor = Math.max(0, Math.min(100, boat.jib_furl_pct ?? 100)) / 100;
+  const effectiveAreaRatio = totalFullArea > 0
+    ? (mainArea * mainReefFactor + jibArea * jibFurlFactor) / totalFullArea
+    : 1.0;
+
   const hullSpeed = boat.hull_speed_kt ?? 6.5;
-  let speedKt = hullSpeed * pos.speedFactor * trimFactor * windFactor * reefPenalty;
+  let speedKt = hullSpeed * pos.speedFactor * trimFactor * windFactor * effectiveAreaRatio;
   speedKt = Math.max(0, Math.min(hullSpeed, speedKt));
 
   return { speedKt, pointOfSail: pos.name, overpowered, overFactor, reefLevel };

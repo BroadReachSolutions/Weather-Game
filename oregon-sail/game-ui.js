@@ -282,6 +282,29 @@
     /* Track recording uses the same 1nm-sampling logic, fed by the
        simulated position now instead of only the server-confirmed one */
     maybeRecordTrackPoint(boat.lat, boat.lon);
+
+    maybeRefreshGroundTexture(boat.lat, boat.lon);
+  }
+
+  /* Ground texture (the satellite tile under the 3D boat) only needs
+     to refresh when the boat has actually moved into a new area —
+     otherwise we'd be re-fetching the same tile every second. This
+     was previously only tied to the 10-min server sync, which meant
+     sailing into view of land wouldn't show up in the 3D scene until
+     the next sync — fixed by checking distance every sim tick instead. */
+  let lastGroundTextureLat = null;
+  let lastGroundTextureLon = null;
+  const GROUND_TEXTURE_REFRESH_NM = 2;
+
+  function maybeRefreshGroundTexture(lat, lon) {
+    if (typeof window.OSHelm3D === "undefined") return;
+    if (lastGroundTextureLat != null) {
+      const moved = OS.haversineNm(lastGroundTextureLat, lastGroundTextureLon, lat, lon);
+      if (moved < GROUND_TEXTURE_REFRESH_NM) return;
+    }
+    lastGroundTextureLat = lat;
+    lastGroundTextureLon = lon;
+    window.OSHelm3D.updateGroundTexture(lat, lon);
   }
 
   /* ---------------------------------------------------------------
@@ -512,6 +535,7 @@
       boomAngleDeg: currentBoomAngle,
       isSailing,
       reefLevel: OS.boat ? (OS.boat.reef_level || 0) : 0,
+      jibFurlPct: OS.boat ? (OS.boat.jib_furl_pct != null ? OS.boat.jib_furl_pct : 100) : 100,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
          feed on the client */
@@ -988,36 +1012,92 @@
       map.setView([OS.boat.lat, OS.boat.lon], map.getZoom(), { animate: true });
     });
 
-    /* Boom trim slider lives inside the instrument gauge now, but
-       keeps the same element id so this wiring still works */
+    /* The gauges (boom slider, engine controls, wheel, sails toggle)
+       live inside the instrument panel, which instruments.js builds
+       on its own async DOMContentLoaded + retry timer — not
+       coordinated with this function's call timing. Wiring them here
+       directly can run before that DOM exists, so retry until it does
+       rather than silently failing. */
+    wireGaugeDependentControls();
+  }
+
+  function wireGaugeDependentControls(attemptsLeft) {
     const boomSlider = document.getElementById("osBoomSlider");
-    if (boomSlider) {
-      boomSlider.value = currentBoomAngle;
-      boomSlider.addEventListener("input", () => {
-        currentBoomAngle = parseInt(boomSlider.value, 10);
-        refreshBoatIcon(); /* live preview while dragging */
-        if (window.OSInstruments) window.OSInstruments.setBoomLabel(currentBoomAngle);
-      });
-      boomSlider.addEventListener("change", async () => {
-        saveBoomAngle(currentBoomAngle);
-        await OS.setBoomAngle(currentBoomAngle);
-      });
+    const sailsToggle = document.getElementById("osSailsToggle");
+    const wheelFace = document.getElementById("osWheelFace");
+    const engineToggle = document.getElementById("osEngineToggle");
+    const jibSlider = document.getElementById("osJibFurlSlider");
+
+    if (!boomSlider || !sailsToggle || !wheelFace || !engineToggle || !jibSlider) {
+      if (attemptsLeft == null) attemptsLeft = 20;
+      if (attemptsLeft > 0) setTimeout(() => wireGaugeDependentControls(attemptsLeft - 1), 200);
+      return;
     }
+
+    boomSlider.value = currentBoomAngle;
+    boomSlider.addEventListener("input", () => {
+      currentBoomAngle = parseInt(boomSlider.value, 10);
+      refreshBoatIcon(); /* live preview while dragging */
+      if (window.OSInstruments) window.OSInstruments.setBoomLabel(currentBoomAngle);
+    });
+    boomSlider.addEventListener("change", async () => {
+      saveBoomAngle(currentBoomAngle);
+      await OS.setBoomAngle(currentBoomAngle);
+    });
 
     wireEngineControls();
     wireWheelControls();
 
-    const sailsToggle = document.getElementById("osSailsToggle");
-    if (sailsToggle) {
-      const isUp = !!(OS.boat && OS.boat.sailing_active);
-      if (window.OSInstruments) window.OSInstruments.setSailsState(isUp);
-      sailsToggle.addEventListener("click", async () => {
-        const newState = !(OS.boat && OS.boat.sailing_active);
-        await OS.setSailingActive(newState);
-        if (window.OSInstruments) window.OSInstruments.setSailsState(newState);
-        renderStatusLine(OS.boat);
+    const isUp = !!(OS.boat && OS.boat.sailing_active);
+    if (window.OSInstruments) window.OSInstruments.setSailsState(isUp);
+    sailsToggle.addEventListener("click", async () => {
+      const newState = !(OS.boat && OS.boat.sailing_active);
+      await OS.setSailingActive(newState);
+      if (window.OSInstruments) window.OSInstruments.setSailsState(newState);
+      renderStatusLine(OS.boat);
+    });
+
+    /* Main reef buttons — 3 discrete states (full / reef 1 / reef 2) */
+    if (window.OSInstruments) window.OSInstruments.setReefButtons(OS.boat ? (OS.boat.reef_level || 0) : 0);
+    document.querySelectorAll(".osReefBtn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const level = parseInt(btn.dataset.reef, 10);
+        await OS.setReefLevel(level);
+        if (window.OSInstruments) window.OSInstruments.setReefButtons(level);
+        updateSailAreaReadout();
       });
-    }
+    });
+
+    /* Jib furl — continuous scroll/slider, 0 (furled) to 100 (full out) */
+    jibSlider.value = OS.boat ? (OS.boat.jib_furl_pct != null ? OS.boat.jib_furl_pct : 100) : 100;
+    if (window.OSInstruments) window.OSInstruments.setJibFurlLabel(parseFloat(jibSlider.value));
+    jibSlider.addEventListener("input", () => {
+      const pct = parseFloat(jibSlider.value);
+      if (OS.boat) OS.boat.jib_furl_pct = pct; /* live in-memory, smooth dragging */
+      if (window.OSInstruments) window.OSInstruments.setJibFurlLabel(pct);
+      updateSailAreaReadout();
+    });
+    jibSlider.addEventListener("change", async () => {
+      await OS.setJibFurl(parseFloat(jibSlider.value));
+    });
+
+    updateSailAreaReadout();
+  }
+
+  /* Shows how much sail area is actually exposed right now (main
+     reef factor + jib furl combined) against the boat's full area —
+     this is the same ratio the speed formula uses, made visible so
+     the player can see why reefing/furling slows them down. */
+  function updateSailAreaReadout() {
+    if (!OS.boat || typeof window.OSInstruments === "undefined") return;
+    const mainArea = OS.boat.main_sail_area_sqft ?? 245;
+    const jibArea = OS.boat.jib_sail_area_sqft ?? 105;
+    const totalArea = mainArea + jibArea;
+    const reefPenalties = OS.boat.reef_speed_penalty ?? [1.0, 0.85, 0.65];
+    const mainFactor = reefPenalties[OS.boat.reef_level || 0] ?? 1.0;
+    const jibFactor = Math.max(0, Math.min(100, OS.boat.jib_furl_pct ?? 100)) / 100;
+    const exposed = mainArea * mainFactor + jibArea * jibFactor;
+    window.OSInstruments.setSailAreaReadout(exposed, totalArea);
   }
 
   /* ---------------------------------------------------------------
@@ -1029,8 +1109,9 @@
      --------------------------------------------------------------- */
   function wireWheelControls() {
     const face = document.getElementById("osWheelFace");
-    const badge = document.getElementById("osAutopilotBadge");
-    if (!face) return;
+    const manualBtn = document.getElementById("osManualBtn");
+    const autoBtn = document.getElementById("osAutoBtn");
+    if (!face) return; /* caller (wireGaugeDependentControls) already confirmed it exists */
 
     if (window.OSInstruments) {
       window.OSInstruments.setWheelState(OS.boat ? OS.boat.rudder_angle || 0 : 0, OS.boat ? OS.boat.autopilot_on : true);
@@ -1081,8 +1162,16 @@
     face.addEventListener("mousedown", onDown);
     face.addEventListener("touchstart", onDown, { passive: false });
 
-    if (badge) {
-      badge.addEventListener("click", async () => {
+    if (manualBtn) {
+      manualBtn.addEventListener("click", async () => {
+        if (!OS.boat) return;
+        await OS.setAutopilot(false);
+        if (window.OSInstruments) window.OSInstruments.setWheelState(OS.boat.rudder_angle || 0, false);
+      });
+    }
+
+    if (autoBtn) {
+      autoBtn.addEventListener("click", async () => {
         if (!OS.boat) return;
         await OS.setAutopilot(true);
         OS.boat.rudder_angle = 0;

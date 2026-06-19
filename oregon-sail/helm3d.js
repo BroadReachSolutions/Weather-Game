@@ -45,7 +45,7 @@
     const h = wrap.clientHeight || 240;
 
     camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 1000);
-    camera.position.set(0, 10, 18);
+    camera.position.set(0, 14, 26);
 
     renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
     renderer.setSize(w, h);
@@ -61,8 +61,8 @@
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 1, 0);
     controls.maxPolarAngle = Math.PI * 0.49; /* don't let camera dip below water */
-    controls.minDistance = 6;
-    controls.maxDistance = 60;
+    controls.minDistance = 10;
+    controls.maxDistance = 90;
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.update();
@@ -70,9 +70,63 @@
     buildGroundPlane();
     buildWater();
     buildBoat();
+    buildSky();
+
+    windLinesGroup = new THREE.Group();
+    scene.add(windLinesGroup);
 
     window.addEventListener("resize", onResize);
     return true;
+  }
+
+  /* ---------------------------------------------------------------
+     SKY — a few simple decorative elements (sun glow + low-poly
+     cloud puffs drifting slowly) so the scene doesn't feel like an
+     empty colored dome. Purely cosmetic, no gameplay data involved.
+     --------------------------------------------------------------- */
+  let cloudGroup = null;
+
+  function buildSky() {
+    /* Soft sun glow — a large, dim sprite-like disc high in the sky */
+    const sunGeo = new THREE.CircleGeometry(18, 24);
+    const sunMat = new THREE.MeshBasicMaterial({
+      color: 0xfff6d8, transparent: true, opacity: 0.55, depthWrite: false
+    });
+    const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    sunMesh.position.set(60, 70, -80);
+    sunMesh.lookAt(0, 10, 0);
+    scene.add(sunMesh);
+
+    /* Low-poly cloud puffs — small clusters of soft white spheres
+       scattered at altitude, drifting slowly across the sky */
+    cloudGroup = new THREE.Group();
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+    const cloudCount = 9;
+    for (let i = 0; i < cloudCount; i++) {
+      const cluster = new THREE.Group();
+      const puffCount = 3 + Math.floor(Math.random() * 3);
+      for (let p = 0; p < puffCount; p++) {
+        const r = 2 + Math.random() * 2.5;
+        const puffGeo = new THREE.SphereGeometry(r, 6, 5);
+        const puff = new THREE.Mesh(puffGeo, cloudMat);
+        puff.position.set((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 4);
+        cluster.add(puff);
+      }
+      const angle = (i / cloudCount) * Math.PI * 2;
+      const dist = 70 + Math.random() * 50;
+      cluster.position.set(Math.cos(angle) * dist, 28 + Math.random() * 14, Math.sin(angle) * dist);
+      cluster.userData.driftSpeed = 0.15 + Math.random() * 0.15;
+      cloudGroup.add(cluster);
+    }
+    scene.add(cloudGroup);
+  }
+
+  function animateSky(elapsedFactor) {
+    if (!cloudGroup) return;
+    cloudGroup.children.forEach((cluster) => {
+      cluster.position.x += cluster.userData.driftSpeed * elapsedFactor;
+      if (cluster.position.x > 140) cluster.position.x = -140;
+    });
   }
 
   /* ---------------------------------------------------------------
@@ -156,9 +210,10 @@
 
   function animateWater(waveHeightFt) {
     if (!waterMesh) return;
-    /* Bigger, chunkier amplitude than a realistic ocean — stylized,
-       readable swell rather than subtle ripples */
-    const amplitude = Math.min(2.2, (waveHeightFt || 1) * 0.28);
+    /* Bigger, chunkier amplitude than a realistic ocean, but scaled
+       back a bit from the very first pass since the boat is now
+       1.8x larger and shouldn't look swamped by the swell */
+    const amplitude = Math.min(1.4, (waveHeightFt || 1) * 0.18);
     const pos = waterMesh.geometry.attributes.position;
     const foamMesh = waterMesh.userData.foamMesh;
     const foamPos = foamMesh ? foamMesh.geometry.attributes.position : null;
@@ -189,6 +244,9 @@
 
   function buildBoat() {
     boatGroup = new THREE.Group();
+    /* Whole boat scaled up substantially so it reads clearly against
+       the water/waves instead of looking swamped by them */
+    boatGroup.scale.set(1.8, 1.8, 1.8);
 
     /* Hull — extruded from a top-down silhouette with a pointed bow
        (+Z) and a flat transom stern (-Z), instead of a plain box */
@@ -206,12 +264,6 @@
     hullMesh = new THREE.Mesh(hullExtrude, hullMat);
     hullMesh.position.y = 0.1;
     boatGroup.add(hullMesh);
-
-    /* A contrasting hull stripe / rubrail for visual definition */
-    const stripeGeo = new THREE.BoxGeometry(2.16, 0.12, 6.9);
-    const stripeMesh = new THREE.Mesh(stripeGeo, new THREE.MeshPhongMaterial({ color: 0x1565c0 }));
-    stripeMesh.position.set(0, 0.45, 0.8);
-    boatGroup.add(stripeMesh);
 
     /* Keel fin beneath, just for visual grounding */
     const keelGeo = new THREE.BoxGeometry(0.3, 1.2, 2);
@@ -235,7 +287,11 @@
     const boomLen = 3.2;
     const boomGeo = new THREE.CylinderGeometry(0.05, 0.05, boomLen, 6);
     const boomMesh = new THREE.Mesh(boomGeo, new THREE.MeshPhongMaterial({ color: 0xcfd8df }));
-    boomMesh.rotation.z = Math.PI / 2;
+    /* A cylinder's default long axis is Y. Rotating on X lays it down
+       along Z (fore-aft, running with the keel) — the previous
+       rotation.z laid it along X instead (side-to-side, perpendicular
+       to the hull), which was the reported 90°-off bug. */
+    boomMesh.rotation.x = Math.PI / 2;
     boomMesh.position.set(0, 0, -boomLen / 2); /* extends aft from the mast pivot */
     boomGroup.add(boomMesh);
 
@@ -280,49 +336,66 @@
     }));
     boatGroup.add(headsailMesh);
 
-    /* Wind speed lines — small streaming lines near the mast that
-       get longer/thicker with stronger wind, give a sense of wind
-       force the way flags or pennants would */
-    windLinesGroup = new THREE.Group();
-    windLinesGroup.position.set(mastX, 6.0, mastZ);
-    boatGroup.add(windLinesGroup);
-
     scene.add(boatGroup);
   }
 
-  /* reefLevel: 0 = full sail, 1 = reef 1 (partly down), 2 = reef 2
-     (mostly down). Scales the headsail's visible height to match. */
-  function updateHeadsailReef(reefLevel) {
+  /* jibFurlPct: 0 (fully furled) .. 100 (full jib out). Scales the
+     headsail's visible height to match how much jib is actually
+     deployed, matching the new continuous furl control. */
+  function updateHeadsailReef(jibFurlPct) {
     if (!headsailMesh) return;
-    const scaleByReef = { 0: 1.0, 1: 0.6, 2: 0.3 };
-    const scale = scaleByReef[reefLevel] != null ? scaleByReef[reefLevel] : 1.0;
+    const scale = Math.max(0, Math.min(100, jibFurlPct)) / 100;
     headsailMesh.scale.y = scale;
   }
 
-  /* Rebuilds the small streaming wind-speed lines near the masthead.
-     More lines + longer + thicker as wind speed increases, fewer and
-     shorter in light air — a simple visual wind-force indicator. */
+  /* Rebuilds scene-wide wind streaks scattered across the visible
+     water area (not attached to the boat/mast) so wind is visible
+     everywhere around the player, not just at the masthead. More
+     streaks + longer + thicker as wind speed increases. */
   let lastWindLineSpeedKt = -1;
+  let windStreakSpeed = 0;
   function updateWindLines(windSpeedKt) {
     if (!windLinesGroup) return;
     const rounded = Math.round(windSpeedKt);
+    windStreakSpeed = windSpeedKt;
     if (rounded === lastWindLineSpeedKt) return; /* avoid rebuilding every frame */
     lastWindLineSpeedKt = rounded;
 
-    while (windLinesGroup.children.length) windLinesGroup.remove(windLinesGroup.children[0]);
+    while (windLinesGroup.children.length) {
+      const child = windLinesGroup.children[0];
+      windLinesGroup.remove(child);
+    }
 
-    const count = Math.max(2, Math.min(6, Math.round(2 + windSpeedKt / 5)));
-    const length = Math.max(0.4, Math.min(1.6, 0.4 + windSpeedKt * 0.06));
-    const thickness = Math.max(0.015, Math.min(0.05, 0.015 + windSpeedKt * 0.002));
+    const count = Math.max(8, Math.min(40, Math.round(8 + windSpeedKt * 1.6)));
+    const length = Math.max(0.5, Math.min(2.2, 0.5 + windSpeedKt * 0.07));
+    const thickness = Math.max(0.02, Math.min(0.07, 0.02 + windSpeedKt * 0.002));
 
     for (let i = 0; i < count; i++) {
       const geo = new THREE.CylinderGeometry(thickness, thickness, length, 4);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
       const line = new THREE.Mesh(geo, mat);
-      line.rotation.z = Math.PI / 2; /* lay it horizontal, streaming aft */
-      line.position.set((i - count / 2) * 0.18, 0.1 - i * 0.05, -length / 2);
+      line.rotation.x = Math.PI / 2; /* lie flat, streaming along Z */
+      /* Scatter across a wide area around the boat at varying heights
+         just above the water, so wind reads as an ambient field */
+      line.position.set(
+        (Math.random() - 0.5) * 70,
+        0.3 + Math.random() * 4,
+        (Math.random() - 0.5) * 70
+      );
+      line.userData.baseZ = line.position.z;
+      line.userData.offset = Math.random() * 40;
       windLinesGroup.add(line);
     }
+  }
+
+  /* Streams each wind line along the wind direction over time,
+     wrapping back around so the field feels continuous */
+  function animateWindLines(elapsedFactor) {
+    if (!windLinesGroup) return;
+    windLinesGroup.children.forEach((line) => {
+      line.position.z -= windStreakSpeed * 0.01 * elapsedFactor;
+      if (line.position.z < -40) line.position.z = 40;
+    });
   }
 
   function updateBoom(boomAngleDeg) {
@@ -352,13 +425,20 @@
 
     const waveHeightFt = window.OSHelm3DState ? window.OSHelm3DState.waveHeightFt : 1;
     animateWater(waveHeightFt);
+    animateWindLines(1);
+    animateSky(1);
+    updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
     if (window.OSHelm3DState) {
       const s = window.OSHelm3DState;
       const targetHeel = computeTargetHeel(s.windSpeedKt, s.trimFactor, s.pointOfSailFactor, s.isSailing);
       currentHeelDeg += (targetHeel - currentHeelDeg) * HEEL_SMOOTHING;
 
-      const targetPitch = Math.sin(waveClock * 0.7) * Math.min(8, (waveHeightFt || 1) * 1.2);
+      /* Gentle idle rocking even with sails down / calm water — a
+         becalmed or anchored boat should still bob slightly rather
+         than sit perfectly rigid, which read as static/lifeless */
+      const effectiveWaveHeight = s.isSailing ? (waveHeightFt || 1) : Math.max(0.5, (waveHeightFt || 1) * 0.5);
+      const targetPitch = Math.sin(waveClock * 0.7) * Math.min(8, effectiveWaveHeight * 1.2);
       currentPitchDeg += (targetPitch - currentPitchDeg) * PITCH_SMOOTHING;
 
       if (boatGroup) {
@@ -366,18 +446,21 @@
         const heelSign = (s.boomAngleDeg || 0) >= 0 ? -1 : 1;
         boatGroup.rotation.z = (currentHeelDeg * heelSign * Math.PI) / 180;
         boatGroup.rotation.x = (currentPitchDeg * Math.PI) / 180;
-        boatGroup.position.y = Math.sin(waveClock * 0.7) * Math.min(0.4, (waveHeightFt || 1) * 0.08);
+        boatGroup.position.y = 0.3 + Math.sin(waveClock * 0.7) * Math.min(0.4, effectiveWaveHeight * 0.08);
       }
 
       updateBoom(s.boomAngleDeg || 0);
-      updateHeadsailReef(s.isSailing ? (s.reefLevel || 0) : 3); /* 3 = fully down, not sailing */
+      updateHeadsailReef(s.isSailing ? (s.jibFurlPct != null ? s.jibFurlPct : 100) : 0); /* 0 = fully down, not sailing */
       updateWindLines(s.windSpeedKt || 0);
 
       /* Sails visible only while sailing_active; mainsail billow is a
          subtle camber bend (Z displacement of the boom-tip vertex)
-         rather than X-scaling, since it's a flat triangle fan now */
+         rather than X-scaling, since it's a flat triangle fan now.
+         Mainsail height also scales down with reef level. */
       if (sailMesh) {
         sailMesh.visible = !!s.isSailing;
+        const reefScaleMap = { 0: 1.0, 1: 0.65, 2: 0.35 };
+        sailMesh.scale.y = reefScaleMap[s.reefLevel] != null ? reefScaleMap[s.reefLevel] : 1.0;
         const fill = (s.trimFactor || 0) * 0.4; /* 0..0.4 units of camber */
         const posAttr = sailMesh.geometry.attributes.position;
         posAttr.setX(2, fill); /* boom-tip vertex bows outward slightly when well-trimmed */
