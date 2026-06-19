@@ -250,6 +250,13 @@
     const windKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
 
     const result = window.OSPhysics.advance(boat, windKt, windDeg, elapsedHours);
+    if (window.OS_DEBUG_STEERING) {
+      console.log("[OS DEBUG] sim tick:", {
+        autopilot: boat.autopilot_on, rudder: boat.rudder_angle,
+        headingBefore: boat.course_bearing, headingAfter: result.heading,
+        speedKt: result.speedKt, elapsedHours
+      });
+    }
 
     /* Mutate the in-memory boat state directly — this is the client
        simulation "moving" the boat between server syncs */
@@ -1147,6 +1154,7 @@
       OS.boat.rudder_angle = newRudder;
       OS.boat.autopilot_on = false; /* grabbing the wheel takes manual control */
       if (window.OSInstruments) window.OSInstruments.setWheelState(newRudder, false);
+      console.log("[OS DEBUG] wheel drag:", { rudder: newRudder, autopilot: OS.boat.autopilot_on, sailing: OS.boat.sailing_active, engine: OS.boat.engine_on });
     }
 
     function onUp() {

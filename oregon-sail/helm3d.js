@@ -514,8 +514,18 @@
       }
 
       if (boatGroup) {
-        /* Heel to whichever side the wind is pushing from (boom side) */
-        const heelSign = (s.boomAngleDeg || 0) >= 0 ? -1 : 1;
+        /* Heel to whichever side the wind is actually hitting the
+           boat from, derived from real heading vs true wind — NOT
+           boom angle, which was only a rough proxy and could
+           visually disagree with where the wind streaks show the
+           wind actually coming from (e.g. while poorly trimmed or
+           motor-sailing). relative 0-360, 0=wind dead ahead,
+           >180 = wind from the port side. */
+        let heelSign = -1;
+        if (typeof s.heading === "number" && typeof s.windDeg === "number") {
+          const relative = ((s.windDeg - s.heading) + 360) % 360;
+          heelSign = relative > 180 ? 1 : -1; /* wind on port heels to starboard (-1 here), and vice versa */
+        }
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
         boatGroup.rotation.z = (currentHeelDeg * heelSign * Math.PI) / 180;
