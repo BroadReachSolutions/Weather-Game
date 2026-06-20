@@ -160,8 +160,8 @@
        hard over doesn't spin in place, matching real sailing.
      Returns the new heading after elapsedHours of turning.
      --------------------------------------------------------------- */
-  const AUTOPILOT_TURN_RATE_DEG_PER_HOUR = 90; /* how fast autopilot corrects course */
-  const MAX_TURN_RATE_DEG_PER_HOUR_PER_KT = 25; /* rudder turn authority, scales with speed */
+  const AUTOPILOT_TURN_RATE_DEG_PER_HOUR = 32400; /* autopilot corrects a 90° heading error in about 10 seconds */
+  const MAX_TURN_RATE_DEG_PER_HOUR_PER_KT = 72000; /* full rudder deflection completes a 360° turn in about 18 seconds, in line with how quickly a small sailboat actually turns */
 
   function updateHeading(boat, speedKt, elapsedHours) {
     const currentHeading = boat.course_bearing ?? 0;

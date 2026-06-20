@@ -249,11 +249,12 @@
     const windDeg = typeof window.getLastWindDeg === "function" ? window.getLastWindDeg() : 0;
     const windKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
 
+    const headingBeforeTick = boat.course_bearing; /* capture BEFORE advance() runs, since advance() mutates boat.course_bearing directly via reference */
     const result = window.OSPhysics.advance(boat, windKt, windDeg, elapsedHours);
     if (window.OS_DEBUG_STEERING) {
       console.log("[OS DEBUG] sim tick:", {
         autopilot: boat.autopilot_on, rudder: boat.rudder_angle,
-        headingBefore: boat.course_bearing, headingAfter: result.heading,
+        headingBefore: headingBeforeTick, headingAfter: result.heading,
         speedKt: result.speedKt, elapsedHours
       });
     }
@@ -1120,7 +1121,6 @@
     const face = document.getElementById("osWheelFace");
     const manualBtn = document.getElementById("osManualBtn");
     const autoBtn = document.getElementById("osAutoBtn");
-    console.log("[OS DEBUG] wireWheelControls called, face found:", !!face, face);
     if (!face) return; /* caller (wireGaugeDependentControls) already confirmed it exists */
 
     if (window.OSInstruments) {
@@ -1155,7 +1155,6 @@
       OS.boat.rudder_angle = newRudder;
       OS.boat.autopilot_on = false; /* grabbing the wheel takes manual control */
       if (window.OSInstruments) window.OSInstruments.setWheelState(newRudder, false);
-      console.log("[OS DEBUG] wheel drag:", { rudder: newRudder, autopilot: OS.boat.autopilot_on, sailing: OS.boat.sailing_active, engine: OS.boat.engine_on });
     }
 
     function onUp() {
@@ -1172,13 +1171,6 @@
 
     face.addEventListener("mousedown", onDown);
     face.addEventListener("touchstart", onDown, { passive: false });
-
-    /* Sanity-check listener: confirms whether ANY pointer event
-       reaches the wheel face at all, in case something upstream
-       (e.g. a parent's touch-action or another listener) is
-       intercepting it before our own handler runs. */
-    face.addEventListener("touchstart", () => console.log("[OS DEBUG] raw touchstart hit osWheelFace"), { capture: true });
-    face.addEventListener("mousedown", () => console.log("[OS DEBUG] raw mousedown hit osWheelFace"), { capture: true });
 
     if (manualBtn) {
       manualBtn.addEventListener("click", async () => {
