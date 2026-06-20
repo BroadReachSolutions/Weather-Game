@@ -288,62 +288,67 @@
      WATER — animated plane using vertex displacement for a simple
      rolling-wave look, not a real ocean simulation.
      --------------------------------------------------------------- */
+  const waterUniforms = {
+    uTime: { value: 0 },
+    uAmplitude: { value: 0.4 },
+    uDeepColor: { value: new THREE.Color(0x2a73ad) },
+    uLightColor: { value: new THREE.Color(0x6bb8e0) }
+  };
+
   function buildWater() {
     const geo = new THREE.PlaneGeometry(300, 300, 60, 60);
-    /* Two-tone water: vertex colors blend between a deeper and a
-       lighter transparent blue based on the ripple displacement
-       itself, instead of relying on lighting (which was producing
-       muddy gray/black shading in the wave troughs). Using vertex
-       colors keeps it flat and stylized regardless of viewing angle. */
-    const colorAttr = new Float32Array(geo.attributes.position.count * 3);
-    geo.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
 
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      vertexColors: true,
+    /* Two-tone water, computed entirely on the GPU instead of looping
+       over ~3700 vertices in JavaScript every frame (a real CPU
+       bottleneck that was contributing to the reported stutter). The
+       vertex shader displaces each point with the same layered-sine
+       ripple pattern as before; the fragment shader blends between a
+       deep and light tone based on that same displacement. JS now
+       only updates two small uniforms (time, amplitude) per frame. */
+    const mat = new THREE.ShaderMaterial({
+      uniforms: waterUniforms,
       transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      vertexShader: `
+        uniform float uTime;
+        uniform float uAmplitude;
+        varying float vRipple;
+        void main() {
+          float slowClock = uTime * 0.35;
+          float ripple = sin(position.x * 0.18 + slowClock) * uAmplitude * 0.6
+                       + sin(position.y * 0.14 + slowClock * 0.8) * uAmplitude * 0.4
+                       + sin((position.x - position.y) * 0.09 + slowClock * 0.5) * uAmplitude * 0.25;
+          vRipple = ripple / max(uAmplitude, 0.0001);
+          vec3 displaced = vec3(position.x, position.y, ripple);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uDeepColor;
+        uniform vec3 uLightColor;
+        varying float vRipple;
+        void main() {
+          float t = clamp((vRipple + 1.0) / 2.0, 0.0, 1.0);
+          vec3 color = mix(uDeepColor, uLightColor, t);
+          gl_FragColor = vec4(color, 0.6);
+        }
+      `
     });
+
     waterMesh = new THREE.Mesh(geo, mat);
     waterMesh.rotation.x = -Math.PI / 2;
     waterMesh.position.y = 0;
     scene.add(waterMesh);
   }
 
-  const WATER_DEEP = { r: 0.16, g: 0.45, b: 0.68 };   /* deeper tone */
-  const WATER_LIGHT = { r: 0.42, g: 0.72, b: 0.88 };  /* lighter ripple-crest tone */
-
   function animateWater(waveHeightFt) {
     if (!waterMesh) return;
-    /* Calmer, slower amplitude and a much slower time scale than
-       before — the previous version moved noticeably too fast for a
-       relaxed sailing feel. */
-    const amplitude = Math.min(1.0, (waveHeightFt || 1) * 0.14);
-    const pos = waterMesh.geometry.attributes.position;
-    const color = waterMesh.geometry.attributes.color;
-    const slowClock = waveClock * 0.35; /* slowed down from the raw per-frame clock */
-
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const ripple = Math.sin(x * 0.18 + slowClock) * amplitude * 0.6 +
-                      Math.sin(y * 0.14 + slowClock * 0.8) * amplitude * 0.4 +
-                      Math.sin((x - y) * 0.09 + slowClock * 0.5) * amplitude * 0.25;
-      pos.setZ(i, ripple);
-
-      /* Blend vertex color between the deep and light tone based on
-         how "crested" this point currently is, normalized 0..1 */
-      const t = Math.max(0, Math.min(1, (ripple / amplitude + 1) / 2));
-      color.setXYZ(
-        i,
-        WATER_DEEP.r + (WATER_LIGHT.r - WATER_DEEP.r) * t,
-        WATER_DEEP.g + (WATER_LIGHT.g - WATER_DEEP.g) * t,
-        WATER_DEEP.b + (WATER_LIGHT.b - WATER_DEEP.b) * t
-      );
-    }
-    pos.needsUpdate = true;
-    color.needsUpdate = true;
+    /* Calmer, slower amplitude than before — the previous version
+       moved noticeably too fast for a relaxed sailing feel. Just two
+       uniform writes now; the actual per-vertex work happens on the
+       GPU in the shader above. */
+    waterUniforms.uAmplitude.value = Math.min(1.0, (waveHeightFt || 1) * 0.14);
+    waterUniforms.uTime.value = waveClock;
   }
 
   /* ---------------------------------------------------------------
@@ -352,32 +357,59 @@
      boat is actually moving even when the camera angle makes the
      surrounding water's own animation hard to judge by itself.
      --------------------------------------------------------------- */
-  let wakeMesh = null;
   let bowWaveMesh = null;
+  let wakeTrailMesh = null;
+  let wakeHistory = []; /* { x, z, t } world-space points sampled behind the boat over time */
+  const WAKE_LIFETIME_SEC = 15;
+  const WAKE_MAX_POINTS = 90; /* sampled at ~6/sec for 15s of trail */
+  const WAKE_SAMPLE_INTERVAL = WAKE_LIFETIME_SEC / WAKE_MAX_POINTS;
+  let wakeSampleClock = 0;
 
   function buildWake() {
-    /* Two triangles forming a V, apex at the stern, widening aft —
-       geometry itself is static; we scale the whole mesh by speed
-       each frame rather than rebuilding it every time. */
+    /* Wake trail — a ribbon built from the boat's actual recorded
+       path over the last ~15 seconds, instead of a fixed shape
+       attached to the stern. Lives directly in the scene (not
+       parented to boatGroup) since it needs to stay behind at each
+       position the boat actually was, not move/rotate with it now. */
+    const maxVerts = WAKE_MAX_POINTS * 2; /* two edge vertices per sample point */
     const geo = new THREE.BufferGeometry();
-    const wakeVerts = new Float32Array([
-      0, 0, 0,    1.4, 0, -8.5,   0.3, 0, -2.6,
-      0, 0, 0,   -1.4, 0, -8.5,  -0.3, 0, -2.6
-    ]);
-    geo.setAttribute("position", new THREE.BufferAttribute(wakeVerts, 3));
-    geo.setIndex([0, 1, 2, 3, 4, 5]);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xf2fbff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(maxVerts * 3), 3));
+    geo.setAttribute("alpha", new THREE.BufferAttribute(new Float32Array(maxVerts), 1));
+    const indices = [];
+    for (let i = 0; i < WAKE_MAX_POINTS - 1; i++) {
+      const a = i * 2, b = i * 2 + 1, c = (i + 1) * 2, d = (i + 1) * 2 + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+    geo.setIndex(indices);
+    geo.setDrawRange(0, 0); /* nothing to draw until we have history */
+
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      vertexShader: `
+        attribute float alpha;
+        varying float vAlpha;
+        void main() {
+          vAlpha = alpha;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying float vAlpha;
+        void main() {
+          gl_FragColor = vec4(0.92, 0.97, 1.0, vAlpha * 0.45);
+        }
+      `
     });
-    wakeMesh = new THREE.Mesh(geo, mat);
-    /* Stern of the hull is at local Z = -2.6 (see hullShape); position
-       the wake's apex there, just at the water surface */
-    wakeMesh.position.set(0, 0.05, -2.6);
-    boatGroup.add(wakeMesh);
+
+    wakeTrailMesh = new THREE.Mesh(geo, mat);
+    scene.add(wakeTrailMesh);
 
     /* Bow wave — a small breaking-white wedge right at the bow,
        widening with speed the same way real water piles up and
-       breaks at the bow of a moving boat */
+       breaks at the bow of a moving boat. This one stays attached
+       to the boat since it's an immediate effect, not a history trail. */
     const bowGeo = new THREE.BufferGeometry();
     const bowVerts = new Float32Array([
       0, 0, 0,    0.7, 0, -0.9,   0.18, 0, 0.5,
@@ -394,21 +426,82 @@
     boatGroup.add(bowWaveMesh);
   }
 
-  function updateWake(speedKt) {
-    if (!wakeMesh) return;
-    const speed = Math.max(0, speedKt || 0);
-    /* No wake at all when basically stopped; scales up toward hull
-       speed, capped so it doesn't grow unbounded at high speed */
-    const t = Math.min(1, speed / 6);
+  /* Each entry: { dx, dz, t } - offset from the boat's CURRENT
+     position (in the boat's own local/world-aligned XZ plane) where
+     the boat actually was `t` seconds ago, reconstructed by
+     integrating recorded heading+speed backward in time. Since
+     boatGroup never actually translates in this scene (the world is
+     boat-centered; the ground texture scrolls instead), we can't
+     record real XZ history — this is the local equivalent. */
+  function recordWakePoint(headingDeg, speedKt, dtSeconds) {
+    wakeSampleClock += dtSeconds;
+    if (wakeSampleClock < WAKE_SAMPLE_INTERVAL) return;
+    const interval = wakeSampleClock;
+    wakeSampleClock = 0;
 
-    wakeMesh.visible = speed > 0.3;
-    wakeMesh.scale.set(0.5 + t * 1.1, 1, 0.6 + t * 1.1);
-    wakeMesh.material.opacity = 0.3 + t * 0.4;
+    /* Age every existing point and push them further behind by how
+       far the boat has traveled in this sample interval */
+    const headingRad = (headingDeg * Math.PI) / 180;
+    const nm = (speedKt || 0) * (interval / 3600);
+    /* World-units-per-nm is arbitrary in this stylized scene; reuse
+       the same rough scale the wake/boat geometry already uses */
+    const moveDist = nm * 60;
+    const moveX = -Math.sin(headingRad) * moveDist;
+    const moveZ = -Math.cos(headingRad) * moveDist;
 
-    if (bowWaveMesh) {
-      bowWaveMesh.visible = speed > 0.5;
-      bowWaveMesh.scale.set(0.6 + t * 1.4, 1, 0.6 + t * 1.4);
-      bowWaveMesh.material.opacity = 0.35 + t * 0.45;
+    wakeHistory.forEach(p => { p.dx += moveX; p.dz += moveZ; p.t += interval; });
+
+    if ((speedKt || 0) >= 0.3) {
+      wakeHistory.push({ dx: 0, dz: 0, t: 0 });
+    }
+    if (wakeHistory.length > WAKE_MAX_POINTS) wakeHistory.shift();
+  }
+
+  function updateWakeTrail(dtSeconds) {
+    if (!wakeTrailMesh) return;
+    wakeHistory = wakeHistory.filter(p => p.t < WAKE_LIFETIME_SEC);
+
+    const pos = wakeTrailMesh.geometry.attributes.position;
+    const alpha = wakeTrailMesh.geometry.attributes.alpha;
+    const n = wakeHistory.length;
+
+    if (n < 2) {
+      wakeTrailMesh.geometry.setDrawRange(0, 0);
+      return;
+    }
+
+    for (let i = 0; i < n; i++) {
+      const p = wakeHistory[i];
+      /* Width tapers from narrow (oldest/aft) to the boat's stern
+         width (newest), and fades out as it ages past the lifetime */
+      const ageT = p.t / WAKE_LIFETIME_SEC;
+      const fade = Math.max(0, 1 - ageT);
+      const halfWidth = 0.15 + (i / Math.max(1, n - 1)) * 0.55;
+
+      /* Perpendicular direction for ribbon width — approximate using
+         the segment direction to the next point (or previous, at the end) */
+      const next = wakeHistory[i + 1] || wakeHistory[i - 1] || p;
+      const ddx = next.dx - p.dx, ddz = next.dz - p.dz;
+      const len = Math.sqrt(ddx * ddx + ddz * ddz) || 1;
+      const perpX = (-ddz / len) * halfWidth;
+      const perpZ = (ddx / len) * halfWidth;
+
+      pos.setXYZ(i * 2, p.dx + perpX, 0.04, p.dz + perpZ);
+      pos.setXYZ(i * 2 + 1, p.dx - perpX, 0.04, p.dz - perpZ);
+      alpha.setX(i * 2, fade);
+      alpha.setX(i * 2 + 1, fade);
+    }
+
+    pos.needsUpdate = true;
+    alpha.needsUpdate = true;
+    wakeTrailMesh.geometry.setDrawRange(0, (n - 1) * 6);
+
+    /* Anchor the trail at the boat's current stern position/heading.
+       The dx/dz offsets recorded above are already in world-aligned
+       (heading-relative-at-the-time) terms, so the mesh itself stays
+       unrotated — only translated to the boat's current location. */
+    if (currentHeadingDeg != null && boatGroup) {
+      wakeTrailMesh.position.set(boatGroup.position.x, 0, boatGroup.position.z);
     }
   }
 
@@ -813,7 +906,17 @@
     animateWindLines(1);
     animateSky(1);
     animateWildlife(0.016); /* tick runs roughly once per animation frame, ~16ms */
-    updateWake(window.OSHelm3DState ? window.OSHelm3DState.speedKt || 0 : 0);
+    if (window.OSHelm3DState) {
+      const speedKt = window.OSHelm3DState.speedKt || 0;
+      recordWakePoint(currentHeadingDeg || window.OSHelm3DState.heading || 0, speedKt, 0.016);
+      if (bowWaveMesh) {
+        const t = Math.min(1, Math.max(0, speedKt) / 6);
+        bowWaveMesh.visible = speedKt > 0.5;
+        bowWaveMesh.scale.set(0.6 + t * 1.4, 1, 0.6 + t * 1.4);
+        bowWaveMesh.material.opacity = 0.35 + t * 0.45;
+      }
+    }
+    updateWakeTrail(0.016);
     updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
     if (window.OSHelm3DState) {
