@@ -40,14 +40,14 @@
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x7ec8e3);
-    scene.fog = new THREE.Fog(0x9fd3e8, 40, 220);
+    scene.fog = new THREE.Fog(0x9fd3e8, 90, 320);
 
     const wrap = document.getElementById("osHelmViewWrap");
     const w = wrap.clientWidth || 360;
     const h = wrap.clientHeight || 240;
 
     camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 1000);
-    camera.position.set(0, 14, 26);
+    camera.position.set(0, 18, 32);
 
     renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
     renderer.setSize(w, h);
@@ -61,10 +61,10 @@
 
     /* Orbit controls — drag to look around, as requested */
     controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1, 0);
+    controls.target.set(0, 3, 0);
     controls.maxPolarAngle = Math.PI * 0.49; /* don't let camera dip below water */
-    controls.minDistance = 10;
-    controls.maxDistance = 90;
+    controls.minDistance = 12;
+    controls.maxDistance = 110;
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.update();
@@ -230,28 +230,26 @@
      --------------------------------------------------------------- */
   function buildWater() {
     const geo = new THREE.PlaneGeometry(300, 300, 50, 50);
-    /* RuneScape-style water: flat, saturated, slightly translucent
-       blue with a bright specular highlight rather than realistic
-       reflections — a stylized "toy ocean" look */
-    const mat = new THREE.MeshPhongMaterial({
-      color: 0x2e9bd6,
-      specular: 0xbfe9ff,
-      shininess: 120,
+    /* Old-school stylized water: flat-colored and noticeably
+       see-through, like early 3D sailing games — using a basic
+       (unlit) material instead of Phong so wave troughs don't pick
+       up harsh directional shadowing that read as black/gray */
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x3fb4e0,
       transparent: true,
-      opacity: 0.88,
-      side: THREE.DoubleSide,
-      flatShading: true
+      opacity: 0.55,
+      side: THREE.DoubleSide
     });
     waterMesh = new THREE.Mesh(geo, mat);
     waterMesh.rotation.x = -Math.PI / 2;
     waterMesh.position.y = 0;
     scene.add(waterMesh);
 
-    /* A lighter cap layer of small foam-cap dots for visual texture,
-       purely decorative — stylized whitecaps */
+    /* A lighter cap layer of small foam-cap highlights, purely
+       decorative — stylized whitecaps, also unlit/flat */
     const foamGeo = new THREE.PlaneGeometry(300, 300, 50, 50);
     const foamMat = new THREE.MeshBasicMaterial({
-      color: 0xeaf8ff, transparent: true, opacity: 0.18,
+      color: 0xeaf8ff, transparent: true, opacity: 0.15,
       side: THREE.DoubleSide, depthWrite: false
     });
     const foamMesh = new THREE.Mesh(foamGeo, foamMat);
@@ -299,10 +297,12 @@
     boatGroup = new THREE.Group();
     /* Whole boat scaled up substantially so it reads clearly against
        the water/waves instead of looking swamped by them */
-    boatGroup.scale.set(1.8, 1.8, 1.8);
+    boatGroup.scale.set(2.4, 2.4, 2.4);
 
     /* Hull — extruded from a top-down silhouette with a pointed bow
-       (+Z) and a flat transom stern (-Z), instead of a plain box */
+       (+Z) and a flat transom stern (-Z). Depth increased so the
+       freeboard (waterline to deck) reads as a real 5-6ft equivalent
+       once scaled, instead of a thin slab that sat low in the water. */
     const hullShape = new THREE.Shape();
     hullShape.moveTo(0, 4.2);       /* bow point */
     hullShape.quadraticCurveTo(0.9, 2.6, 1.05, 0.5);
@@ -311,30 +311,152 @@
     hullShape.lineTo(-1.05, 0.5);
     hullShape.quadraticCurveTo(-0.9, 2.6, 0, 4.2); /* port side back to bow */
 
-    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: 0.9, bevelEnabled: false });
+    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: 2.1, bevelEnabled: false });
     hullExtrude.rotateX(Math.PI / 2);
     const hullMat = new THREE.MeshPhongMaterial({ color: 0xe8e4da, flatShading: true });
     hullMesh = new THREE.Mesh(hullExtrude, hullMat);
-    hullMesh.position.y = 0.1;
+    /* Raised so most of the hull sits above the waterline (y=0),
+       giving real visible freeboard instead of riding low */
+    hullMesh.position.y = 1.0;
     boatGroup.add(hullMesh);
+
+    const deckY = 1.0 + 2.1; /* top of the hull = deck level */
 
     /* Keel fin beneath, just for visual grounding */
     const keelGeo = new THREE.BoxGeometry(0.3, 1.2, 2);
     const keelMesh = new THREE.Mesh(keelGeo, new THREE.MeshPhongMaterial({ color: 0x2a2a2a }));
-    keelMesh.position.y = -0.6;
+    keelMesh.position.y = -0.1;
     boatGroup.add(keelMesh);
 
-    /* Mast — positioned forward of center, the boom and sails attach to it */
+    /* ---------------------------------------------------------------
+       CABIN TOP — a raised structure forward of the cockpit with
+       small round portholes along each side, sitting on deck.
+       --------------------------------------------------------------- */
+    const cabinGeo = new THREE.BoxGeometry(1.7, 0.9, 3.2);
+    const cabinMat = new THREE.MeshPhongMaterial({ color: 0xf2efe6, flatShading: true });
+    const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
+    cabinMesh.position.set(0, deckY + 0.45, 1.3);
+    boatGroup.add(cabinMesh);
+
+    const portholeMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
+    const portholeGeo = new THREE.CircleGeometry(0.16, 12);
+    for (let side = -1; side <= 1; side += 2) {
+      for (let i = 0; i < 3; i++) {
+        const porthole = new THREE.Mesh(portholeGeo, portholeMat);
+        porthole.position.set(side * 0.851, deckY + 0.5, 0.3 + i * 0.85);
+        porthole.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+        boatGroup.add(porthole);
+      }
+    }
+
+    /* ---------------------------------------------------------------
+       COCKPIT + BIMINI + HELM — an open well aft of the cabin with
+       a canvas bimini top on tubular frames, and a simple wheel/post
+       at the helm station underneath it.
+       --------------------------------------------------------------- */
+    const cockpitFloorGeo = new THREE.BoxGeometry(1.4, 0.15, 1.8);
+    const cockpitFloorMesh = new THREE.Mesh(cockpitFloorGeo, new THREE.MeshPhongMaterial({ color: 0xd8d4c8 }));
+    cockpitFloorMesh.position.set(0, deckY + 0.1, -1.1);
+    boatGroup.add(cockpitFloorMesh);
+
+    const biminiFrameMat = new THREE.MeshPhongMaterial({ color: 0xc8ccd0 });
+    const biminiPostPositions = [
+      [-0.65, -0.3], [0.65, -0.3], [-0.65, -1.8], [0.65, -1.8]
+    ];
+    biminiPostPositions.forEach(([px, pz]) => {
+      const postGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.3, 6);
+      const post = new THREE.Mesh(postGeo, biminiFrameMat);
+      post.position.set(px, deckY + 0.65, pz);
+      boatGroup.add(post);
+    });
+    const biminiTopGeo = new THREE.BoxGeometry(1.5, 0.06, 1.7);
+    const biminiTopMesh = new THREE.Mesh(biminiTopGeo, new THREE.MeshPhongMaterial({
+      color: 0x2c5f73, flatShading: true
+    }));
+    biminiTopMesh.position.set(0, deckY + 1.32, -1.05);
+    boatGroup.add(biminiTopMesh);
+
+    /* Helm — wheel on a post, under the bimini, aft end of the cockpit */
+    const helmPostGeo = new THREE.CylinderGeometry(0.05, 0.06, 0.55, 6);
+    const helmPostMesh = new THREE.Mesh(helmPostGeo, new THREE.MeshPhongMaterial({ color: 0x3a3a3a }));
+    helmPostMesh.position.set(0, deckY + 0.37, -1.7);
+    boatGroup.add(helmPostMesh);
+
+    const helmWheelGeo = new THREE.TorusGeometry(0.3, 0.025, 6, 16);
+    const helmWheelMesh = new THREE.Mesh(helmWheelGeo, new THREE.MeshPhongMaterial({ color: 0x4a3527 }));
+    helmWheelMesh.position.set(0, deckY + 0.68, -1.7);
+    helmWheelMesh.rotation.x = Math.PI / 2.3; /* tilted back like a real boat wheel */
+    boatGroup.add(helmWheelMesh);
+
+    /* ---------------------------------------------------------------
+       LIFELINES — thin cables on stanchions around the deck perimeter
+       --------------------------------------------------------------- */
+    const stanchionMat = new THREE.MeshPhongMaterial({ color: 0xd0d4d8 });
+    const lifelineMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8 });
+    const deckEdgeZ = [3.6, 2.4, 1.2, 0, -1.2, -2.4]; /* stanchion stations along the hull */
+
+    [-1, 1].forEach((side) => {
+      const stanchionPositions = [];
+      deckEdgeZ.forEach((z) => {
+        /* Hull narrows toward the bow — approximate the half-width at
+           each Z station so stanchions roughly follow the hull line */
+        const t = Math.max(0, Math.min(1, (4.2 - z) / (4.2 - (-2.6))));
+        const halfWidth = 1.05 * (1 - 0.5 * Math.pow(1 - t, 2));
+        const x = side * Math.min(1.0, halfWidth);
+        stanchionPositions.push([x, z]);
+
+        const stanchionGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.45, 5);
+        const stanchion = new THREE.Mesh(stanchionGeo, stanchionMat);
+        stanchion.position.set(x, deckY + 0.22, z);
+        boatGroup.add(stanchion);
+      });
+
+      /* Connect consecutive stanchions with a top lifeline cable */
+      for (let i = 0; i < stanchionPositions.length - 1; i++) {
+        const [x1, z1] = stanchionPositions[i];
+        const [x2, z2] = stanchionPositions[i + 1];
+        const dx = x2 - x1, dz = z2 - z1;
+        const len = Math.sqrt(dx * dx + dz * dz);
+        const lineGeo = new THREE.CylinderGeometry(0.012, 0.012, len, 4);
+        const line = new THREE.Mesh(lineGeo, lifelineMat);
+        line.position.set((x1 + x2) / 2, deckY + 0.42, (z1 + z2) / 2);
+        line.rotation.z = Math.PI / 2;
+        line.rotation.y = Math.atan2(dx, dz);
+        boatGroup.add(line);
+      }
+    });
+
+    /* ---------------------------------------------------------------
+       MAST, BOOM, SAILS (existing, repositioned for the taller deck)
+       --------------------------------------------------------------- */
     const mastX = 0, mastZ = 0.6;
+    const mastBaseY = deckY;
     const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, 7, 8);
     mastMesh = new THREE.Mesh(mastGeo, new THREE.MeshPhongMaterial({ color: 0x5a4632 }));
-    mastMesh.position.set(mastX, 4.3, mastZ);
+    mastMesh.position.set(mastX, mastBaseY + 3.5, mastZ);
     boatGroup.add(mastMesh);
+
+    /* Standing rigging — forestay (bow to masthead) and two side
+       shrouds (port/starboard deck to masthead), thin taut cables */
+    const riggingMat = new THREE.MeshBasicMaterial({ color: 0xcccccc });
+    function addStay(fromX, fromZ, toY) {
+      const dx = mastX - fromX, dz = mastZ - fromZ, dy = toY - mastBaseY;
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const geo = new THREE.CylinderGeometry(0.018, 0.018, len, 4);
+      const mesh = new THREE.Mesh(geo, riggingMat);
+      mesh.position.set((fromX + mastX) / 2, (mastBaseY + toY) / 2, (fromZ + mastZ) / 2);
+      mesh.lookAt(mastX, toY, mastZ);
+      mesh.rotateX(Math.PI / 2);
+      boatGroup.add(mesh);
+    }
+    addStay(mastX, 4.1, mastBaseY + 7); /* forestay to the bow */
+    addStay(-1.0, 0.6, mastBaseY + 6.3); /* port shroud */
+    addStay(1.0, 0.6, mastBaseY + 6.3);  /* starboard shroud */
 
     /* Boom group — pivots exactly at the mast's base/centerline so it
        reads as properly attached, not floating beside the mast */
     boomGroup = new THREE.Group();
-    boomGroup.position.set(mastX, 1.2, mastZ);
+    boomGroup.position.set(mastX, mastBaseY + 0.9, mastZ);
     boatGroup.add(boomGroup);
 
     const boomLen = 3.2;
@@ -350,13 +472,6 @@
 
     /* Mainsail — triangle from mast (at boom pivot height up to mast
        top) back to the boom tip, attached at the mast the whole time */
-    const sailShape = new THREE.Shape();
-    sailShape.moveTo(0, 0);
-    sailShape.lineTo(0, 6.0);
-    sailShape.lineTo(0, 0);
-    /* Build as a triangle fan so it stays visually attached to the
-       mast edge regardless of boom rotation (the geometry's one edge
-       IS the mast, the opposite point is the boom tip in boomGroup) */
     const mainsailGeo = new THREE.BufferGeometry();
     const mainsailVerts = new Float32Array([
       0, 0, 0,      /* mast base (boom pivot height) */
@@ -372,14 +487,13 @@
     boomGroup.add(sailMesh); /* parented to boomGroup so it swings with the boom but stays mast-attached */
 
     /* Headsail (jib) — forward of the mast, between the bow and a
-       point partway up the mast. Height scales with reef level:
-       full sail = full height, reef 1 = partly down, reef 2 = mostly
-       down, matching the request directly. */
+       point partway up the mast. Height scales with how much jib is
+       furled in. */
     const headsailGeo = new THREE.BufferGeometry();
     const headsailVerts = new Float32Array([
-      mastX, 0.9, mastZ,   /* tack, near the mast base */
-      mastX, 5.2, mastZ,   /* head, partway up the mast */
-      mastX, 0.9, 3.9      /* clew, forward toward the bow */
+      mastX, mastBaseY + 0.6, mastZ,   /* tack, near the mast base */
+      mastX, mastBaseY + 4.9, mastZ,   /* head, partway up the mast */
+      mastX, mastBaseY + 0.6, 3.9      /* clew, forward toward the bow */
     ]);
     headsailGeo.setAttribute("position", new THREE.BufferAttribute(headsailVerts, 3));
     headsailGeo.setIndex([0, 1, 2]);

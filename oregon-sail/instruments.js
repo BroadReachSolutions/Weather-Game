@@ -383,7 +383,7 @@
     const aw = calculateApparentWind(headingDeg, speedKt, trueWindFromDeg, trueWindKt);
     const arrowGroup = document.getElementById("osWindexArrowGroup");
     const label = document.getElementById("osWindexLabel");
-    if (arrowGroup) arrowGroup.setAttribute("transform", `rotate(${aw.angleFromBow.toFixed(1)} 40 40)`);
+    if (arrowGroup) arrowGroup.setAttribute("transform", `rotate(${((aw.angleFromBow + 180) % 360).toFixed(1)} 40 40)`);
     if (label) label.textContent = `${aw.speedKt.toFixed(1)} kt apparent`;
   }
 
