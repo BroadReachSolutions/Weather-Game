@@ -221,7 +221,7 @@
      independently so the voyage still progresses while the app is
      closed; syncStateToServer() periodically reconciles the two.
      --------------------------------------------------------------- */
-  const SIM_TICK_MS = 1000; /* advance the simulation once per second */
+  const SIM_TICK_MS = 250; /* advance the simulation 4x/sec — was 1000ms, which made the underlying heading/position jump in discrete once-per-second steps that even the 3D visual smoothing couldn't fully hide */
   let simIntervalId = null;
   let lastSimTime = null;
 

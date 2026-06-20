@@ -29,7 +29,7 @@
 
   const HEEL_TIME_CONSTANT = 0.7;    /* seconds to close most of the heel gap */
   const PITCH_TIME_CONSTANT = 0.5;
-  const HEADING_TIME_CONSTANT = 0.35; /* boat visually catches up to its real heading fairly quickly, but still eases instead of snapping */
+  const HEADING_TIME_CONSTANT = 0.65; /* slowed further for a smoother, less abrupt turn — was 0.35 */
 
   /* ---------------------------------------------------------------
      SCENE SETUP
@@ -271,7 +271,7 @@
        moved noticeably too fast for a relaxed sailing feel. Just two
        uniform writes now; the actual per-vertex work happens on the
        GPU in the shader above. */
-    waterUniforms.uAmplitude.value = Math.min(1.0, (waveHeightFt || 1) * 0.14);
+    waterUniforms.uAmplitude.value = Math.min(1.8, (waveHeightFt || 1) * 0.26);
     waterUniforms.uTime.value = waveClock;
   }
 
@@ -866,7 +866,7 @@
          becalmed or anchored boat should still bob slightly rather
          than sit perfectly rigid, which read as static/lifeless */
       const effectiveWaveHeight = s.isSailing ? (waveHeightFt || 1) : Math.max(0.5, (waveHeightFt || 1) * 0.5);
-      const targetPitch = Math.sin(waveClock * 0.7) * Math.min(8, effectiveWaveHeight * 1.2);
+      const targetPitch = Math.sin(waveClock * 0.7) * Math.min(14, effectiveWaveHeight * 2.0);
       currentPitchDeg += (targetPitch - currentPitchDeg) * pitchAlpha;
 
       /* Heading — the boat's actual facing direction. Smoothed with
@@ -891,11 +891,15 @@
           const relative = ((s.windDeg - s.heading) + 360) % 360;
           heelSign = relative > 180 ? 1 : -1; /* wind on port heels to starboard (-1 here), and vice versa */
         }
+        /* Wave-driven roll, out of phase with pitch so the boat reads
+           as actually riding over 3D swell rather than just nodding
+           fore-aft — combined additively with the wind-driven heel */
+        const waveRollDeg = Math.sin(waveClock * 0.7 + 1.4) * Math.min(6, effectiveWaveHeight * 0.9);
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
-        boatGroup.rotation.z = (currentHeelDeg * heelSign * Math.PI) / 180;
+        boatGroup.rotation.z = ((currentHeelDeg * heelSign) + waveRollDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * Math.PI) / 180;
-        boatGroup.position.y = 0.3 + Math.sin(waveClock * 0.7) * Math.min(0.4, effectiveWaveHeight * 0.08);
+        boatGroup.position.y = 0.3 + Math.sin(waveClock * 0.7) * Math.min(0.9, effectiveWaveHeight * 0.16);
       }
 
       updateBoom(s.boomAngleDeg || 0);
