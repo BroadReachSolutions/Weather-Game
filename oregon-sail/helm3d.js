@@ -73,6 +73,7 @@
     buildWater();
     buildBoat();
     buildWake();
+    buildWildlife();
     buildSky();
 
     windLinesGroup = new THREE.Group();
@@ -130,6 +131,64 @@
       cluster.position.x += cluster.userData.driftSpeed * elapsedFactor;
       if (cluster.position.x > 140) cluster.position.x = -140;
     });
+  }
+
+  /* ---------------------------------------------------------------
+     WILDLIFE — occasional fish (a small dorsal-fin wedge breaking
+     the surface) that spawn near the boat, swim across, and vanish.
+     Purely decorative/ambient, doesn't read any game state. A new
+     one spawns every so often as long as there are fewer than a cap.
+     --------------------------------------------------------------- */
+  let wildlifeGroup = null;
+  let lastWildlifeSpawn = 0;
+  const MAX_WILDLIFE = 3;
+  const WILDLIFE_SPAWN_INTERVAL = 8; /* seconds, roughly */
+
+  function buildWildlife() {
+    wildlifeGroup = new THREE.Group();
+    scene.add(wildlifeGroup);
+  }
+
+  function spawnFish() {
+    const finGeo = new THREE.ConeGeometry(0.12, 0.35, 4);
+    const finMat = new THREE.MeshBasicMaterial({ color: 0x2e4a52 });
+    const fin = new THREE.Mesh(finGeo, finMat);
+    fin.rotation.x = Math.PI / 2.4;
+
+    /* Spawn somewhere in a ring around the boat, not too close, not
+       too far, heading on a random course across that area */
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const spawnDist = 12 + Math.random() * 20;
+    fin.position.set(Math.cos(spawnAngle) * spawnDist, 0.05, Math.sin(spawnAngle) * spawnDist);
+
+    const headingAngle = Math.random() * Math.PI * 2;
+    fin.rotation.y = headingAngle;
+    fin.userData.vx = Math.sin(headingAngle) * 0.04;
+    fin.userData.vz = Math.cos(headingAngle) * 0.04;
+    fin.userData.life = 0;
+    fin.userData.maxLife = 14 + Math.random() * 10; /* seconds before it despawns */
+
+    wildlifeGroup.add(fin);
+  }
+
+  function animateWildlife(dtSeconds) {
+    if (!wildlifeGroup) return;
+    lastWildlifeSpawn += dtSeconds;
+    if (lastWildlifeSpawn > WILDLIFE_SPAWN_INTERVAL && wildlifeGroup.children.length < MAX_WILDLIFE) {
+      if (Math.random() < 0.4) spawnFish(); /* not guaranteed every interval, keeps it sparse */
+      lastWildlifeSpawn = 0;
+    }
+
+    for (let i = wildlifeGroup.children.length - 1; i >= 0; i--) {
+      const fin = wildlifeGroup.children[i];
+      fin.position.x += fin.userData.vx;
+      fin.position.z += fin.userData.vz;
+      fin.position.y = 0.05 + Math.sin(waveClock * 3 + i) * 0.04; /* gentle bob, like breaking the surface */
+      fin.userData.life += dtSeconds;
+      if (fin.userData.life > fin.userData.maxLife) {
+        wildlifeGroup.remove(fin);
+      }
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -230,58 +289,61 @@
      rolling-wave look, not a real ocean simulation.
      --------------------------------------------------------------- */
   function buildWater() {
-    const geo = new THREE.PlaneGeometry(300, 300, 50, 50);
-    /* Old-school stylized water: flat-colored and noticeably
-       see-through, like early 3D sailing games — using a basic
-       (unlit) material instead of Phong so wave troughs don't pick
-       up harsh directional shadowing that read as black/gray */
+    const geo = new THREE.PlaneGeometry(300, 300, 60, 60);
+    /* Two-tone water: vertex colors blend between a deeper and a
+       lighter transparent blue based on the ripple displacement
+       itself, instead of relying on lighting (which was producing
+       muddy gray/black shading in the wave troughs). Using vertex
+       colors keeps it flat and stylized regardless of viewing angle. */
+    const colorAttr = new Float32Array(geo.attributes.position.count * 3);
+    geo.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
+
     const mat = new THREE.MeshBasicMaterial({
-      color: 0x3fb4e0,
+      color: 0xffffff,
+      vertexColors: true,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.6,
       side: THREE.DoubleSide
     });
     waterMesh = new THREE.Mesh(geo, mat);
     waterMesh.rotation.x = -Math.PI / 2;
     waterMesh.position.y = 0;
     scene.add(waterMesh);
-
-    /* A lighter cap layer of small foam-cap highlights, purely
-       decorative — stylized whitecaps, also unlit/flat */
-    const foamGeo = new THREE.PlaneGeometry(300, 300, 50, 50);
-    const foamMat = new THREE.MeshBasicMaterial({
-      color: 0xeaf8ff, transparent: true, opacity: 0.15,
-      side: THREE.DoubleSide, depthWrite: false
-    });
-    const foamMesh = new THREE.Mesh(foamGeo, foamMat);
-    foamMesh.rotation.x = -Math.PI / 2;
-    foamMesh.position.y = 0.02;
-    scene.add(foamMesh);
-    waterMesh.userData.foamMesh = foamMesh;
   }
+
+  const WATER_DEEP = { r: 0.16, g: 0.45, b: 0.68 };   /* deeper tone */
+  const WATER_LIGHT = { r: 0.42, g: 0.72, b: 0.88 };  /* lighter ripple-crest tone */
 
   function animateWater(waveHeightFt) {
     if (!waterMesh) return;
-    /* Bigger, chunkier amplitude than a realistic ocean, but scaled
-       back a bit from the very first pass since the boat is now
-       1.8x larger and shouldn't look swamped by the swell */
-    const amplitude = Math.min(1.4, (waveHeightFt || 1) * 0.18);
+    /* Calmer, slower amplitude and a much slower time scale than
+       before — the previous version moved noticeably too fast for a
+       relaxed sailing feel. */
+    const amplitude = Math.min(1.0, (waveHeightFt || 1) * 0.14);
     const pos = waterMesh.geometry.attributes.position;
-    const foamMesh = waterMesh.userData.foamMesh;
-    const foamPos = foamMesh ? foamMesh.geometry.attributes.position : null;
+    const color = waterMesh.geometry.attributes.color;
+    const slowClock = waveClock * 0.35; /* slowed down from the raw per-frame clock */
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
-      const z = Math.sin(x * 0.22 + waveClock) * amplitude * 0.6 +
-                 Math.sin(y * 0.16 + waveClock * 1.25) * amplitude * 0.4 +
-                 Math.sin((x + y) * 0.1 + waveClock * 0.8) * amplitude * 0.25;
-      pos.setZ(i, z);
-      if (foamPos) foamPos.setZ(i, z + 0.03);
+      const ripple = Math.sin(x * 0.18 + slowClock) * amplitude * 0.6 +
+                      Math.sin(y * 0.14 + slowClock * 0.8) * amplitude * 0.4 +
+                      Math.sin((x - y) * 0.09 + slowClock * 0.5) * amplitude * 0.25;
+      pos.setZ(i, ripple);
+
+      /* Blend vertex color between the deep and light tone based on
+         how "crested" this point currently is, normalized 0..1 */
+      const t = Math.max(0, Math.min(1, (ripple / amplitude + 1) / 2));
+      color.setXYZ(
+        i,
+        WATER_DEEP.r + (WATER_LIGHT.r - WATER_DEEP.r) * t,
+        WATER_DEEP.g + (WATER_LIGHT.g - WATER_DEEP.g) * t,
+        WATER_DEEP.b + (WATER_LIGHT.b - WATER_DEEP.b) * t
+      );
     }
     pos.needsUpdate = true;
-    waterMesh.geometry.computeVertexNormals();
-    if (foamPos) { foamPos.needsUpdate = true; }
+    color.needsUpdate = true;
   }
 
   /* ---------------------------------------------------------------
@@ -291,6 +353,7 @@
      surrounding water's own animation hard to judge by itself.
      --------------------------------------------------------------- */
   let wakeMesh = null;
+  let bowWaveMesh = null;
 
   function buildWake() {
     /* Two triangles forming a V, apex at the stern, widening aft —
@@ -298,20 +361,37 @@
        each frame rather than rebuilding it every time. */
     const geo = new THREE.BufferGeometry();
     const wakeVerts = new Float32Array([
-      0, 0, 0,    1.1, 0, -7,   0.25, 0, -2.2,
-      0, 0, 0,   -1.1, 0, -7,  -0.25, 0, -2.2
+      0, 0, 0,    1.4, 0, -8.5,   0.3, 0, -2.6,
+      0, 0, 0,   -1.4, 0, -8.5,  -0.3, 0, -2.6
     ]);
     geo.setAttribute("position", new THREE.BufferAttribute(wakeVerts, 3));
     geo.setIndex([0, 1, 2, 3, 4, 5]);
-    geo.computeVertexNormals();
     const mat = new THREE.MeshBasicMaterial({
-      color: 0xeaf8ff, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false
+      color: 0xf2fbff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false
     });
     wakeMesh = new THREE.Mesh(geo, mat);
     /* Stern of the hull is at local Z = -2.6 (see hullShape); position
        the wake's apex there, just at the water surface */
     wakeMesh.position.set(0, 0.05, -2.6);
     boatGroup.add(wakeMesh);
+
+    /* Bow wave — a small breaking-white wedge right at the bow,
+       widening with speed the same way real water piles up and
+       breaks at the bow of a moving boat */
+    const bowGeo = new THREE.BufferGeometry();
+    const bowVerts = new Float32Array([
+      0, 0, 0,    0.7, 0, -0.9,   0.18, 0, 0.5,
+      0, 0, 0,   -0.7, 0, -0.9,  -0.18, 0, 0.5
+    ]);
+    bowGeo.setAttribute("position", new THREE.BufferAttribute(bowVerts, 3));
+    bowGeo.setIndex([0, 1, 2, 3, 4, 5]);
+    const bowMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false
+    });
+    bowWaveMesh = new THREE.Mesh(bowGeo, bowMat);
+    /* Bow point of the hull is at local Z = 4.2 */
+    bowWaveMesh.position.set(0, 0.08, 4.0);
+    boatGroup.add(bowWaveMesh);
   }
 
   function updateWake(speedKt) {
@@ -320,9 +400,16 @@
     /* No wake at all when basically stopped; scales up toward hull
        speed, capped so it doesn't grow unbounded at high speed */
     const t = Math.min(1, speed / 6);
+
     wakeMesh.visible = speed > 0.3;
-    wakeMesh.scale.set(0.4 + t * 1.0, 1, 0.5 + t * 1.0);
-    wakeMesh.material.opacity = 0.25 + t * 0.3;
+    wakeMesh.scale.set(0.5 + t * 1.1, 1, 0.6 + t * 1.1);
+    wakeMesh.material.opacity = 0.3 + t * 0.4;
+
+    if (bowWaveMesh) {
+      bowWaveMesh.visible = speed > 0.5;
+      bowWaveMesh.scale.set(0.6 + t * 1.4, 1, 0.6 + t * 1.4);
+      bowWaveMesh.material.opacity = 0.35 + t * 0.45;
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -380,54 +467,55 @@
 
     /* ---------------------------------------------------------------
        CABIN TOP — a raised structure forward of the cockpit with
-       small round portholes along each side, sitting on deck.
+       small round portholes along each side, sitting on deck. Built
+       from simple, reliable primitives (box walls + a tilted roof
+       plane) rather than hand-indexed triangles, which were fragile
+       and prone to rendering incorrectly.
        --------------------------------------------------------------- */
-    /* Cabin top — tapers to a point at the bow AND slopes downward
-       toward that point (a real cabin trunk's roof angles down
-       forward, it doesn't stay flat). Built as a hand-placed buffer
-       geometry so we can give the roof vertices different heights. */
     const cabinMat = new THREE.MeshPhongMaterial({ color: 0xf2efe6, flatShading: true });
+    const cabinCenterZ = 0.3;   /* center of the cabin trunk, aft-to-fore */
+    const cabinLength = 2.7;    /* aft edge to where it tapers in toward the bow */
+    const cabinWidth = 1.7;
+    const cabinWallHeight = 0.85;
 
-    const cabinAftZ = -1.0, cabinMidZ = 0.6, cabinForeZ = 1.9;
-    const roofAftY = deckY + 0.9, roofForeY = deckY + 0.5; /* roof slopes down toward the bow */
-    const sideHalfWidth = 0.85;
+    /* Cabin walls — a straightforward box, sides clipped narrower
+       toward the bow by the separately-placed roof's slope/taper look */
+    const cabinWallGeo = new THREE.BoxGeometry(cabinWidth, cabinWallHeight, cabinLength);
+    const cabinWallMesh = new THREE.Mesh(cabinWallGeo, cabinMat);
+    cabinWallMesh.position.set(0, deckY + cabinWallHeight / 2, cabinCenterZ);
+    boatGroup.add(cabinWallMesh);
 
-    /* Vertices: aft-port-deck(0), aft-stbd-deck(1), aft-port-roof(2),
-       aft-stbd-roof(3), mid-port-roof(4), mid-stbd-roof(5),
-       bow-point-roof(6), bow-point-deck(7) */
-    const cv = [
-      [-sideHalfWidth, deckY, cabinAftZ],          // 0
-      [ sideHalfWidth, deckY, cabinAftZ],          // 1
-      [-sideHalfWidth, roofAftY, cabinAftZ],       // 2
-      [ sideHalfWidth, roofAftY, cabinAftZ],       // 3
-      [-sideHalfWidth, roofForeY + 0.25, cabinMidZ], // 4
-      [ sideHalfWidth, roofForeY + 0.25, cabinMidZ], // 5
-      [0, roofForeY, cabinForeZ],                   // 6 (bow point, roof meets deck-ish)
-      [0, deckY, cabinForeZ]                        // 7 (bow point at deck)
-    ];
-    const cabinPositions = [];
-    function pushTri(a, b, c) { [a, b, c].forEach(i => cabinPositions.push(...cv[i])); }
-    /* Port side wall */
-    pushTri(0, 2, 4); pushTri(0, 4, 6); pushTri(0, 6, 7);
-    /* Starboard side wall */
-    pushTri(1, 5, 3); pushTri(1, 7, 6); pushTri(1, 6, 5);
-    /* Roof (aft flat section + sloped forward section to the point) */
-    pushTri(2, 3, 5); pushTri(2, 5, 4); pushTri(4, 5, 6);
-    /* Aft face (transom of the cabin trunk) */
-    pushTri(0, 1, 3); pushTri(0, 3, 2);
+    /* Roof — a single tilted plane sitting on top of the walls,
+       angled down toward the bow (+Z) for a real cabin-trunk look */
+    const roofGeo = new THREE.BoxGeometry(cabinWidth + 0.1, 0.08, cabinLength + 0.2);
+    const roofMesh = new THREE.Mesh(roofGeo, cabinMat);
+    roofMesh.position.set(0, deckY + cabinWallHeight + 0.04, cabinCenterZ);
+    roofMesh.rotation.x = -0.12; /* slopes down toward the bow */
+    boatGroup.add(roofMesh);
 
-    const cabinGeo = new THREE.BufferGeometry();
-    cabinGeo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(cabinPositions), 3));
-    cabinGeo.computeVertexNormals();
-    const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
-    boatGroup.add(cabinMesh);
+    /* A simple forward-tapering "bow cap" wedge so the cabin doesn't
+       just end in a flat vertical face at its forward end */
+    const capShape = new THREE.Shape();
+    capShape.moveTo(-cabinWidth / 2, 0);
+    capShape.lineTo(cabinWidth / 2, 0);
+    capShape.lineTo(0, 1.0);
+    capShape.lineTo(-cabinWidth / 2, 0);
+    const capGeo = new THREE.ExtrudeGeometry(capShape, { depth: cabinWallHeight, bevelEnabled: false });
+    const capMesh = new THREE.Mesh(capGeo, cabinMat);
+    capMesh.rotation.x = -Math.PI / 2;
+    capMesh.position.set(0, deckY + cabinWallHeight, cabinCenterZ + cabinLength / 2);
+    boatGroup.add(capMesh);
 
     const portholeMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
     const portholeGeo = new THREE.CircleGeometry(0.16, 12);
     for (let side = -1; side <= 1; side += 2) {
       for (let i = 0; i < 3; i++) {
         const porthole = new THREE.Mesh(portholeGeo, portholeMat);
-        porthole.position.set(side * 0.86, deckY + 0.65, -0.7 + i * 0.55);
+        porthole.position.set(
+          side * (cabinWidth / 2 + 0.01),
+          deckY + cabinWallHeight / 2 + 0.1,
+          cabinCenterZ - cabinLength / 2 + 0.5 + i * 0.85
+        );
         porthole.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
         boatGroup.add(porthole);
       }
@@ -724,6 +812,7 @@
     animateWater(waveHeightFt);
     animateWindLines(1);
     animateSky(1);
+    animateWildlife(0.016); /* tick runs roughly once per animation frame, ~16ms */
     updateWake(window.OSHelm3DState ? window.OSHelm3DState.speedKt || 0 : 0);
     updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
