@@ -27,9 +27,9 @@
   let currentHeadingDeg = null; /* boat's facing direction, null until first state arrives */
   let waveClock = 0;
 
-  const HEEL_SMOOTHING = 0.06;
-  const PITCH_SMOOTHING = 0.08;
-  const HEADING_SMOOTHING = 0.15;
+  const HEEL_TIME_CONSTANT = 0.7;    /* seconds to close most of the heel gap */
+  const PITCH_TIME_CONSTANT = 0.5;
+  const HEADING_TIME_CONSTANT = 0.35; /* boat visually catches up to its real heading fairly quickly, but still eases instead of snapping */
 
   /* ---------------------------------------------------------------
      SCENE SETUP
@@ -192,96 +192,20 @@
   }
 
   /* ---------------------------------------------------------------
-     GROUND PLANE — textured with the same satellite imagery the
-     chart plotter uses, so the player can see real coastline/land
-     shape near their position. Flat (no elevation), oriented to
-     true north so it stays consistent with the boat's real heading.
+     GROUND PLANE — a simple flat-colored seabed/horizon backdrop.
+     Previously stitched a 5×5 grid of real satellite tiles here, but
+     that's been removed (per request) to keep this view purely
+     focused on the boat/water/sky, and it was also a real perf cost
+     (25 tile fetches + canvas redraws every time the boat moved far
+     enough to trigger a refresh).
      --------------------------------------------------------------- */
   function buildGroundPlane() {
-    /* Plane sized to roughly match the real-world area the tile grid
-       covers (see updateGroundTexture) — large enough that sailing
-       toward land shows it well before you'd reach the plane's edge. */
     const geo = new THREE.PlaneGeometry(900, 900);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x3a5f6b, transparent: true, opacity: 0.0 });
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1f5870, transparent: true, opacity: 0.5 });
     groundMesh = new THREE.Mesh(geo, mat);
     groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.position.y = -0.05;
     scene.add(groundMesh);
-  }
-
-  /* ---------------------------------------------------------------
-     GROUND TEXTURE — stitches a grid of real ArcGIS satellite tiles
-     into one canvas texture covering roughly a 25-mile radius around
-     the boat (a 5×5 grid at zoom 11, ~15km/tile ≈ 75km / 47mi across).
-     Refresh is distance-triggered from game-ui.js, not time-based —
-     re-fetching 25 tiles every second would hammer the tile server.
-     --------------------------------------------------------------- */
-  const GROUND_TILE_ZOOM = 11;
-  const GROUND_TILE_GRID = 5; /* 5x5 tiles, odd number so boat sits on the center tile */
-  const GROUND_TILE_PX = 256; /* ArcGIS tile pixel size */
-
-  function lonToTileX(lon, zoom) {
-    return Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
-  }
-  function latToTileY(lat, zoom) {
-    const latRad = (lat * Math.PI) / 180;
-    return Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * Math.pow(2, zoom));
-  }
-
-  let groundTextureLoadToken = 0; /* guards against a slow earlier load overwriting a newer one */
-
-  function updateGroundTexture(lat, lon) {
-    if (!groundMesh) return;
-    const myToken = ++groundTextureLoadToken;
-
-    const centerX = lonToTileX(lon, GROUND_TILE_ZOOM);
-    const centerY = latToTileY(lat, GROUND_TILE_ZOOM);
-    const half = Math.floor(GROUND_TILE_GRID / 2);
-
-    const canvas = document.createElement("canvas");
-    canvas.width = GROUND_TILE_GRID * GROUND_TILE_PX;
-    canvas.height = GROUND_TILE_GRID * GROUND_TILE_PX;
-    const ctx = canvas.getContext("2d");
-    /* Fallback fill while tiles load in, in case some fail */
-    ctx.fillStyle = "#1f6f8b";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    let loaded = 0;
-    const total = GROUND_TILE_GRID * GROUND_TILE_GRID;
-
-    function finalize() {
-      if (myToken !== groundTextureLoadToken) return; /* a newer call superseded this one */
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.wrapS = THREE.ClampToEdgeWrapping;
-      texture.wrapT = THREE.ClampToEdgeWrapping;
-      groundMesh.material.map = texture;
-      groundMesh.material.opacity = 0.92;
-      groundMesh.material.needsUpdate = true;
-    }
-
-    for (let row = 0; row < GROUND_TILE_GRID; row++) {
-      for (let col = 0; col < GROUND_TILE_GRID; col++) {
-        const tx = centerX - half + col;
-        const ty = centerY - half + row;
-        const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${GROUND_TILE_ZOOM}/${ty}/${tx}`;
-
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          if (myToken !== groundTextureLoadToken) return;
-          ctx.drawImage(img, col * GROUND_TILE_PX, row * GROUND_TILE_PX, GROUND_TILE_PX, GROUND_TILE_PX);
-          loaded++;
-          if (loaded === total) finalize();
-        };
-        img.onerror = () => {
-          /* Missing tile (open ocean sometimes 404s, or offline) —
-             leave the fallback fill for that cell, don't block the rest */
-          loaded++;
-          if (loaded === total) finalize();
-        };
-        img.src = url;
-      }
-    }
   }
 
   /* ---------------------------------------------------------------
@@ -586,19 +510,6 @@
     roofMesh.rotation.x = -0.12; /* slopes down toward the bow */
     boatGroup.add(roofMesh);
 
-    /* A simple forward-tapering "bow cap" wedge so the cabin doesn't
-       just end in a flat vertical face at its forward end */
-    const capShape = new THREE.Shape();
-    capShape.moveTo(-cabinWidth / 2, 0);
-    capShape.lineTo(cabinWidth / 2, 0);
-    capShape.lineTo(0, 1.0);
-    capShape.lineTo(-cabinWidth / 2, 0);
-    const capGeo = new THREE.ExtrudeGeometry(capShape, { depth: cabinWallHeight, bevelEnabled: false });
-    const capMesh = new THREE.Mesh(capGeo, cabinMat);
-    capMesh.rotation.x = -Math.PI / 2;
-    capMesh.position.set(0, deckY + cabinWallHeight, cabinCenterZ + cabinLength / 2);
-    boatGroup.add(capMesh);
-
     const portholeMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
     const portholeGeo = new THREE.CircleGeometry(0.16, 12);
     for (let side = -1; side <= 1; side += 2) {
@@ -897,18 +808,31 @@
     return windLoad * trimFactor * pointOfSailFactor * heelMax;
   }
 
+  const TARGET_FPS = 30;
+  const FRAME_BUDGET_MS = 1000 / TARGET_FPS;
+  let lastFrameTime = 0;
+
   function tick() {
     animFrameId = requestAnimationFrame(tick);
-    waveClock += 0.02;
+
+    /* Cap rendering at 30fps — requestAnimationFrame fires at the
+       display's native rate (often 60Hz+), but we don't need that
+       many updates for this stylized scene, and capping it reduces
+       battery/CPU load to a more sustainable level on phones. */
+    const now = performance.now();
+    if (now - lastFrameTime < FRAME_BUDGET_MS) return;
+    lastFrameTime = now;
+
+    waveClock += 0.04; /* doubled from 0.02 since this now runs at 30fps (throttled) instead of 60fps, keeping the same real-time speed */
 
     const waveHeightFt = window.OSHelm3DState ? window.OSHelm3DState.waveHeightFt : 1;
     animateWater(waveHeightFt);
     animateWindLines(1);
     animateSky(1);
-    animateWildlife(0.016); /* tick runs roughly once per animation frame, ~16ms */
+    animateWildlife(0.033); /* matches the real ~33ms frame budget at 30fps now, not a 60fps assumption */
     if (window.OSHelm3DState) {
       const speedKt = window.OSHelm3DState.speedKt || 0;
-      recordWakePoint(currentHeadingDeg || window.OSHelm3DState.heading || 0, speedKt, 0.016);
+      recordWakePoint(currentHeadingDeg || window.OSHelm3DState.heading || 0, speedKt, 0.033);
       if (bowWaveMesh) {
         const t = Math.min(1, Math.max(0, speedKt) / 6);
         bowWaveMesh.visible = speedKt > 0.5;
@@ -916,30 +840,42 @@
         bowWaveMesh.material.opacity = 0.35 + t * 0.45;
       }
     }
-    updateWakeTrail(0.016);
+    updateWakeTrail(0.033);
     updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
     if (window.OSHelm3DState) {
       const s = window.OSHelm3DState;
+      /* Time-based exponential easing — closes a consistent FRACTION
+         of the remaining gap per real second, independent of how
+         often this function actually runs. The previous version used
+         a fixed per-call fraction (e.g. heading += delta * 0.15),
+         which made motion framerate-dependent: at 60fps it looked
+         reasonably smooth, but capping to 30fps (or any frame drop)
+         immediately made turns choppier since the same fraction was
+         now only being applied half as often. This is the real fix
+         for the reported "small fast clippings" turning feel. */
+      const dt = FRAME_BUDGET_MS / 1000; /* seconds per (throttled) frame */
+      const heelAlpha = 1 - Math.exp(-dt / HEEL_TIME_CONSTANT);
+      const pitchAlpha = 1 - Math.exp(-dt / PITCH_TIME_CONSTANT);
+      const headingAlpha = 1 - Math.exp(-dt / HEADING_TIME_CONSTANT);
+
       const targetHeel = computeTargetHeel(s.windSpeedKt, s.trimFactor, s.pointOfSailFactor, s.isSailing);
-      currentHeelDeg += (targetHeel - currentHeelDeg) * HEEL_SMOOTHING;
+      currentHeelDeg += (targetHeel - currentHeelDeg) * heelAlpha;
 
       /* Gentle idle rocking even with sails down / calm water — a
          becalmed or anchored boat should still bob slightly rather
          than sit perfectly rigid, which read as static/lifeless */
       const effectiveWaveHeight = s.isSailing ? (waveHeightFt || 1) : Math.max(0.5, (waveHeightFt || 1) * 0.5);
       const targetPitch = Math.sin(waveClock * 0.7) * Math.min(8, effectiveWaveHeight * 1.2);
-      currentPitchDeg += (targetPitch - currentPitchDeg) * PITCH_SMOOTHING;
+      currentPitchDeg += (targetPitch - currentPitchDeg) * pitchAlpha;
 
-      /* Heading — the boat's actual facing direction. This was missing
-         entirely before (only heel/pitch were applied), which is why
-         turning the wheel never visibly turned the boat. Smoothed with
+      /* Heading — the boat's actual facing direction. Smoothed with
          proper angle-wrapping so it doesn't spin the long way around
          when crossing the 0/360 boundary (e.g. 350° -> 10°). */
       if (typeof s.heading === "number") {
         if (currentHeadingDeg == null) currentHeadingDeg = s.heading;
         let delta = ((s.heading - currentHeadingDeg + 540) % 360) - 180;
-        currentHeadingDeg = (currentHeadingDeg + delta * HEADING_SMOOTHING + 360) % 360;
+        currentHeadingDeg = (currentHeadingDeg + delta * headingAlpha + 360) % 360;
       }
 
       if (boatGroup) {
@@ -1049,7 +985,6 @@
       }
       tick();
     },
-    updateGroundTexture: updateGroundTexture,
     setState: function (state) {
       window.OSHelm3DState = state;
     },

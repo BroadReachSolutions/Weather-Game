@@ -192,7 +192,6 @@
 
     if (typeof window.OSHelm3D !== "undefined") {
       window.OSHelm3D.init();
-      window.OSHelm3D.updateGroundTexture(boat.lat, boat.lon);
     }
 
     startSimulationLoop();
@@ -290,29 +289,6 @@
     /* Track recording uses the same 1nm-sampling logic, fed by the
        simulated position now instead of only the server-confirmed one */
     maybeRecordTrackPoint(boat.lat, boat.lon);
-
-    maybeRefreshGroundTexture(boat.lat, boat.lon);
-  }
-
-  /* Ground texture (the satellite tile under the 3D boat) only needs
-     to refresh when the boat has actually moved into a new area —
-     otherwise we'd be re-fetching the same tile every second. This
-     was previously only tied to the 10-min server sync, which meant
-     sailing into view of land wouldn't show up in the 3D scene until
-     the next sync — fixed by checking distance every sim tick instead. */
-  let lastGroundTextureLat = null;
-  let lastGroundTextureLon = null;
-  const GROUND_TEXTURE_REFRESH_NM = 6; /* grid covers ~20nm radius; refresh well before reaching the edge, but not so often we re-fetch 25 tiles constantly */
-
-  function maybeRefreshGroundTexture(lat, lon) {
-    if (typeof window.OSHelm3D === "undefined") return;
-    if (lastGroundTextureLat != null) {
-      const moved = OS.haversineNm(lastGroundTextureLat, lastGroundTextureLon, lat, lon);
-      if (moved < GROUND_TEXTURE_REFRESH_NM) return;
-    }
-    lastGroundTextureLat = lat;
-    lastGroundTextureLon = lon;
-    window.OSHelm3D.updateGroundTexture(lat, lon);
   }
 
   /* ---------------------------------------------------------------
@@ -337,9 +313,6 @@
       speed_over_ground_kt: OS.boat.speed_over_ground_kt,
       total_nm_traveled: OS.boat.total_nm_traveled
     });
-    if (typeof window.OSHelm3D !== "undefined") {
-      window.OSHelm3D.updateGroundTexture(OS.boat.lat, OS.boat.lon);
-    }
   }
 
   /* ---------------------------------------------------------------

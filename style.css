@@ -1832,6 +1832,7 @@ body.layout-edit .widgetResize {
 /* Map */
 /* Chart plotter tile — hosts the relocated Leaflet map inside Nav Station */
 .osChartPlotterTile {
+  display: none; /* temporarily hidden while focusing on 3D Helm polish — map/course logic underneath is untouched */
   flex-shrink: 0;
   height: 220px;
   border-bottom: 1px solid rgba(125,186,220,0.15);
