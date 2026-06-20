@@ -169,6 +169,22 @@ function combineSpeed(sailKt, engineKt, hullSpeedKt) {
   return Math.max(0, Math.min(hullSpeedKt, combined));
 }
 
+/* Mirrors physics.js's inertia model — see that file for the full
+   rationale. At this function's 10-minute tick interval the curve
+   will have settled almost completely either way, but keeping the
+   formula identical to the client avoids any behavioral drift
+   between client-simulated and server-ticked voyages. */
+const ACCEL_TIME_CONSTANT_SEC = 3;
+const DECEL_TIME_CONSTANT_SEC = 7;
+
+function applyInertia(currentSpeedKt, targetSpeedKt, elapsedHours) {
+  const elapsedSec = elapsedHours * 3600;
+  const speedingUp = targetSpeedKt > currentSpeedKt;
+  const timeConstant = speedingUp ? ACCEL_TIME_CONSTANT_SEC : DECEL_TIME_CONSTANT_SEC;
+  const alpha = 1 - Math.exp(-elapsedSec / timeConstant);
+  return currentSpeedKt + (targetSpeedKt - currentSpeedKt) * alpha;
+}
+
 async function tickBoat(supabase, boat) {
   const weather = await fetchWind(boat.lat, boat.lon);
   const windSpeedMph = weather.windSpeedKt * 1.15078;
@@ -186,9 +202,13 @@ async function tickBoat(supabase, boat) {
   const sail = calculateSailSpeed(boat, windSpeedMph, weather.windDirDeg);
   const engineKt = calculateEngineSpeed(boat);
   const hullSpeed = boat.hull_speed_kt ?? 6.5;
-  const speedKt = combineSpeed(sail.speedKt, engineKt, hullSpeed);
-
+  const targetSpeedKt = combineSpeed(sail.speedKt, engineKt, hullSpeed);
+  const currentSpeedKt = boat.speed_over_ground_kt ?? 0;
   const hours = TICK_MINUTES / 60;
+  const speedKt = (targetSpeedKt < 0 || currentSpeedKt < 0)
+    ? targetSpeedKt
+    : applyInertia(currentSpeedKt, targetSpeedKt, hours);
+
   let nmMoved = speedKt * hours;
 
   let hullDamage = 0;

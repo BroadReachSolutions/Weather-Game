@@ -190,18 +190,54 @@
      the client loop with small elapsed times (~1s) for smooth
      real-time movement.
      --------------------------------------------------------------- */
+  /* ---------------------------------------------------------------
+     INERTIA
+     The formulas above give the boat's EQUILIBRIUM speed for its
+     current trim/wind/reef — but a real boat doesn't snap to that
+     speed instantly. It accelerates as the sails load up and
+     decelerates gradually from hull drag/momentum when conditions
+     ease off. Without this, every small trim adjustment or wind gust
+     made the boat's speed visibly teleport, which read as twitchy
+     and lifeless rather than something with real mass moving through
+     water. boat.speed_over_ground_kt is used as the persistent
+     "current" speed across ticks; targetSpeedKt is the instantaneous
+     equilibrium value the formulas compute.
+     --------------------------------------------------------------- */
+  const ACCEL_TIME_CONSTANT_SEC = 3;   /* speeding up: ~3s to close most of the gap */
+  const DECEL_TIME_CONSTANT_SEC = 7;   /* slowing down: slower, like coasting off momentum */
+
+  function applyInertia(currentSpeedKt, targetSpeedKt, elapsedHours) {
+    const elapsedSec = elapsedHours * 3600;
+    const speedingUp = targetSpeedKt > currentSpeedKt;
+    const timeConstant = speedingUp ? ACCEL_TIME_CONSTANT_SEC : DECEL_TIME_CONSTANT_SEC;
+    /* Exponential approach — closes a consistent FRACTION of the
+       remaining gap per unit time, so it eases in/out instead of
+       moving at a constant rate (which would overshoot or feel robotic) */
+    const alpha = 1 - Math.exp(-elapsedSec / timeConstant);
+    return currentSpeedKt + (targetSpeedKt - currentSpeedKt) * alpha;
+  }
+
   function advance(boat, windSpeedKt, windDirDeg, elapsedHours) {
     const windSpeedMph = windSpeedKt * 1.15078;
     const sail = calculateSailSpeed(boat, windSpeedMph, windDirDeg);
     const engineKt = calculateEngineSpeed(boat);
     const hullSpeed = boat.hull_speed_kt ?? 6.5;
-    let speedKt = combineSpeed(sail.speedKt, engineKt, hullSpeed);
+    let targetSpeedKt = combineSpeed(sail.speedKt, engineKt, hullSpeed);
 
     /* Testing easter egg: captain "Sonic" sailing vessel "Sonic"
        gets a 100x speed multiplier for rapid playtesting */
     const isSonic = (boat.captain_name || "").trim().toLowerCase() === "sonic" &&
                      (boat.vessel_name || "").trim().toLowerCase() === "sonic";
-    if (isSonic) speedKt *= 100;
+    if (isSonic) targetSpeedKt *= 100;
+
+    /* Ease the boat's actual speed toward the target instead of
+       snapping to it — see INERTIA block above. Reversing (negative
+       target, e.g. engine in reverse) skips easing since that's a
+       deliberate gear change, not a drift in conditions. */
+    const currentSpeedKt = boat.speed_over_ground_kt ?? 0;
+    const speedKt = (targetSpeedKt < 0 || currentSpeedKt < 0)
+      ? targetSpeedKt
+      : applyInertia(currentSpeedKt, targetSpeedKt, elapsedHours);
 
     /* Steer before moving, so this tick's movement reflects the
        updated heading (autopilot correction or manual rudder turn) */
