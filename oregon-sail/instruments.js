@@ -146,8 +146,7 @@
                 <path d="M40 14 L47 34 L46 56 Q40 60 34 56 L33 34 Z" class="osWindexBoatShape"/>
               </g>
               <g id="osWindexArrowGroup">
-                <line x1="40" y1="40" x2="40" y2="14" class="osWindexArrowLine"/>
-                <path d="M35 18 L40 8 L45 18 Z" class="osWindexArrowHead"/>
+                <line x1="40" y1="40" x2="40" y2="10" class="osWindexArrowLine"/>
               </g>
             </svg>
           </div>

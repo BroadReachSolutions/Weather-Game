@@ -2160,12 +2160,8 @@ body.layout-edit .osGauge {
 
 .osWindexArrowLine {
   stroke: #4fc3f7;
-  stroke-width: 2;
+  stroke-width: 2.5;
   stroke-linecap: round;
-}
-
-.osWindexArrowHead {
-  fill: #4fc3f7;
 }
 
 /* Engine gauge */

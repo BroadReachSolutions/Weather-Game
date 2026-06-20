@@ -451,7 +451,12 @@
        single world axis regardless of real wind direction. */
     if (window.OSHelm3DState && typeof window.OSHelm3DState.windDeg === "number") {
       const towardDeg = (window.OSHelm3DState.windDeg + 180) % 360;
-      windLinesGroup.rotation.y = (towardDeg * Math.PI) / 180;
+      /* Same sign convention as the boat's heading rotation below
+         (negative) — using the opposite sign here previously made
+         the wind spin the wrong way relative to the boat, which is
+         what caused it to visually disagree with the real forecast
+         direction. */
+      windLinesGroup.rotation.y = -(towardDeg * Math.PI) / 180;
     }
     windLinesGroup.children.forEach((line) => {
       line.position.z -= windStreakSpeed * 0.01 * elapsedFactor;
