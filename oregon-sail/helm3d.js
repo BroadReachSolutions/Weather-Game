@@ -17,7 +17,7 @@
 
 (function () {
   let scene, camera, renderer, controls;
-  let boatGroup, hullMesh, mastMesh, boomGroup, sailMesh;
+  let boatGroup, hullMesh, mastMesh, boomGroup, sailMesh, headsailGroup;
   let waterMesh, groundMesh;
   let animFrameId = null;
   let canvasEl = null;
@@ -320,22 +320,45 @@
     hullMesh.position.y = 1.0;
     boatGroup.add(hullMesh);
 
-    const deckY = 1.0 + 2.1; /* top of the hull = deck level */
+    /* ExtrudeGeometry extrudes along local +Z from 0 to depth; our
+       rotateX(90°) on the geometry maps local +Z to world -Y, so the
+       hull's deck (top edge, local z=0) ends up at hullMesh.position.y
+       itself, and the keel/bottom (local z=depth) ends up BELOW that
+       at position.y - depth. Using position.y + depth here previously
+       put deckY a full hull-depth too high, floating the entire
+       cabin/bimini/mast assembly above the actual hull. */
+    const deckY = 1.0;
 
-    /* Keel fin beneath, just for visual grounding */
+    /* Keel fin beneath, just for visual grounding. Hull bottom is at
+       deckY - hullDepth (1.0 - 2.1 = -1.1); keel hangs below that. */
     const keelGeo = new THREE.BoxGeometry(0.3, 1.2, 2);
     const keelMesh = new THREE.Mesh(keelGeo, new THREE.MeshPhongMaterial({ color: 0x2a2a2a }));
-    keelMesh.position.y = -0.1;
+    keelMesh.position.y = -1.7;
     boatGroup.add(keelMesh);
 
     /* ---------------------------------------------------------------
        CABIN TOP — a raised structure forward of the cockpit with
        small round portholes along each side, sitting on deck.
        --------------------------------------------------------------- */
-    const cabinGeo = new THREE.BoxGeometry(1.7, 0.9, 3.2);
+    /* Cabin top — tapers to a point at the forward (bow) end instead
+       of a flat box front, echoing the hull's own pointed bow shape.
+       Built as an extruded top-down silhouette like the hull. */
+    const cabinShape = new THREE.Shape();
+    cabinShape.moveTo(0, 1.9);          /* forward point */
+    cabinShape.quadraticCurveTo(0.7, 1.3, 0.85, 0.6);
+    cabinShape.lineTo(0.85, -1.0);      /* starboard side aft */
+    cabinShape.lineTo(-0.85, -1.0);     /* aft edge */
+    cabinShape.lineTo(-0.85, 0.6);
+    cabinShape.quadraticCurveTo(-0.7, 1.3, 0, 1.9); /* port side back to the point */
+
+    const cabinExtrude = new THREE.ExtrudeGeometry(cabinShape, { depth: 0.9, bevelEnabled: false });
+    cabinExtrude.rotateX(Math.PI / 2);
     const cabinMat = new THREE.MeshPhongMaterial({ color: 0xf2efe6, flatShading: true });
-    const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
-    cabinMesh.position.set(0, deckY + 0.45, 1.3);
+    const cabinMesh = new THREE.Mesh(cabinExtrude, cabinMat);
+    /* Same rotateX(90°) quirk as the hull — local z=0 (top surface of
+       the shape, which here is the cabin roof) ends up at this
+       position.y, with the structure extending DOWN to the deck. */
+    cabinMesh.position.set(0, deckY + 0.9, 1.3);
     boatGroup.add(cabinMesh);
 
     const portholeMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
@@ -343,7 +366,7 @@
     for (let side = -1; side <= 1; side += 2) {
       for (let i = 0; i < 3; i++) {
         const porthole = new THREE.Mesh(portholeGeo, portholeMat);
-        porthole.position.set(side * 0.851, deckY + 0.5, 0.3 + i * 0.85);
+        porthole.position.set(side * 0.86, deckY + 0.5, -0.5 + i * 0.7);
         porthole.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
         boatGroup.add(porthole);
       }
@@ -431,9 +454,9 @@
        --------------------------------------------------------------- */
     const mastX = 0, mastZ = 0.6;
     const mastBaseY = deckY;
-    const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, 7, 8);
+    const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, 9, 8);
     mastMesh = new THREE.Mesh(mastGeo, new THREE.MeshPhongMaterial({ color: 0x5a4632 }));
-    mastMesh.position.set(mastX, mastBaseY + 3.5, mastZ);
+    mastMesh.position.set(mastX, mastBaseY + 4.5, mastZ);
     boatGroup.add(mastMesh);
 
     /* Standing rigging — forestay (bow to masthead) and two side
@@ -449,14 +472,14 @@
       mesh.rotateX(Math.PI / 2);
       boatGroup.add(mesh);
     }
-    addStay(mastX, 4.1, mastBaseY + 7); /* forestay to the bow */
-    addStay(-1.0, 0.6, mastBaseY + 6.3); /* port shroud */
-    addStay(1.0, 0.6, mastBaseY + 6.3);  /* starboard shroud */
+    addStay(mastX, 4.1, mastBaseY + 9); /* forestay to the bow */
+    addStay(-1.0, 0.6, mastBaseY + 8.1); /* port shroud */
+    addStay(1.0, 0.6, mastBaseY + 8.1);  /* starboard shroud */
 
     /* Boom group — pivots exactly at the mast's base/centerline so it
        reads as properly attached, not floating beside the mast */
     boomGroup = new THREE.Group();
-    boomGroup.position.set(mastX, mastBaseY + 0.9, mastZ);
+    boomGroup.position.set(mastX, mastBaseY + 1.8, mastZ);
     boatGroup.add(boomGroup);
 
     const boomLen = 3.2;
@@ -475,7 +498,7 @@
     const mainsailGeo = new THREE.BufferGeometry();
     const mainsailVerts = new Float32Array([
       0, 0, 0,      /* mast base (boom pivot height) */
-      0, 6.0, 0,    /* mast top */
+      0, 7.0, 0,    /* mast top */
       0, 0, -boomLen /* boom tip (local to boomGroup) */
     ]);
     mainsailGeo.setAttribute("position", new THREE.BufferAttribute(mainsailVerts, 3));
@@ -486,14 +509,22 @@
     }));
     boomGroup.add(sailMesh); /* parented to boomGroup so it swings with the boom but stays mast-attached */
 
-    /* Headsail (jib) — forward of the mast, between the bow and a
-       point partway up the mast. Height scales with how much jib is
-       furled in. */
+    /* Headsail (jib) — a roller-furling jib. Its luff (the edge along
+       the forestay, from mast base up toward the masthead) is the
+       furl axis: furling rolls the sail's clew up TOWARD that edge,
+       like a real roller furler winding the sail around the
+       forestay, rather than just shrinking it downward. We model
+       this with a dedicated group pivoted at the tack (mast base)
+       whose rotation/scale we drive from updateHeadsailReef. */
+    headsailGroup = new THREE.Group();
+    headsailGroup.position.set(mastX, mastBaseY + 0.6, mastZ);
+    boatGroup.add(headsailGroup);
+
     const headsailGeo = new THREE.BufferGeometry();
     const headsailVerts = new Float32Array([
-      mastX, mastBaseY + 0.6, mastZ,   /* tack, near the mast base */
-      mastX, mastBaseY + 4.9, mastZ,   /* head, partway up the mast */
-      mastX, mastBaseY + 0.6, 3.9      /* clew, forward toward the bow */
+      0, 0, 0,        /* tack, at the headsailGroup origin (mast base) */
+      0, 5.6, 0,      /* head, up near the masthead */
+      0, 0, 3.3        /* clew, forward toward the bow */
     ]);
     headsailGeo.setAttribute("position", new THREE.BufferAttribute(headsailVerts, 3));
     headsailGeo.setIndex([0, 1, 2]);
@@ -501,7 +532,7 @@
     headsailMesh = new THREE.Mesh(headsailGeo, new THREE.MeshPhongMaterial({
       color: 0xf0f0ec, side: THREE.DoubleSide, transparent: true, opacity: 0.9, flatShading: true
     }));
-    boatGroup.add(headsailMesh);
+    headsailGroup.add(headsailMesh);
 
     scene.add(boatGroup);
   }
@@ -509,10 +540,17 @@
   /* jibFurlPct: 0 (fully furled) .. 100 (full jib out). Scales the
      headsail's visible height to match how much jib is actually
      deployed, matching the new continuous furl control. */
+  /* jibFurlPct: 0 (fully furled/rolled up) .. 100 (full jib out).
+     A real roller-furling jib winds the sail around the forestay
+     starting from the leech (the free aft edge, our "clew" point),
+     rolling inward toward the luff — so we shrink the sail's
+     foot/leech extent (local Z, from luff at z=0 to clew at z=3.3)
+     toward zero, which reads as the sail disappearing forward into
+     a furled roll at the mast/forestay rather than just sinking down. */
   function updateHeadsailReef(jibFurlPct) {
     if (!headsailMesh) return;
     const scale = Math.max(0, Math.min(100, jibFurlPct)) / 100;
-    headsailMesh.scale.y = scale;
+    headsailMesh.scale.z = scale;
   }
 
   /* Rebuilds scene-wide wind streaks scattered across the visible
