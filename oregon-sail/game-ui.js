@@ -546,6 +546,7 @@
       isSailing,
       reefLevel: OS.boat ? (OS.boat.reef_level || 0) : 0,
       jibFurlPct: OS.boat ? (OS.boat.jib_furl_pct != null ? OS.boat.jib_furl_pct : 100) : 100,
+      speedKt: OS.boat ? (OS.boat.speed_over_ground_kt || 0) : 0,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
          feed on the client */
