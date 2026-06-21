@@ -544,7 +544,11 @@
   <!-- First-run defaults: seeds localStorage with the designer's
        preferred layout/settings so new players start with a clean,
        tested UI instead of the raw zero state. Runs once and never
-       overwrites settings the player has already customised. -->
+       overwrites settings the player has already customised.
+       Also checks the dev console's live app_config (Supabase) for
+       three dev-controlled values — background color, default theme,
+       compass mode/zoom/style — falling back to the hardcoded
+       snapshot below if that fetch fails or the dev hasn't set them. -->
   <script>
   (function () {
     var DEFAULTS_VERSION = "1";
@@ -566,13 +570,71 @@
       "osBoomAngle": "-9"
     };
 
-    Object.keys(defaults).forEach(function (k) {
-      if (localStorage.getItem(k) === null) {
-        localStorage.setItem(k, defaults[k]);
+    function applyDefaults(devOverrides) {
+      /* Dev console overrides (background color / theme / compass
+         settings) take priority over the hardcoded snapshot above,
+         but only for the specific keys the dev has actually set —
+         merge rather than replace wholesale. */
+      if (devOverrides) {
+        if (devOverrides.dashboardBackgroundColor) {
+          try {
+            var widgetSettings = JSON.parse(defaults["marineDashboardWidgetSettingsV2"]);
+            widgetSettings.dashboardSettings.backgroundColor = devOverrides.dashboardBackgroundColor;
+            defaults["marineDashboardWidgetSettingsV2"] = JSON.stringify(widgetSettings);
+          } catch (e) {}
+        }
+        if (devOverrides.defaultTheme) {
+          try {
+            var ws2 = JSON.parse(defaults["marineDashboardWidgetSettingsV2"]);
+            Object.keys(ws2.widgetSettings).forEach(function (k) {
+              if (ws2.widgetSettings[k] && typeof ws2.widgetSettings[k] === "object") {
+                ws2.widgetSettings[k].theme = devOverrides.defaultTheme;
+              }
+            });
+            defaults["marineDashboardWidgetSettingsV2"] = JSON.stringify(ws2);
+          } catch (e) {}
+        }
+        if (devOverrides.compassMapMode) defaults["compassMapMode"] = devOverrides.compassMapMode;
+        if (devOverrides.compassStyle) defaults["compassStyle"] = devOverrides.compassStyle;
+        if (devOverrides.compassZoom) defaults["compassZoom"] = String(devOverrides.compassZoom);
       }
-    });
 
-    localStorage.setItem("osDefaultsApplied", DEFAULTS_VERSION);
+      Object.keys(defaults).forEach(function (k) {
+        if (localStorage.getItem(k) === null) {
+          localStorage.setItem(k, defaults[k]);
+        }
+      });
+
+      localStorage.setItem("osDefaultsApplied", DEFAULTS_VERSION);
+    }
+
+    /* Try the live dev-controlled config first; fall back to the
+       hardcoded snapshot immediately if it's unreachable (offline,
+       slow connection, etc) rather than blocking page load on it. */
+    var fetchTimedOut = false;
+    var timeoutId = setTimeout(function () {
+      fetchTimedOut = true;
+      applyDefaults(null);
+    }, 1500);
+
+    fetch("https://ailcwfpjlelofhqmqzdy.supabase.co/rest/v1/app_config?id=eq.1&select=config", {
+      headers: {
+        "apikey": "sb_publishable_3QZVUGb46lWu2ubdurS2Qg_vWNMZ44e",
+        "Authorization": "Bearer sb_publishable_3QZVUGb46lWu2ubdurS2Qg_vWNMZ44e"
+      }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        if (fetchTimedOut) return; /* already applied via fallback */
+        clearTimeout(timeoutId);
+        var config = rows && rows[0] && rows[0].config ? rows[0].config : null;
+        applyDefaults(config);
+      })
+      .catch(function () {
+        if (fetchTimedOut) return;
+        clearTimeout(timeoutId);
+        applyDefaults(null);
+      });
   })();
   </script>
 

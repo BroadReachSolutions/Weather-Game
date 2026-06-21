@@ -35,9 +35,39 @@
   }
 
   /* ---------------------------------------------------------------
+     WEATHER OVERRIDE WIRING
+     Wraps the real wind getter functions (defined in script.js) so
+     every consumer in the game — point of sail, sail speed, the 3D
+     heel/wind-streak direction, the windex gauge — transparently
+     respects the override without each call site needing its own
+     check. When inactive, falls through to the real value untouched.
+     --------------------------------------------------------------- */
+  function installWeatherOverrideHooks() {
+    if (window.__osRealGetLastWindDeg) return; /* already installed */
+
+    window.__osRealGetLastWindDeg = window.getLastWindDeg;
+    window.__osRealGetLastWindMph = window.getLastWindMph;
+
+    window.getLastWindDeg = function () {
+      if (window.OSDevWeatherOverride && window.OSDevWeatherOverride.active) {
+        return window.OSDevWeatherOverride.dirDeg;
+      }
+      return typeof window.__osRealGetLastWindDeg === "function" ? window.__osRealGetLastWindDeg() : 0;
+    };
+
+    window.getLastWindMph = function () {
+      if (window.OSDevWeatherOverride && window.OSDevWeatherOverride.active) {
+        return window.OSDevWeatherOverride.speedMph;
+      }
+      return typeof window.__osRealGetLastWindMph === "function" ? window.__osRealGetLastWindMph() : 0;
+    };
+  }
+
+  /* ---------------------------------------------------------------
      INIT — shows the toggle button, wires the open/close/tab switching
      --------------------------------------------------------------- */
   function init() {
+    installWeatherOverrideHooks();
     const toggleBtn = document.getElementById("osDevToggleBtn");
     const closeBtn = document.getElementById("osDevCloseBtn");
     const console_ = document.getElementById("osDevConsole");
@@ -340,7 +370,7 @@
     content.innerHTML = `
       <div class="osDevSection">
         <div class="osDevSectionHeader"><span>Weather Override</span></div>
-        <p class="osDevHint">Forces a fixed wind speed/direction instead of the real forecast, for testing specific conditions on demand.</p>
+        <p class="osDevHint">Forces a fixed wind speed/direction instead of the real forecast, for testing specific conditions on demand. Only affects your live client session right now — while this browser tab is open, every sailing calculation (point of sail, heel, wind streaks, windex) uses this instead of the real forecast. The server's background tick (which moves the boat while the app is closed) always uses real weather, regardless of this setting.</p>
         <div class="osDevFormGrid">
           <label class="osDevCheckboxLabel"><input type="checkbox" id="dwActive" ${override.active ? "checked" : ""}> Override active</label>
           <label>Wind Speed (mph) <input type="number" id="dwSpeed" value="${override.speedMph}"></label>
@@ -440,14 +470,64 @@
     const config = data.config || {};
     content.innerHTML = `
       <div class="osDevSection">
-        <div class="osDevSectionHeader"><span>Global UI Config</span></div>
-        <p class="osDevHint">Changes here apply to EVERY player on next load, not just you. Stored as raw JSON for flexibility — add any key the app's CSS/JS is wired to read.</p>
-        <textarea id="dcConfigJson" class="osDevJsonEditor" rows="14">${JSON.stringify(config, null, 2)}</textarea>
+        <div class="osDevSectionHeader"><span>New Player Defaults</span></div>
+        <p class="osDevHint">These apply to new players' first load (read from this table before script.js even runs). Existing players who've already customised their settings are never overwritten.</p>
+        <div class="osDevFormGrid">
+          <label>Dashboard Background Color
+            <input type="color" id="dcBgColor" value="${config.dashboardBackgroundColor || "#07131c"}">
+          </label>
+          <label>Default Widget Theme
+            <select id="dcTheme">
+              <option value="clean" ${(!config.defaultTheme || config.defaultTheme === "clean") ? "selected" : ""}>Clean</option>
+            </select>
+          </label>
+          <label>Default Compass Mode
+            <select id="dcCompassMode">
+              <option value="radar" ${(!config.compassMapMode || config.compassMapMode === "radar") ? "selected" : ""}>Radar</option>
+              <option value="satellite" ${config.compassMapMode === "satellite" ? "selected" : ""}>Satellite</option>
+            </select>
+          </label>
+          <label>Default Compass Style
+            <select id="dcCompassStyle">
+              <option value="none" ${(!config.compassStyle || config.compassStyle === "none") ? "selected" : ""}>No Ring</option>
+              <option value="ring" ${config.compassStyle === "ring" ? "selected" : ""}>Ring</option>
+            </select>
+          </label>
+          <label>Default Compass Zoom
+            <input type="number" id="dcCompassZoom" value="${config.compassZoom || 17}" min="2" max="19">
+          </label>
+        </div>
         <div class="osDevFormActions">
-          <button class="osDevBtn" id="osDevSaveConfigBtn">Save Global Config</button>
+          <button class="osDevBtn" id="osDevSaveFriendlyBtn">Save Defaults</button>
+        </div>
+      </div>
+
+      <div class="osDevSection">
+        <div class="osDevSectionHeader"><span>Raw Config (advanced)</span></div>
+        <p class="osDevHint">Full JSON for anything not covered above. Editing the friendly fields and saving above also updates these same keys here.</p>
+        <textarea id="dcConfigJson" class="osDevJsonEditor" rows="10">${JSON.stringify(config, null, 2)}</textarea>
+        <div class="osDevFormActions">
+          <button class="osDevBtn" id="osDevSaveConfigBtn">Save Raw JSON</button>
         </div>
       </div>
     `;
+
+    document.getElementById("osDevSaveFriendlyBtn").addEventListener("click", async () => {
+      const updated = {
+        ...config,
+        dashboardBackgroundColor: document.getElementById("dcBgColor").value,
+        defaultTheme: document.getElementById("dcTheme").value,
+        compassMapMode: document.getElementById("dcCompassMode").value,
+        compassStyle: document.getElementById("dcCompassStyle").value,
+        compassZoom: parseInt(document.getElementById("dcCompassZoom").value, 10) || 17
+      };
+      const { error: saveErr } = await sbClient
+        .from("app_config")
+        .update({ config: updated, updated_at: new Date().toISOString() })
+        .eq("id", 1);
+      if (saveErr) { alert("Save failed: " + saveErr.message); logEvent("error", "UI config save failed: " + saveErr.message); }
+      else { logEvent("info", "Saved new-player defaults (background/theme/compass)."); alert("Saved — new players will get these on their first load."); }
+    });
 
     document.getElementById("osDevSaveConfigBtn").addEventListener("click", async () => {
       let parsed;
