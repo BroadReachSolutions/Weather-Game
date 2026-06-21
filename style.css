@@ -1665,6 +1665,15 @@ body.layout-edit .widgetResize {
   flex-direction: column;
   border-radius: 12px;
   overflow: hidden;
+  transition: top 0.2s ease;
+}
+
+/* While the Boat Designer tab is active, dock the console to the
+   bottom ~55% so the live 3D Helm view stays visible above it for
+   a real-time preview as sliders change */
+.osDevConsole.osDevDesignerMode {
+  top: 45%;
+  background: rgba(12, 17, 23, 0.97);
 }
 
 .osDevConsoleHeader {
@@ -1943,6 +1952,49 @@ body.layout-edit .widgetResize {
 .osDevLogRow-info { color: rgba(159,194,217,0.8); }
 
 .osDevLogTime { flex-shrink: 0; opacity: 0.6; }
+
+.osDevDesignerSliders, .osDevDesignerColors {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.osDevSliderRow, .osDevColorRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.osDevSliderLabel {
+  font-size: 10px;
+  color: rgba(159,194,217,0.7);
+  display: flex;
+  justify-content: space-between;
+}
+
+.osDevSliderVal {
+  color: #ffd699;
+  font-family: monospace;
+}
+
+.osDevSlider {
+  width: 100%;
+}
+
+.osDevColorRow {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.osDevColorInput {
+  width: 44px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(125,186,220,0.3);
+  background: transparent;
+  cursor: pointer;
+}
 
 /* ═══ GAME WIDGET — Oregon Sail ═══ */
 

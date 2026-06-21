@@ -194,6 +194,13 @@
 
     if (typeof window.OSHelm3D !== "undefined") {
       window.OSHelm3D.init();
+      if (boat.hull_design) {
+        /* init() builds the scene async (waits for the canvas/THREE
+           to be ready), so give it a moment before rebuilding with
+           the saved design — otherwise rebuildBoat() runs before
+           there's a scene to rebuild into */
+        setTimeout(() => window.OSHelm3D.rebuildBoat(boat.hull_design), 500);
+      }
     }
 
     startSimulationLoop();

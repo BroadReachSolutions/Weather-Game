@@ -99,9 +99,21 @@
   function switchDevTab(tabName) {
     const content = document.getElementById("osDevTabContent");
     if (!content) return;
+    const leavingDesigner = content.dataset.activeTab === "designer" && tabName !== "designer";
     content.dataset.activeTab = tabName;
+
+    const console_ = document.getElementById("osDevConsole");
+    if (console_) console_.classList.toggle("osDevDesignerMode", tabName === "designer");
+
+    if (leavingDesigner && typeof window.OSHelm3D !== "undefined" && window.OS.boat) {
+      /* Restore the boat's actual saved design (or default) so any
+         unsaved preview tweaks don't linger in the live game view */
+      window.OSHelm3D.rebuildBoat(window.OS.boat.hull_design || window.OSHelm3D.getDefaultBoatDNA());
+    }
+
     const renderers = {
       vessels: renderVesselsTab,
+      designer: renderDesignerTab,
       state: renderStateTab,
       weather: renderWeatherTab,
       teleport: renderTeleportTab,
@@ -280,6 +292,140 @@
         });
       }
     }
+  }
+
+  /* ---------------------------------------------------------------
+     BOAT DESIGNER TAB — live parametric 3D boat design. Sliders/color
+     pickers drive window.OSHelm3D.rebuildBoat() directly so the boat
+     visible in the Helm view above updates in real time as you drag,
+     before anything is saved anywhere.
+     --------------------------------------------------------------- */
+  const DESIGNER_FIELDS = [
+    { key: "hullLength", label: "Hull Length", min: 4, max: 12, step: 0.1 },
+    { key: "hullWidth", label: "Hull Width (Beam)", min: 1.2, max: 4, step: 0.1 },
+    { key: "freeboard", label: "Freeboard Height", min: 0.8, max: 4, step: 0.1 },
+    { key: "mastHeight", label: "Mast Height", min: 4, max: 16, step: 0.2 },
+    { key: "cabinLength", label: "Cabin Length", min: 1, max: 5, step: 0.1 },
+    { key: "cabinWidth", label: "Cabin Width", min: 0.8, max: 3, step: 0.1 },
+    { key: "cabinHeight", label: "Cabin Height", min: 0.4, max: 1.6, step: 0.05 },
+    { key: "cabinOffsetZ", label: "Cabin Position (fore/aft)", min: -1.5, max: 1.5, step: 0.1 },
+    { key: "biminiWidth", label: "Bimini Width", min: 0.8, max: 2.5, step: 0.1 },
+    { key: "biminiLength", label: "Bimini Length", min: 0.8, max: 3, step: 0.1 }
+  ];
+  const DESIGNER_COLORS = [
+    { key: "hullColor", label: "Hull Color" },
+    { key: "deckColor", label: "Deck Color" },
+    { key: "cabinColor", label: "Cabin Color" },
+    { key: "sailColor", label: "Sail Color" },
+    { key: "biminiColor", label: "Bimini Color" }
+  ];
+
+  let designerDNA = null;
+
+  function colorToHex(num) {
+    return "#" + (num || 0).toString(16).padStart(6, "0");
+  }
+  function hexToColorInt(hex) {
+    return parseInt(hex.replace("#", ""), 16);
+  }
+
+  function renderDesignerTab() {
+    const content = document.getElementById("osDevTabContent");
+    if (typeof window.OSHelm3D === "undefined") {
+      content.innerHTML = `<div class="osDevError">3D Helm view isn't loaded.</div>`;
+      return;
+    }
+
+    /* Start from this boat's saved design if it has one, otherwise
+       the generator's defaults (today's boat as it ships) */
+    designerDNA = JSON.parse(JSON.stringify(
+      (window.OS.boat && window.OS.boat.hull_design) || window.OSHelm3D.getCurrentBoatDNA() || window.OSHelm3D.getDefaultBoatDNA()
+    ));
+
+    content.innerHTML = `
+      <div class="osDevSection">
+        <div class="osDevSectionHeader"><span>Boat Designer</span></div>
+        <p class="osDevHint">Drag a slider — the boat in the Helm view above updates instantly. Nothing saves until you choose an action below.</p>
+        <div class="osDevDesignerSliders" id="osDevDesignerSliders"></div>
+        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Colors</span></div>
+        <div class="osDevDesignerColors" id="osDevDesignerColors"></div>
+        <div class="osDevFormActions" style="margin-top:14px;">
+          <button class="osDevBtn" id="osDevApplyToMeBtn">Apply to My Boat</button>
+          <button class="osDevBtnSecondary" id="osDevSaveAsPresetBtn">Save as New Preset</button>
+          <button class="osDevBtnSecondary" id="osDevResetDesignBtn">Reset to Default Shape</button>
+        </div>
+      </div>
+    `;
+
+    const sliderWrap = document.getElementById("osDevDesignerSliders");
+    DESIGNER_FIELDS.forEach(f => {
+      const row = document.createElement("div");
+      row.className = "osDevSliderRow";
+      row.innerHTML = `
+        <label class="osDevSliderLabel">${f.label} <span class="osDevSliderVal" id="dsVal_${f.key}">${designerDNA[f.key]}</span></label>
+        <input type="range" class="osDevSlider" id="ds_${f.key}" min="${f.min}" max="${f.max}" step="${f.step}" value="${designerDNA[f.key]}">
+      `;
+      sliderWrap.appendChild(row);
+
+      const slider = row.querySelector("input");
+      slider.addEventListener("input", () => {
+        const val = parseFloat(slider.value);
+        designerDNA[f.key] = val;
+        document.getElementById(`dsVal_${f.key}`).textContent = val;
+        window.OSHelm3D.rebuildBoat(designerDNA);
+      });
+    });
+
+    const colorWrap = document.getElementById("osDevDesignerColors");
+    DESIGNER_COLORS.forEach(c => {
+      const row = document.createElement("div");
+      row.className = "osDevColorRow";
+      row.innerHTML = `
+        <label class="osDevSliderLabel">${c.label}</label>
+        <input type="color" class="osDevColorInput" id="dc_${c.key}" value="${colorToHex(designerDNA[c.key])}">
+      `;
+      colorWrap.appendChild(row);
+
+      const input = row.querySelector("input");
+      input.addEventListener("input", () => {
+        designerDNA[c.key] = hexToColorInt(input.value);
+        window.OSHelm3D.rebuildBoat(designerDNA);
+      });
+    });
+
+    /* Render once immediately with the loaded DNA so the preview
+       matches the sliders right away, not just after the first drag */
+    window.OSHelm3D.rebuildBoat(designerDNA);
+
+    document.getElementById("osDevApplyToMeBtn").addEventListener("click", async () => {
+      if (!window.OS.boat) return;
+      window.OS.boat.hull_design = designerDNA;
+      const { error } = await sbClient.from("boats").update({ hull_design: designerDNA }).eq("id", window.OS.boat.id);
+      if (error) { alert("Save failed: " + error.message); logEvent("error", "Apply design failed: " + error.message); }
+      else { logEvent("info", "Applied custom hull design to your boat."); alert("Applied — your boat now uses this design permanently."); }
+    });
+
+    document.getElementById("osDevSaveAsPresetBtn").addEventListener("click", async () => {
+      const key = prompt("Preset key (short slug, e.g. 'racer'):");
+      if (!key) return;
+      const name = prompt("Display name:", key);
+      if (!name) return;
+      const { error } = await sbClient.from("boat_presets").insert({
+        preset_key: key.trim().toLowerCase(),
+        display_name: name.trim(),
+        hull_design: designerDNA,
+        hull_speed_kt: 6.5,
+        rated_wind_mph: 15
+      });
+      if (error) { alert("Save failed: " + error.message); logEvent("error", "Save preset failed: " + error.message); }
+      else { logEvent("info", "Saved new preset with custom hull design: " + name); alert("Saved as a new vessel preset."); }
+    });
+
+    document.getElementById("osDevResetDesignBtn").addEventListener("click", () => {
+      designerDNA = window.OSHelm3D.getDefaultBoatDNA();
+      window.OSHelm3D.rebuildBoat(designerDNA);
+      renderDesignerTab();
+    });
   }
 
   /* ---------------------------------------------------------------

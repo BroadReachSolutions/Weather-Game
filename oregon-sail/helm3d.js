@@ -439,27 +439,66 @@
   let headsailMesh = null;
   let windLinesGroup = null;
 
-  function buildBoat() {
+  /* ---------------------------------------------------------------
+     BOAT DESIGN PARAMETERS ("DNA")
+     Every dimension/color buildBoat() uses is read from this object
+     instead of being hardcoded, so the dev console's boat designer
+     can drive the exact same generator with different numbers and
+     preview the result live. Defaults below match the boat exactly
+     as it existed before this change — nothing looks different for
+     existing players unless a custom design is actually supplied.
+     --------------------------------------------------------------- */
+  function defaultBoatDNA() {
+    return {
+      scale: 2.4,
+      hullLength: 6.8,        /* bow point (4.2) to transom (-2.6) */
+      hullWidth: 2.1,         /* full beam, port to starboard */
+      freeboard: 2.1,         /* hull depth — waterline to deck */
+      cabinLength: 2.7,
+      cabinWidth: 1.7,
+      cabinHeight: 0.85,
+      cabinOffsetZ: 0.3,      /* cabin center, fore(+)/aft(-) of midship */
+      mastHeight: 9,
+      biminiWidth: 1.5,
+      biminiLength: 1.7,
+      hullColor: 0xe8e4da,
+      deckColor: 0xd8d4c8,
+      cabinColor: 0xf2efe6,
+      sailColor: 0xf5f5f0,
+      biminiColor: 0x2c5f73
+    };
+  }
+
+  let currentBoatDNA = defaultBoatDNA();
+
+  function buildBoat(dna) {
+    const d = dna || currentBoatDNA || defaultBoatDNA();
+    currentBoatDNA = d;
+
     boatGroup = new THREE.Group();
     /* Whole boat scaled up substantially so it reads clearly against
        the water/waves instead of looking swamped by them */
-    boatGroup.scale.set(2.4, 2.4, 2.4);
+    boatGroup.scale.set(d.scale, d.scale, d.scale);
 
     /* Hull — extruded from a top-down silhouette with a pointed bow
-       (+Z) and a flat transom stern (-Z). Depth increased so the
-       freeboard (waterline to deck) reads as a real 5-6ft equivalent
-       once scaled, instead of a thin slab that sat low in the water. */
-    const hullShape = new THREE.Shape();
-    hullShape.moveTo(0, 4.2);       /* bow point */
-    hullShape.quadraticCurveTo(0.9, 2.6, 1.05, 0.5);
-    hullShape.lineTo(1.05, -2.6);   /* starboard side to stern */
-    hullShape.lineTo(-1.05, -2.6);  /* transom (stern) */
-    hullShape.lineTo(-1.05, 0.5);
-    hullShape.quadraticCurveTo(-0.9, 2.6, 0, 4.2); /* port side back to bow */
+       (+Z) and a flat transom stern (-Z). hullLength/hullWidth scale
+       the silhouette proportionally from the original hand-tuned
+       shape; freeboard is the extrude depth (waterline to deck). */
+    const bowZ = d.hullLength * 0.618;       /* keeps the original bow/stern proportions */
+    const sternZ = -(d.hullLength - bowZ);
+    const halfWidth = d.hullWidth / 2;
 
-    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: 2.1, bevelEnabled: false });
+    const hullShape = new THREE.Shape();
+    hullShape.moveTo(0, bowZ);
+    hullShape.quadraticCurveTo(halfWidth * 0.857, bowZ * 0.619, halfWidth, bowZ * 0.119);
+    hullShape.lineTo(halfWidth, sternZ);
+    hullShape.lineTo(-halfWidth, sternZ);
+    hullShape.lineTo(-halfWidth, bowZ * 0.119);
+    hullShape.quadraticCurveTo(-halfWidth * 0.857, bowZ * 0.619, 0, bowZ);
+
+    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: d.freeboard, bevelEnabled: false });
     hullExtrude.rotateX(Math.PI / 2);
-    const hullMat = new THREE.MeshPhongMaterial({ color: 0xe8e4da, flatShading: true });
+    const hullMat = new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true });
     hullMesh = new THREE.Mesh(hullExtrude, hullMat);
     /* Raised so most of the hull sits above the waterline (y=0),
        giving real visible freeboard instead of riding low */
@@ -469,31 +508,25 @@
     /* ExtrudeGeometry extrudes along local +Z from 0 to depth; our
        rotateX(90°) on the geometry maps local +Z to world -Y, so the
        hull's deck (top edge, local z=0) ends up at hullMesh.position.y
-       itself, and the keel/bottom (local z=depth) ends up BELOW that
-       at position.y - depth. Using position.y + depth here previously
-       put deckY a full hull-depth too high, floating the entire
-       cabin/bimini/mast assembly above the actual hull. */
+       itself, and the keel/bottom (local z=depth) ends up BELOW that. */
     const deckY = 1.0;
 
-    /* Keel fin beneath, just for visual grounding. Hull bottom is at
-       deckY - hullDepth (1.0 - 2.1 = -1.1); keel hangs below that. */
-    const keelGeo = new THREE.BoxGeometry(0.3, 1.2, 2);
+    /* Keel fin beneath, just for visual grounding. Scales loosely
+       with freeboard so a deeper hull gets a proportionally deeper keel. */
+    const keelGeo = new THREE.BoxGeometry(0.3, d.freeboard * 0.8, 2);
     const keelMesh = new THREE.Mesh(keelGeo, new THREE.MeshPhongMaterial({ color: 0x2a2a2a }));
-    keelMesh.position.y = -1.7;
+    keelMesh.position.y = deckY - d.freeboard - keelGeo.parameters.height * 0.5 + 0.1;
     boatGroup.add(keelMesh);
 
     /* ---------------------------------------------------------------
        CABIN TOP — a raised structure forward of the cockpit with
-       small round portholes along each side, sitting on deck. Built
-       from simple, reliable primitives (box walls + a tilted roof
-       plane) rather than hand-indexed triangles, which were fragile
-       and prone to rendering incorrectly.
+       small round portholes along each side, sitting on deck.
        --------------------------------------------------------------- */
-    const cabinMat = new THREE.MeshPhongMaterial({ color: 0xf2efe6, flatShading: true });
-    const cabinCenterZ = 0.3;   /* center of the cabin trunk, aft-to-fore */
-    const cabinLength = 2.7;    /* aft edge to where it tapers in toward the bow */
-    const cabinWidth = 1.7;
-    const cabinWallHeight = 0.85;
+    const cabinMat = new THREE.MeshPhongMaterial({ color: d.cabinColor, flatShading: true });
+    const cabinCenterZ = d.cabinOffsetZ;
+    const cabinLength = d.cabinLength;
+    const cabinWidth = d.cabinWidth;
+    const cabinWallHeight = d.cabinHeight;
 
     /* Cabin walls — a straightforward box, sides clipped narrower
        toward the bow by the separately-placed roof's slope/taper look */
@@ -518,7 +551,7 @@
         porthole.position.set(
           side * (cabinWidth / 2 + 0.01),
           deckY + cabinWallHeight / 2 + 0.1,
-          cabinCenterZ - cabinLength / 2 + 0.5 + i * 0.85
+          cabinCenterZ - cabinLength / 2 + 0.5 + i * (cabinLength / 3.5)
         );
         porthole.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
         boatGroup.add(porthole);
@@ -531,13 +564,15 @@
        at the helm station underneath it.
        --------------------------------------------------------------- */
     const cockpitFloorGeo = new THREE.BoxGeometry(1.4, 0.15, 1.8);
-    const cockpitFloorMesh = new THREE.Mesh(cockpitFloorGeo, new THREE.MeshPhongMaterial({ color: 0xd8d4c8 }));
+    const cockpitFloorMesh = new THREE.Mesh(cockpitFloorGeo, new THREE.MeshPhongMaterial({ color: d.deckColor }));
     cockpitFloorMesh.position.set(0, deckY + 0.1, -1.1);
     boatGroup.add(cockpitFloorMesh);
 
     const biminiFrameMat = new THREE.MeshPhongMaterial({ color: 0xc8ccd0 });
+    const biminiHalfW = d.biminiWidth / 2 - 0.1;
     const biminiPostPositions = [
-      [-0.65, -0.3], [0.65, -0.3], [-0.65, -1.8], [0.65, -1.8]
+      [-biminiHalfW, -0.3], [biminiHalfW, -0.3],
+      [-biminiHalfW, -0.3 - (d.biminiLength - 0.2)], [biminiHalfW, -0.3 - (d.biminiLength - 0.2)]
     ];
     biminiPostPositions.forEach(([px, pz]) => {
       const postGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.3, 6);
@@ -545,11 +580,11 @@
       post.position.set(px, deckY + 0.65, pz);
       boatGroup.add(post);
     });
-    const biminiTopGeo = new THREE.BoxGeometry(1.5, 0.06, 1.7);
+    const biminiTopGeo = new THREE.BoxGeometry(d.biminiWidth, 0.06, d.biminiLength);
     const biminiTopMesh = new THREE.Mesh(biminiTopGeo, new THREE.MeshPhongMaterial({
-      color: 0x2c5f73, flatShading: true
+      color: d.biminiColor, flatShading: true
     }));
-    biminiTopMesh.position.set(0, deckY + 1.32, -1.05);
+    biminiTopMesh.position.set(0, deckY + 1.32, -0.3 - (d.biminiLength - 0.2) / 2);
     boatGroup.add(biminiTopMesh);
 
     /* Helm — wheel on a post, under the bimini, aft end of the cockpit */
@@ -569,16 +604,16 @@
        --------------------------------------------------------------- */
     const stanchionMat = new THREE.MeshPhongMaterial({ color: 0xd0d4d8 });
     const lifelineMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8 });
-    const deckEdgeZ = [3.6, 2.4, 1.2, 0, -1.2, -2.4]; /* stanchion stations along the hull */
+    const deckEdgeZ = [bowZ * 0.857, bowZ * 0.571, bowZ * 0.286, 0, sternZ * 0.5, sternZ];
 
     [-1, 1].forEach((side) => {
       const stanchionPositions = [];
       deckEdgeZ.forEach((z) => {
         /* Hull narrows toward the bow — approximate the half-width at
            each Z station so stanchions roughly follow the hull line */
-        const t = Math.max(0, Math.min(1, (4.2 - z) / (4.2 - (-2.6))));
-        const halfWidth = 1.05 * (1 - 0.5 * Math.pow(1 - t, 2));
-        const x = side * Math.min(1.0, halfWidth);
+        const t = Math.max(0, Math.min(1, (bowZ - z) / (bowZ - sternZ)));
+        const hw = halfWidth * (1 - 0.5 * Math.pow(1 - t, 2));
+        const x = side * Math.min(halfWidth * 0.95, hw);
         stanchionPositions.push([x, z]);
 
         const stanchionGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.45, 5);
@@ -598,9 +633,7 @@
         line.position.set((x1 + x2) / 2, deckY + 0.42, (z1 + z2) / 2);
         /* Cylinder's default long axis is Y. Rotating on X lays it
            along Z first, THEN yawing on Y aims that Z-aligned segment
-           toward the real stanchion-to-stanchion direction. The
-           previous order (Z then Y) laid it along X instead, which
-           is the reported 90°-off lifelines. */
+           toward the real stanchion-to-stanchion direction. */
         line.rotation.x = Math.PI / 2;
         line.rotation.y = Math.atan2(dx, dz);
         boatGroup.add(line);
@@ -608,13 +641,13 @@
     });
 
     /* ---------------------------------------------------------------
-       MAST, BOOM, SAILS (existing, repositioned for the taller deck)
+       MAST, BOOM, SAILS
        --------------------------------------------------------------- */
     const mastX = 0, mastZ = 0.6;
     const mastBaseY = deckY;
-    const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, 9, 8);
+    const mastGeo = new THREE.CylinderGeometry(0.08, 0.08, d.mastHeight, 8);
     mastMesh = new THREE.Mesh(mastGeo, new THREE.MeshPhongMaterial({ color: 0x5a4632 }));
-    mastMesh.position.set(mastX, mastBaseY + 4.5, mastZ);
+    mastMesh.position.set(mastX, mastBaseY + d.mastHeight / 2, mastZ);
     boatGroup.add(mastMesh);
 
     /* Standing rigging — forestay (bow to masthead) and two side
@@ -630,9 +663,9 @@
       mesh.rotateX(Math.PI / 2);
       boatGroup.add(mesh);
     }
-    addStay(mastX, 4.1, mastBaseY + 9); /* forestay to the bow */
-    addStay(-1.0, 0.6, mastBaseY + 8.1); /* port shroud */
-    addStay(1.0, 0.6, mastBaseY + 8.1);  /* starboard shroud */
+    addStay(mastX, bowZ * 0.976, mastBaseY + d.mastHeight);            /* forestay to the bow */
+    addStay(-1.0, 0.6, mastBaseY + d.mastHeight * 0.9);                /* port shroud */
+    addStay(1.0, 0.6, mastBaseY + d.mastHeight * 0.9);                 /* starboard shroud */
 
     /* Boom group — pivots exactly at the mast's base/centerline so it
        reads as properly attached, not floating beside the mast */
@@ -644,57 +677,47 @@
     const boomGeo = new THREE.CylinderGeometry(0.05, 0.05, boomLen, 6);
     const boomMesh = new THREE.Mesh(boomGeo, new THREE.MeshPhongMaterial({ color: 0xcfd8df }));
     /* A cylinder's default long axis is Y. Rotating on X lays it down
-       along Z (fore-aft, running with the keel) — the previous
-       rotation.z laid it along X instead (side-to-side, perpendicular
-       to the hull), which was the reported 90°-off bug. */
+       along Z (fore-aft, running with the keel) */
     boomMesh.rotation.x = Math.PI / 2;
     boomMesh.position.set(0, 0, -boomLen / 2); /* extends aft from the mast pivot */
     boomGroup.add(boomMesh);
 
     /* Mainsail — triangle from mast (at boom pivot height up to mast
-       top) back to the boom tip, attached at the mast the whole time */
+       top) back to the boom tip, attached at the mast the whole time.
+       Height scales with mast height so taller masts get taller sails. */
+    const mainsailHeight = Math.max(2, d.mastHeight - 2);
     const mainsailGeo = new THREE.BufferGeometry();
     const mainsailVerts = new Float32Array([
-      0, 0, 0,      /* mast base (boom pivot height) */
-      0, 7.0, 0,    /* mast top */
-      0, 0, -boomLen /* boom tip (local to boomGroup) */
+      0, 0, 0,                  /* mast base (boom pivot height) */
+      0, mainsailHeight, 0,     /* mast top */
+      0, 0, -boomLen            /* boom tip (local to boomGroup) */
     ]);
     mainsailGeo.setAttribute("position", new THREE.BufferAttribute(mainsailVerts, 3));
     mainsailGeo.setIndex([0, 1, 2]);
     mainsailGeo.computeVertexNormals();
     sailMesh = new THREE.Mesh(mainsailGeo, new THREE.MeshPhongMaterial({
-      color: 0xf5f5f0, side: THREE.DoubleSide, transparent: true, opacity: 0.92, flatShading: true
+      color: d.sailColor, side: THREE.DoubleSide, transparent: true, opacity: 0.92, flatShading: true
     }));
     boomGroup.add(sailMesh); /* parented to boomGroup so it swings with the boom but stays mast-attached */
 
-    /* Headsail (jib) — a roller-furling jib. Its luff (the edge along
-       the forestay, from mast base up toward the masthead) is the
-       furl axis: furling rolls the sail's clew up TOWARD that edge,
-       like a real roller furler winding the sail around the
-       forestay, rather than just shrinking it downward. We model
-       this with a dedicated group pivoted at the tack (mast base)
-       whose rotation/scale we drive from updateHeadsailReef. */
-    /* Headsail (jib) — a roller-furling jib. Tack is raised above the
-       cabin top (previously sat near deck level, which put the sail
-       behind/below the cabin roof instead of clearing over it). The
-       luff (mast-base-to-masthead edge) is the furl axis: furling
-       wraps the sail around that vertical axis like a real roller
-       furler, rather than just scaling it flat. */
+    /* Headsail (jib) — a roller-furling jib. Tack sits above the
+       cabin top so it clears over it; height scales with mast height. */
     headsailGroup = new THREE.Group();
-    headsailGroup.position.set(mastX, deckY + 1.3, mastZ); /* tack now clears above the cabin roof */
+    headsailGroup.position.set(mastX, deckY + cabinWallHeight + 0.45, mastZ);
     boatGroup.add(headsailGroup);
 
+    const headsailHeight = Math.max(1.5, d.mastHeight * 0.55);
     const headsailGeo = new THREE.BufferGeometry();
     const headsailVerts = new Float32Array([
-      0, 0, 0,        /* tack, at the headsailGroup origin */
-      0, 5.0, 0,      /* head, up near the masthead */
-      0, 0, 3.3       /* clew, forward toward the bow */
+      0, 0, 0,                 /* tack, at the headsailGroup origin */
+      0, headsailHeight, 0,    /* head, up near the masthead */
+      0, 0, 3.3                /* clew, forward toward the bow */
     ]);
     headsailGeo.setAttribute("position", new THREE.BufferAttribute(headsailVerts, 3));
     headsailGeo.setIndex([0, 1, 2]);
     headsailGeo.computeVertexNormals();
     headsailMesh = new THREE.Mesh(headsailGeo, new THREE.MeshPhongMaterial({
-      color: 0xf0f0ec, side: THREE.DoubleSide, transparent: true, opacity: 0.9, flatShading: true
+      color: d.sailColor, side: THREE.DoubleSide, transparent: true, opacity: 0.9, flatShading: true
     }));
     headsailGroup.add(headsailMesh);
 
@@ -992,6 +1015,20 @@
     setState: function (state) {
       window.OSHelm3DState = state;
     },
+    /* Tears down and regenerates the boat with a new set of design
+       parameters — used by the dev console's boat designer for a
+       live preview as sliders change, and to apply a saved design
+       to a real player's boat. Pass null/omit to rebuild with
+       whatever DNA is already current (e.g. after a resize). */
+    rebuildBoat: function (dna) {
+      if (!scene) return;
+      if (boatGroup) { scene.remove(boatGroup); }
+      if (wakeTrailMesh) { scene.remove(wakeTrailMesh); wakeTrailMesh = null; wakeHistory = []; }
+      buildBoat(dna || currentBoatDNA);
+      buildWake();
+    },
+    getDefaultBoatDNA: defaultBoatDNA,
+    getCurrentBoatDNA: function () { return currentBoatDNA; },
     resize: onResize
   };
 })();
