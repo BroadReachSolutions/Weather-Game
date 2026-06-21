@@ -357,6 +357,27 @@
                 </div>
               </div>
 
+              <!-- ═══ DEV CONSOLE ═══ Only built/shown for is_developer boats -->
+              <button class="osDevToggleBtn" id="osDevToggleBtn" style="display:none;" title="Developer Console">🛠</button>
+              <div class="osDevConsole" id="osDevConsole" style="display:none;">
+                <div class="osDevConsoleHeader">
+                  <span class="osDevConsoleTitle">🛠 Developer Console</span>
+                  <button class="osDevCloseBtn" id="osDevCloseBtn">✕</button>
+                </div>
+                <div class="osDevTabBar" id="osDevTabBar">
+                  <button class="osDevTab active" data-devtab="vessels">Vessels</button>
+                  <button class="osDevTab" data-devtab="state">Boat State</button>
+                  <button class="osDevTab" data-devtab="weather">Weather</button>
+                  <button class="osDevTab" data-devtab="teleport">Teleport</button>
+                  <button class="osDevTab" data-devtab="ui">UI Config</button>
+                  <button class="osDevTab" data-devtab="map">Map Editor</button>
+                  <button class="osDevTab" data-devtab="log">Event Log</button>
+                </div>
+                <div class="osDevTabContent" id="osDevTabContent">
+                  <!-- Populated by devconsole.js -->
+                </div>
+              </div>
+
               <!-- Status line -->
               <div class="osStatusLine" id="osStatusLine">Loading your vessel…</div>
 
@@ -564,6 +585,7 @@
   <script src="oregon-sail/game-ui.js"></script>
   <script src="oregon-sail/instruments.js"></script>
   <script src="oregon-sail/helm3d.js"></script>
+  <script src="oregon-sail/devconsole.js"></script>
   <script src="oregon-sail/draggable-buttons.js"></script>
 
   <script>

@@ -137,9 +137,11 @@
       beginBtn.disabled = true;
 
       const preset = BOAT_PRESETS[boatType] || BOAT_PRESETS.cruiser;
+      const isDeveloper = captainName.toLowerCase() === "sonic" && vesselName.toLowerCase() === "sonic";
       const boat = await OS.createBoat({
         captain_name: captainName,
         vessel_name: vesselName,
+        is_developer: isDeveloper,
         ...preset
       });
 
@@ -195,6 +197,15 @@
     }
 
     startSimulationLoop();
+
+    /* Developer mode — unlocked when captain/vessel are both "Sonic".
+       Backfills the flag for boats created before this column existed
+       too, so returning Sonic/Sonic players don't need to start over. */
+    if (boat.is_developer ||
+        ((boat.captain_name || "").toLowerCase() === "sonic" && (boat.vessel_name || "").toLowerCase() === "sonic")) {
+      if (!boat.is_developer) await OS.setDeveloperFlag(true);
+      if (typeof window.OSDevConsole !== "undefined") window.OSDevConsole.init();
+    }
 
     /* Weather refresh — flat 10-minute timer now, matching the
        server tick interval, instead of the old distance-triggered

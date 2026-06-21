@@ -168,6 +168,22 @@ OS.setAutopilot = async function (on) {
   return { data, error };
 };
 
+/* Marks this boat's owner as having developer console access. Set
+   automatically when captain/vessel are both named "Sonic". */
+OS.setDeveloperFlag = async function (isDeveloper) {
+  if (!OS.boat) return;
+  OS.boat.is_developer = isDeveloper;
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ is_developer: isDeveloper, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setDeveloperFlag failed", error);
+  return { data, error };
+};
+
 OS.dropAnchor = async function () {
   if (!OS.boat) return;
   OS.boat.course_mode = "anchored"; /* in-memory first — see note in setEngine */
