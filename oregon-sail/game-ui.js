@@ -89,20 +89,75 @@
 
   /* Boat type presets — one for now, easily extended later.
      Stats here feed directly into the Supabase boat row on creation. */
-  const BOAT_PRESETS = {
-    cruiser: {
-      hull_speed_kt: 7.2,
-      rated_wind_mph: 15,
-      reef_wind_limits_mph: [25, 30, 35],
-      reef_speed_penalty: [1.0, 0.85, 0.65],
-      boat_weight_class: "medium",
-      sail_area_sqft: 610
-    }
+  /* Fallback used only if the boat_presets table can't be reached
+     (offline, first-ever load before any migration, etc) — keeps the
+     main menu functional even when Supabase is briefly unavailable. */
+  const FALLBACK_PRESET = {
+    preset_key: "cruiser",
+    display_name: "Island Packet 380",
+    icon: "🛥",
+    description: "A blue-water cruiser built for offshore passages. Stiff, seaworthy, forgiving in heavy weather.",
+    hull_speed_kt: 7.2,
+    rated_wind_mph: 15,
+    reef_wind_limits_mph: [25, 30, 35],
+    reef_speed_penalty: [1.0, 0.85, 0.65],
+    boat_weight_class: "medium",
+    main_sail_area_sqft: 245,
+    jib_sail_area_sqft: 105
   };
+
+  let loadedPresets = [];
+
+  async function loadBoatPresets() {
+    try {
+      const { data, error } = await sbClient
+        .from("boat_presets")
+        .select("*")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true });
+      if (error || !data || data.length === 0) {
+        loadedPresets = [FALLBACK_PRESET];
+      } else {
+        loadedPresets = data;
+      }
+    } catch (e) {
+      loadedPresets = [FALLBACK_PRESET];
+    }
+    renderBoatCards();
+  }
+
+  function renderBoatCards() {
+    const container = document.getElementById("osBoatCards");
+    if (!container) return;
+    container.innerHTML = "";
+
+    loadedPresets.forEach((p, i) => {
+      const card = document.createElement("div");
+      card.className = "osBoatCard" + (i === 0 ? " selected" : "");
+      card.dataset.presetKey = p.preset_key;
+      const reefCount = (p.reef_wind_limits_mph || []).length;
+      card.innerHTML = `
+        <div class="osBoatCardIcon">${p.icon || "🛥"}</div>
+        <div class="osBoatCardName">${p.display_name}</div>
+        <div class="osBoatCardStats">
+          <span>Hull speed ${p.hull_speed_kt} kt</span>
+          <span>Rated wind ${p.rated_wind_mph} mph</span>
+          <span>${reefCount} reef point${reefCount === 1 ? "" : "s"}</span>
+        </div>
+        <div class="osBoatCardDesc">${p.description || ""}</div>
+      `;
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".osBoatCard").forEach(c => c.classList.remove("selected"));
+        card.classList.add("selected");
+      });
+      container.appendChild(card);
+    });
+  }
 
   function showMainMenu() {
     const menu = document.getElementById("osMainMenu");
     if (menu) menu.style.display = "flex";
+    loadBoatPresets();
   }
 
   function hideMainMenu() {
@@ -115,19 +170,12 @@
     const errorEl = document.getElementById("osMenuError");
     if (!beginBtn) return;
 
-    /* Boat card selection */
-    document.querySelectorAll(".osBoatCard").forEach(card => {
-      card.addEventListener("click", () => {
-        document.querySelectorAll(".osBoatCard").forEach(c => c.classList.remove("selected"));
-        card.classList.add("selected");
-      });
-    });
-
     beginBtn.addEventListener("click", async () => {
       const captainName = document.getElementById("osCaptainName").value.trim();
       const vesselName = document.getElementById("osVesselName").value.trim();
       const selectedCard = document.querySelector(".osBoatCard.selected");
-      const boatType = selectedCard ? selectedCard.dataset.boatType : "cruiser";
+      const presetKey = selectedCard ? selectedCard.dataset.presetKey : (loadedPresets[0] && loadedPresets[0].preset_key);
+      const preset = loadedPresets.find(p => p.preset_key === presetKey) || loadedPresets[0] || FALLBACK_PRESET;
 
       if (!captainName) { errorEl.textContent = "Please enter your captain's name."; return; }
       if (!vesselName)  { errorEl.textContent = "Please name your vessel."; return; }
@@ -136,13 +184,19 @@
       beginBtn.textContent = "Setting sail…";
       beginBtn.disabled = true;
 
-      const preset = BOAT_PRESETS[boatType] || BOAT_PRESETS.cruiser;
       const isDeveloper = captainName.toLowerCase() === "sonic" && vesselName.toLowerCase() === "sonic";
       const boat = await OS.createBoat({
         captain_name: captainName,
         vessel_name: vesselName,
         is_developer: isDeveloper,
-        ...preset
+        hull_speed_kt: preset.hull_speed_kt,
+        rated_wind_mph: preset.rated_wind_mph,
+        reef_wind_limits_mph: preset.reef_wind_limits_mph,
+        reef_speed_penalty: preset.reef_speed_penalty,
+        boat_weight_class: preset.boat_weight_class,
+        main_sail_area_sqft: preset.main_sail_area_sqft,
+        jib_sail_area_sqft: preset.jib_sail_area_sqft,
+        hull_design: preset.hull_design || null
       });
 
       if (!boat) {

@@ -328,16 +328,9 @@
 
                   <!-- Boat selection (one boat for now, more later) -->
                   <div class="osBoatCards" id="osBoatCards">
-                    <div class="osBoatCard selected" data-boat-type="cruiser">
-                      <div class="osBoatCardIcon">🛥</div>
-                      <div class="osBoatCardName">Island Packet 380</div>
-                      <div class="osBoatCardStats">
-                        <span>Hull speed 7.2 kt</span>
-                        <span>Rated wind 15 mph</span>
-                        <span>2 reef points</span>
-                      </div>
-                      <div class="osBoatCardDesc">A blue-water cruiser built for offshore passages. Stiff, seaworthy, forgiving in heavy weather.</div>
-                    </div>
+                    <!-- Populated dynamically from the boat_presets table by game-ui.js,
+                         so vessels created in the dev console show up here automatically -->
+                    <div class="osDevLoading" id="osBoatCardsLoading">Loading vessels…</div>
                   </div>
 
                   <!-- Captain setup -->
