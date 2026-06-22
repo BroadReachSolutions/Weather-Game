@@ -118,7 +118,7 @@
       }
       const angle = (i / cloudCount) * Math.PI * 2;
       const dist = 70 + Math.random() * 50;
-      cluster.position.set(Math.cos(angle) * dist, 28 + Math.random() * 14, Math.sin(angle) * dist);
+      cluster.position.set(Math.cos(angle) * dist, 75 + Math.random() * 30, Math.sin(angle) * dist);
       cluster.userData.driftSpeed = 0.15 + Math.random() * 0.15;
       cloudGroup.add(cluster);
     }
@@ -613,15 +613,18 @@
        vertices pushed outward in Y/X to fake the characteristic
        balloon shape, rather than a single flat triangle like the
        main/jib — a spinnaker reads as flat-and-triangular if built
-       the same way, which doesn't look right for this sail. */
+       the same way, which doesn't look right for this sail.
+       Flipped 180° on Z (now negative-forward) and scaled up
+       significantly per request — it was popping out the wrong
+       direction and reading too small at the previous size. */
     spinnakerGroup = new THREE.Group();
     spinnakerGroup.position.set(mastX, mastBaseY + d.mastHeight * 0.85, mastZ);
     boatGroup.add(spinnakerGroup);
 
-    const spinHeight = d.mastHeight * 0.75;
-    const spinForward = 4.5;       /* how far ahead of the bow it's flown */
-    const spinBillowOut = 1.6;     /* sideways bulge at mid-height, the "balloon" */
-    const spinBillowFwd = 0.8;     /* forward bulge at mid-height */
+    const spinHeight = d.mastHeight * 1.1;
+    const spinForward = -9;         /* negative = flipped 180°, now pops out toward the bow correctly */
+    const spinBillowOut = 3.0;      /* sideways bulge at mid-height, the "balloon" — much bigger */
+    const spinBillowFwd = -1.6;     /* forward bulge, same flipped sign as spinForward */
 
     const spinnakerGeo = new THREE.BufferGeometry();
     const spinnakerVerts = new Float32Array([
@@ -1000,6 +1003,51 @@
      streaks + longer + thicker as wind speed increases. */
   let lastWindLineSpeedKt = -1;
   let windStreakSpeed = 0;
+  function buildWindStreakGeometry(length, thickness) {
+    /* A tapered "comet" streak: wide/bright at the leading end,
+       narrowing and fading toward the trailing end — reads as a
+       motion trail rather than a plain solid rod. Built as a thin
+       cone (not a cylinder), with a per-vertex alpha attribute so
+       the trailing end genuinely fades to transparent rather than
+       just darkening toward black (which is what vertex *color*
+       alone would do under MeshBasicMaterial, since opacity there
+       is a single flat scalar, not per-vertex). */
+    const geo = new THREE.ConeGeometry(thickness, length, 6, 1, true);
+    const alphas = [];
+    const posAttr = geo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      /* ConeGeometry's local Y runs from -length/2 (base, wide end)
+         to +length/2 (tip) — tip is the leading/bright end here */
+      const y = posAttr.getY(i);
+      const t = (y + length / 2) / length; /* 0 at base/trailing, 1 at tip/leading */
+      alphas.push(t);
+    }
+    geo.setAttribute("alpha", new THREE.Float32BufferAttribute(alphas, 1));
+    return geo;
+  }
+
+  const windStreakMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: { uColor: { value: new THREE.Color(0xdff3ff) } },
+    vertexShader: `
+      attribute float alpha;
+      varying float vAlpha;
+      void main() {
+        vAlpha = alpha;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      varying float vAlpha;
+      void main() {
+        gl_FragColor = vec4(uColor, vAlpha * 0.85);
+      }
+    `
+  });
+
   function updateWindLines(windSpeedKt) {
     if (!windLinesGroup) return;
     const rounded = Math.round(windSpeedKt);
@@ -1012,15 +1060,14 @@
       windLinesGroup.remove(child);
     }
 
-    const count = Math.max(8, Math.min(40, Math.round(8 + windSpeedKt * 1.6)));
-    const length = Math.max(0.5, Math.min(2.2, 0.5 + windSpeedKt * 0.07));
-    const thickness = Math.max(0.02, Math.min(0.07, 0.02 + windSpeedKt * 0.002));
+    const count = Math.max(10, Math.min(50, Math.round(10 + windSpeedKt * 1.8)));
+    const length = Math.max(0.8, Math.min(3.2, 0.8 + windSpeedKt * 0.1));
+    const thickness = Math.max(0.04, Math.min(0.11, 0.04 + windSpeedKt * 0.0035));
 
     for (let i = 0; i < count; i++) {
-      const geo = new THREE.CylinderGeometry(thickness, thickness, length, 4);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
-      const line = new THREE.Mesh(geo, mat);
-      line.rotation.x = Math.PI / 2; /* lie flat, streaming along Z */
+      const geo = buildWindStreakGeometry(length, thickness);
+      const line = new THREE.Mesh(geo, windStreakMat);
+      line.rotation.x = Math.PI / 2; /* lie flat, streaming along Z, tip pointing forward */
       /* Scatter across a wide area around the boat at varying heights
          just above the water, so wind reads as an ambient field */
       line.position.set(
