@@ -1581,6 +1581,31 @@ body.layout-edit .widgetControls {
    body.layout-edit rule — no override needed here */
 body.layout-edit .widget { outline: 2px dashed rgba(140,200,230,0.4) !important; }
 
+/* Game widget's Edit button — always visible (unlike .widgetControls
+   above, which is intentionally hidden until edit mode is already
+   active). Lives here instead of relying on the station widget's own
+   Edit Layout button being visible/reachable, since saved layouts can
+   scroll/position that widget out of view. */
+.osGameEditBtn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 61;
+  background: rgba(100,180,255,0.15);
+  border: 1px solid rgba(100,180,255,0.4);
+  border-radius: 8px;
+  color: #a8daff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+body.layout-edit .osGameEditBtn {
+  background: rgba(100,180,255,0.35);
+  color: #fff;
+}
+
 .widget { outline: none !important; }
 
 /* Bigger touch target for resize handle on mobile */
