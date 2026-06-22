@@ -1491,6 +1491,14 @@ body.layout-edit .widgetFrame {
   overflow: visible !important;
 }
 
+/* The game widget's Edit button needs to stay visible/clickable even
+   OUTSIDE edit mode (it's how you get into edit mode in the first
+   place), so it needs its own exception to the overflow:hidden rule
+   above rather than only being un-clipped once already in edit mode. */
+#gameWidget .widgetFrame {
+  overflow: visible !important;
+}
+
 /* Tide chart fills its widget */
 #tideChartWidget .tideSection { height: 100%; }
 #tideChartWidget .tidePanel   { padding: 0 !important; margin: 0 !important; height: 100% !important; border-radius: 0 !important; }
