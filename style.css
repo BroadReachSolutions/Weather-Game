@@ -1596,8 +1596,8 @@ body.layout-edit .widget { outline: 2px dashed rgba(140,200,230,0.4) !important;
    scroll/position that widget out of view. */
 .osGameEditBtn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  bottom: 6px;
+  left: 6px;
   z-index: 61;
   background: rgba(100,180,255,0.15);
   border: 1px solid rgba(100,180,255,0.4);
