@@ -1981,6 +1981,26 @@ body.layout-edit .widgetResize {
   width: 100%;
 }
 
+.osDevDesignerTypes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: rgba(255,167,38,0.05);
+  border: 1px solid rgba(255,167,38,0.2);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.osDevTypeSelect {
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,167,38,0.35);
+  background: rgba(255,255,255,0.06);
+  color: #eef7ff;
+  font-size: 12px;
+}
+
 .osDevColorRow {
   flex-direction: row;
   align-items: center;

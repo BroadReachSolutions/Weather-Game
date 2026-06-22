@@ -109,6 +109,7 @@
       /* Restore the boat's actual saved design (or default) so any
          unsaved preview tweaks don't linger in the live game view */
       window.OSHelm3D.rebuildBoat(window.OS.boat.hull_design || window.OSHelm3D.getDefaultBoatDNA());
+      designerDNA = null; /* next time the tab opens, start fresh from the boat's real state */
     }
 
     const renderers = {
@@ -300,6 +301,39 @@
      visible in the Helm view above updates in real time as you drag,
      before anything is saved anywhere.
      --------------------------------------------------------------- */
+  const DESIGNER_TYPES = [
+    { key: "hullType", label: "Hull Type", options: [
+      { value: "cruiser", label: "Cruiser" },
+      { value: "racer", label: "Racer" },
+      { value: "trawler", label: "Trawler" },
+      { value: "catamaran", label: "Catamaran" }
+    ]},
+    { key: "cabinType", label: "Cabin Top Type", options: [
+      { value: "trunk", label: "Trunk Cabin" },
+      { value: "flush", label: "Flush Deck" },
+      { value: "pilothouse", label: "Pilothouse" }
+    ]},
+    { key: "keelType", label: "Keel Type", options: [
+      { value: "fin", label: "Fin Keel" },
+      { value: "full", label: "Full Keel" },
+      { value: "wing", label: "Wing Keel" }
+    ]},
+    { key: "biminiType", label: "Bimini Type", options: [
+      { value: "bimini", label: "Bimini (canvas)" },
+      { value: "hardtop", label: "Hardtop" },
+      { value: "none", label: "None (open cockpit)" }
+    ]},
+    { key: "lifelineType", label: "Lifeline Type", options: [
+      { value: "single", label: "Single Line" },
+      { value: "double", label: "Double Line" },
+      { value: "none", label: "None" }
+    ]},
+    { key: "helmType", label: "Steering Type", options: [
+      { value: "wheel", label: "Wheel" },
+      { value: "tiller", label: "Tiller" }
+    ]}
+  ];
+
   const DESIGNER_FIELDS = [
     { key: "hullLength", label: "Hull Length", min: 4, max: 12, step: 0.1 },
     { key: "hullWidth", label: "Hull Width (Beam)", min: 1.2, max: 4, step: 0.1 },
@@ -337,15 +371,22 @@
     }
 
     /* Start from this boat's saved design if it has one, otherwise
-       the generator's defaults (today's boat as it ships) */
-    designerDNA = JSON.parse(JSON.stringify(
-      (window.OS.boat && window.OS.boat.hull_design) || window.OSHelm3D.getCurrentBoatDNA() || window.OSHelm3D.getDefaultBoatDNA()
-    ));
+       the generator's defaults (today's boat as it ships). Only set
+       designerDNA fresh the first time this tab opens — re-renders
+       from a type change reuse the in-progress object so other
+       slider tweaks aren't lost. */
+    if (!designerDNA) {
+      designerDNA = JSON.parse(JSON.stringify(
+        (window.OS.boat && window.OS.boat.hull_design) || window.OSHelm3D.getCurrentBoatDNA() || window.OSHelm3D.getDefaultBoatDNA()
+      ));
+    }
 
     content.innerHTML = `
       <div class="osDevSection">
         <div class="osDevSectionHeader"><span>Boat Designer</span></div>
-        <p class="osDevHint">Drag a slider — the boat in the Helm view above updates instantly. Nothing saves until you choose an action below.</p>
+        <p class="osDevHint">Pick a type for each part, then use the sliders below to scale it. The boat in the Helm view above updates instantly. Nothing saves until you choose an action below.</p>
+        <div class="osDevDesignerTypes" id="osDevDesignerTypes"></div>
+        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Dimensions</span></div>
         <div class="osDevDesignerSliders" id="osDevDesignerSliders"></div>
         <div class="osDevSectionHeader" style="margin-top:14px;"><span>Colors</span></div>
         <div class="osDevDesignerColors" id="osDevDesignerColors"></div>
@@ -356,6 +397,30 @@
         </div>
       </div>
     `;
+
+    const typeWrap = document.getElementById("osDevDesignerTypes");
+    DESIGNER_TYPES.forEach(t => {
+      const row = document.createElement("div");
+      row.className = "osDevSliderRow";
+      const optionsHtml = t.options.map(o =>
+        `<option value="${o.value}" ${designerDNA[t.key] === o.value ? "selected" : ""}>${o.label}</option>`
+      ).join("");
+      row.innerHTML = `
+        <label class="osDevSliderLabel">${t.label}</label>
+        <select class="osDevTypeSelect" id="dt_${t.key}">${optionsHtml}</select>
+      `;
+      typeWrap.appendChild(row);
+
+      const select = row.querySelector("select");
+      select.addEventListener("change", () => {
+        designerDNA[t.key] = select.value;
+        window.OSHelm3D.rebuildBoat(designerDNA);
+        /* Re-render fully since switching types can change which
+           sliders are even relevant (kept simple rather than trying
+           to diff the form — type changes are infrequent) */
+        renderDesignerTab();
+      });
+    });
 
     const sliderWrap = document.getElementById("osDevDesignerSliders");
     DESIGNER_FIELDS.forEach(f => {

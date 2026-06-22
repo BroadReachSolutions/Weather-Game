@@ -451,16 +451,22 @@
   function defaultBoatDNA() {
     return {
       scale: 2.4,
+      hullType: "cruiser",     /* cruiser | racer | trawler | catamaran */
       hullLength: 6.8,        /* bow point (4.2) to transom (-2.6) */
       hullWidth: 2.1,         /* full beam, port to starboard */
       freeboard: 2.1,         /* hull depth — waterline to deck */
+      cabinType: "trunk",     /* trunk | flush | pilothouse */
       cabinLength: 2.7,
       cabinWidth: 1.7,
       cabinHeight: 0.85,
       cabinOffsetZ: 0.3,      /* cabin center, fore(+)/aft(-) of midship */
+      keelType: "fin",        /* fin | full | wing */
       mastHeight: 9,
+      biminiType: "bimini",   /* bimini | hardtop | none */
       biminiWidth: 1.5,
       biminiLength: 1.7,
+      lifelineType: "single", /* single | double | none */
+      helmType: "wheel",      /* wheel | tiller */
       hullColor: 0xe8e4da,
       deckColor: 0xd8d4c8,
       cabinColor: 0xf2efe6,
@@ -473,6 +479,11 @@
 
   function buildBoat(dna) {
     const d = dna || currentBoatDNA || defaultBoatDNA();
+    /* Backfill type fields for any DNA saved before this update, so
+       existing saved boats/presets default to the original look
+       instead of erroring on a missing type */
+    const defaults = defaultBoatDNA();
+    Object.keys(defaults).forEach(k => { if (d[k] === undefined) d[k] = defaults[k]; });
     currentBoatDNA = d;
 
     boatGroup = new THREE.Group();
@@ -480,165 +491,36 @@
        the water/waves instead of looking swamped by them */
     boatGroup.scale.set(d.scale, d.scale, d.scale);
 
-    /* Hull — extruded from a top-down silhouette with a pointed bow
-       (+Z) and a flat transom stern (-Z). hullLength/hullWidth scale
-       the silhouette proportionally from the original hand-tuned
-       shape; freeboard is the extrude depth (waterline to deck). */
-    const bowZ = d.hullLength * 0.618;       /* keeps the original bow/stern proportions */
-    const sternZ = -(d.hullLength - bowZ);
-    const halfWidth = d.hullWidth / 2;
-
-    const hullShape = new THREE.Shape();
-    hullShape.moveTo(0, bowZ);
-    hullShape.quadraticCurveTo(halfWidth * 0.857, bowZ * 0.619, halfWidth, bowZ * 0.119);
-    hullShape.lineTo(halfWidth, sternZ);
-    hullShape.lineTo(-halfWidth, sternZ);
-    hullShape.lineTo(-halfWidth, bowZ * 0.119);
-    hullShape.quadraticCurveTo(-halfWidth * 0.857, bowZ * 0.619, 0, bowZ);
-
-    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: d.freeboard, bevelEnabled: false });
-    hullExtrude.rotateX(Math.PI / 2);
-    const hullMat = new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true });
-    hullMesh = new THREE.Mesh(hullExtrude, hullMat);
-    /* Raised so most of the hull sits above the waterline (y=0),
-       giving real visible freeboard instead of riding low */
-    hullMesh.position.y = 1.0;
-    boatGroup.add(hullMesh);
-
-    /* ExtrudeGeometry extrudes along local +Z from 0 to depth; our
-       rotateX(90°) on the geometry maps local +Z to world -Y, so the
-       hull's deck (top edge, local z=0) ends up at hullMesh.position.y
-       itself, and the keel/bottom (local z=depth) ends up BELOW that. */
-    const deckY = 1.0;
-
-    /* Keel fin beneath, just for visual grounding. Scales loosely
-       with freeboard so a deeper hull gets a proportionally deeper keel. */
-    const keelGeo = new THREE.BoxGeometry(0.3, d.freeboard * 0.8, 2);
-    const keelMesh = new THREE.Mesh(keelGeo, new THREE.MeshPhongMaterial({ color: 0x2a2a2a }));
-    keelMesh.position.y = deckY - d.freeboard - keelGeo.parameters.height * 0.5 + 0.1;
-    boatGroup.add(keelMesh);
-
     /* ---------------------------------------------------------------
-       CABIN TOP — a raised structure forward of the cockpit with
-       small round portholes along each side, sitting on deck.
+       HULL — dispatches to a per-type builder. Each builder returns
+       { bowZ, sternZ, halfWidth, deckY, hullCount } so the rest of
+       the boat (cabin, mast, lifelines, etc) can be positioned
+       consistently regardless of which hull type was chosen.
+       hullCount is 2 for catamarans (everything above deck still
+       builds once, centered between the two hulls).
        --------------------------------------------------------------- */
-    const cabinMat = new THREE.MeshPhongMaterial({ color: d.cabinColor, flatShading: true });
-    const cabinCenterZ = d.cabinOffsetZ;
-    const cabinLength = d.cabinLength;
-    const cabinWidth = d.cabinWidth;
-    const cabinWallHeight = d.cabinHeight;
+    const hullInfo = buildHull(d);
+    const { bowZ, sternZ, halfWidth, deckY } = hullInfo;
 
-    /* Cabin walls — a straightforward box, sides clipped narrower
-       toward the bow by the separately-placed roof's slope/taper look */
-    const cabinWallGeo = new THREE.BoxGeometry(cabinWidth, cabinWallHeight, cabinLength);
-    const cabinWallMesh = new THREE.Mesh(cabinWallGeo, cabinMat);
-    cabinWallMesh.position.set(0, deckY + cabinWallHeight / 2, cabinCenterZ);
-    boatGroup.add(cabinWallMesh);
-
-    /* Roof — a single tilted plane sitting on top of the walls,
-       angled down toward the bow (+Z) for a real cabin-trunk look */
-    const roofGeo = new THREE.BoxGeometry(cabinWidth + 0.1, 0.08, cabinLength + 0.2);
-    const roofMesh = new THREE.Mesh(roofGeo, cabinMat);
-    roofMesh.position.set(0, deckY + cabinWallHeight + 0.04, cabinCenterZ);
-    roofMesh.rotation.x = -0.12; /* slopes down toward the bow */
-    boatGroup.add(roofMesh);
-
-    const portholeMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
-    const portholeGeo = new THREE.CircleGeometry(0.16, 12);
-    for (let side = -1; side <= 1; side += 2) {
-      for (let i = 0; i < 3; i++) {
-        const porthole = new THREE.Mesh(portholeGeo, portholeMat);
-        porthole.position.set(
-          side * (cabinWidth / 2 + 0.01),
-          deckY + cabinWallHeight / 2 + 0.1,
-          cabinCenterZ - cabinLength / 2 + 0.5 + i * (cabinLength / 3.5)
-        );
-        porthole.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
-        boatGroup.add(porthole);
-      }
-    }
+    buildKeel(d, hullInfo);
 
     /* ---------------------------------------------------------------
-       COCKPIT + BIMINI + HELM — an open well aft of the cabin with
-       a canvas bimini top on tubular frames, and a simple wheel/post
-       at the helm station underneath it.
+       CABIN TOP — dispatches to a per-type builder (trunk/flush/pilothouse)
+       --------------------------------------------------------------- */
+    const cabinInfo = buildCabin(d, hullInfo);
+    const cabinWallHeight = cabinInfo.wallHeight;
+
+    /* ---------------------------------------------------------------
+       COCKPIT + BIMINI + HELM
        --------------------------------------------------------------- */
     const cockpitFloorGeo = new THREE.BoxGeometry(1.4, 0.15, 1.8);
     const cockpitFloorMesh = new THREE.Mesh(cockpitFloorGeo, new THREE.MeshPhongMaterial({ color: d.deckColor }));
     cockpitFloorMesh.position.set(0, deckY + 0.1, -1.1);
     boatGroup.add(cockpitFloorMesh);
 
-    const biminiFrameMat = new THREE.MeshPhongMaterial({ color: 0xc8ccd0 });
-    const biminiHalfW = d.biminiWidth / 2 - 0.1;
-    const biminiPostPositions = [
-      [-biminiHalfW, -0.3], [biminiHalfW, -0.3],
-      [-biminiHalfW, -0.3 - (d.biminiLength - 0.2)], [biminiHalfW, -0.3 - (d.biminiLength - 0.2)]
-    ];
-    biminiPostPositions.forEach(([px, pz]) => {
-      const postGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.3, 6);
-      const post = new THREE.Mesh(postGeo, biminiFrameMat);
-      post.position.set(px, deckY + 0.65, pz);
-      boatGroup.add(post);
-    });
-    const biminiTopGeo = new THREE.BoxGeometry(d.biminiWidth, 0.06, d.biminiLength);
-    const biminiTopMesh = new THREE.Mesh(biminiTopGeo, new THREE.MeshPhongMaterial({
-      color: d.biminiColor, flatShading: true
-    }));
-    biminiTopMesh.position.set(0, deckY + 1.32, -0.3 - (d.biminiLength - 0.2) / 2);
-    boatGroup.add(biminiTopMesh);
-
-    /* Helm — wheel on a post, under the bimini, aft end of the cockpit */
-    const helmPostGeo = new THREE.CylinderGeometry(0.05, 0.06, 0.55, 6);
-    const helmPostMesh = new THREE.Mesh(helmPostGeo, new THREE.MeshPhongMaterial({ color: 0x3a3a3a }));
-    helmPostMesh.position.set(0, deckY + 0.37, -1.7);
-    boatGroup.add(helmPostMesh);
-
-    const helmWheelGeo = new THREE.TorusGeometry(0.3, 0.025, 6, 16);
-    const helmWheelMesh = new THREE.Mesh(helmWheelGeo, new THREE.MeshPhongMaterial({ color: 0x4a3527 }));
-    helmWheelMesh.position.set(0, deckY + 0.68, -1.7);
-    helmWheelMesh.rotation.x = Math.PI / 2.3; /* tilted back like a real boat wheel */
-    boatGroup.add(helmWheelMesh);
-
-    /* ---------------------------------------------------------------
-       LIFELINES — thin cables on stanchions around the deck perimeter
-       --------------------------------------------------------------- */
-    const stanchionMat = new THREE.MeshPhongMaterial({ color: 0xd0d4d8 });
-    const lifelineMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8 });
-    const deckEdgeZ = [bowZ * 0.857, bowZ * 0.571, bowZ * 0.286, 0, sternZ * 0.5, sternZ];
-
-    [-1, 1].forEach((side) => {
-      const stanchionPositions = [];
-      deckEdgeZ.forEach((z) => {
-        /* Hull narrows toward the bow — approximate the half-width at
-           each Z station so stanchions roughly follow the hull line */
-        const t = Math.max(0, Math.min(1, (bowZ - z) / (bowZ - sternZ)));
-        const hw = halfWidth * (1 - 0.5 * Math.pow(1 - t, 2));
-        const x = side * Math.min(halfWidth * 0.95, hw);
-        stanchionPositions.push([x, z]);
-
-        const stanchionGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.45, 5);
-        const stanchion = new THREE.Mesh(stanchionGeo, stanchionMat);
-        stanchion.position.set(x, deckY + 0.22, z);
-        boatGroup.add(stanchion);
-      });
-
-      /* Connect consecutive stanchions with a top lifeline cable */
-      for (let i = 0; i < stanchionPositions.length - 1; i++) {
-        const [x1, z1] = stanchionPositions[i];
-        const [x2, z2] = stanchionPositions[i + 1];
-        const dx = x2 - x1, dz = z2 - z1;
-        const len = Math.sqrt(dx * dx + dz * dz);
-        const lineGeo = new THREE.CylinderGeometry(0.012, 0.012, len, 4);
-        const line = new THREE.Mesh(lineGeo, lifelineMat);
-        line.position.set((x1 + x2) / 2, deckY + 0.42, (z1 + z2) / 2);
-        /* Cylinder's default long axis is Y. Rotating on X lays it
-           along Z first, THEN yawing on Y aims that Z-aligned segment
-           toward the real stanchion-to-stanchion direction. */
-        line.rotation.x = Math.PI / 2;
-        line.rotation.y = Math.atan2(dx, dz);
-        boatGroup.add(line);
-      }
-    });
+    buildBimini(d, hullInfo);
+    buildHelm(d, hullInfo);
+    buildLifelines(d, hullInfo);
 
     /* ---------------------------------------------------------------
        MAST, BOOM, SAILS
@@ -722,6 +604,328 @@
     headsailGroup.add(headsailMesh);
 
     scene.add(boatGroup);
+  }
+
+  /* ---------------------------------------------------------------
+     HULL TYPES
+     Each builder constructs the hull mesh(es) and returns the shared
+     measurements (bowZ/sternZ/halfWidth/deckY) the rest of the boat
+     uses to position cabin/mast/lifelines consistently.
+     --------------------------------------------------------------- */
+  function buildSingleHullShape(bowZ, sternZ, halfWidth, bowSharpness) {
+    /* bowSharpness: 0=full/round entry (trawler), 1=sharp/fine entry (racer) */
+    const shape = new THREE.Shape();
+    const bowCtrlX = halfWidth * (0.857 - bowSharpness * 0.25);
+    const bowCtrlY = bowZ * (0.619 + bowSharpness * 0.1);
+    shape.moveTo(0, bowZ);
+    shape.quadraticCurveTo(bowCtrlX, bowCtrlY, halfWidth, bowZ * 0.119);
+    shape.lineTo(halfWidth, sternZ);
+    shape.lineTo(-halfWidth, sternZ);
+    shape.lineTo(-halfWidth, bowZ * 0.119);
+    shape.quadraticCurveTo(-bowCtrlX, bowCtrlY, 0, bowZ);
+    return shape;
+  }
+
+  function buildHull(d) {
+    const type = d.hullType || "cruiser";
+
+    if (type === "catamaran") {
+      /* Twin slender hulls (each ~40% the beam of a single-hull boat
+         of the same length) spaced apart, joined conceptually by the
+         deck/cockpit that builds on top at the centerline as usual. */
+      const bowZ = d.hullLength * 0.618;
+      const sternZ = -(d.hullLength - bowZ);
+      const hullHalfWidth = (d.hullWidth * 0.4) / 2;
+      const spacing = d.hullWidth * 0.85; /* gap between the two hull centerlines */
+
+      const hullMat = new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true });
+      [-1, 1].forEach((side) => {
+        const shape = buildSingleHullShape(bowZ, sternZ, hullHalfWidth, 0.7);
+        const extrude = new THREE.ExtrudeGeometry(shape, { depth: d.freeboard, bevelEnabled: false });
+        extrude.rotateX(Math.PI / 2);
+        const mesh = new THREE.Mesh(extrude, hullMat);
+        mesh.position.set(side * spacing / 2, 1.0, 0);
+        boatGroup.add(mesh);
+        if (side === -1) hullMesh = mesh; /* keep a reference for anything that expects one */
+      });
+
+      /* A simple connecting deck/bridge between the hulls, visually
+         tying the catamaran together under the cockpit/cabin */
+      const bridgeGeo = new THREE.BoxGeometry(spacing - hullHalfWidth, 0.12, d.hullLength * 0.6);
+      const bridgeMesh = new THREE.Mesh(bridgeGeo, new THREE.MeshPhongMaterial({ color: d.deckColor }));
+      bridgeMesh.position.set(0, 1.0 - d.freeboard + 0.3, 0);
+      boatGroup.add(bridgeMesh);
+
+      return { bowZ, sternZ, halfWidth: spacing / 2 + hullHalfWidth, deckY: 1.0, hullCount: 2 };
+    }
+
+    /* Single-hull types: cruiser (balanced), racer (finer entry, narrower),
+       trawler (fuller entry, wider) — same construction, different
+       proportions/sharpness passed into the shape builder. */
+    const profiles = {
+      cruiser: { widthMult: 1.0, sharpness: 0.3 },
+      racer:   { widthMult: 0.88, sharpness: 0.85 },
+      trawler: { widthMult: 1.15, sharpness: -0.2 }
+    };
+    const profile = profiles[type] || profiles.cruiser;
+
+    const bowZ = d.hullLength * 0.618;
+    const sternZ = -(d.hullLength - bowZ);
+    const halfWidth = (d.hullWidth * profile.widthMult) / 2;
+
+    const hullShape = buildSingleHullShape(bowZ, sternZ, halfWidth, profile.sharpness);
+    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: d.freeboard, bevelEnabled: false });
+    hullExtrude.rotateX(Math.PI / 2);
+    const hullMat = new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true });
+    hullMesh = new THREE.Mesh(hullExtrude, hullMat);
+    /* Raised so most of the hull sits above the waterline (y=0),
+       giving real visible freeboard instead of riding low */
+    hullMesh.position.y = 1.0;
+    boatGroup.add(hullMesh);
+
+    /* ExtrudeGeometry extrudes along local +Z from 0 to depth; our
+       rotateX(90°) on the geometry maps local +Z to world -Y, so the
+       hull's deck (top edge, local z=0) ends up at hullMesh.position.y
+       itself, and the keel/bottom (local z=depth) ends up BELOW that. */
+    return { bowZ, sternZ, halfWidth, deckY: 1.0, hullCount: 1 };
+  }
+
+  /* ---------------------------------------------------------------
+     KEEL TYPES
+     --------------------------------------------------------------- */
+  function buildKeel(d, hullInfo) {
+    const { deckY } = hullInfo;
+    const type = d.keelType || "fin";
+    const keelMat = new THREE.MeshPhongMaterial({ color: 0x2a2a2a });
+
+    if (hullInfo.hullCount === 2) {
+      /* Catamarans typically run shallow mini-keels/skegs under each
+         hull rather than one central fin */
+      const spacing = (hullInfo.halfWidth) * 1.1;
+      [-1, 1].forEach((side) => {
+        const geo = new THREE.BoxGeometry(0.18, d.freeboard * 0.35, 1.4);
+        const mesh = new THREE.Mesh(geo, keelMat);
+        mesh.position.set(side * spacing * 0.5, deckY - d.freeboard - geo.parameters.height * 0.5 + 0.1, 0);
+        boatGroup.add(mesh);
+      });
+      return;
+    }
+
+    if (type === "full") {
+      /* Full keel: longer and shallower, running most of the hull's
+         length — classic heavy-cruiser look */
+      const geo = new THREE.BoxGeometry(0.28, d.freeboard * 0.5, hullInfo.bowZ - hullInfo.sternZ - 1.0);
+      const mesh = new THREE.Mesh(geo, keelMat);
+      mesh.position.set(0, deckY - d.freeboard - geo.parameters.height * 0.5 + 0.15, (hullInfo.bowZ + hullInfo.sternZ) / 2 * 0.3);
+      boatGroup.add(mesh);
+      return;
+    }
+
+    if (type === "wing") {
+      /* Fin keel plus small winglets at the bottom */
+      const finGeo = new THREE.BoxGeometry(0.3, d.freeboard * 0.8, 2);
+      const finMesh = new THREE.Mesh(finGeo, keelMat);
+      const finY = deckY - d.freeboard - finGeo.parameters.height * 0.5 + 0.1;
+      finMesh.position.y = finY;
+      boatGroup.add(finMesh);
+
+      const wingGeo = new THREE.BoxGeometry(1.1, 0.12, 0.7);
+      const wingMesh = new THREE.Mesh(wingGeo, keelMat);
+      wingMesh.position.set(0, finY - finGeo.parameters.height / 2, 0);
+      boatGroup.add(wingMesh);
+      return;
+    }
+
+    /* Default: fin keel — a single rectangular blade */
+    const keelGeo = new THREE.BoxGeometry(0.3, d.freeboard * 0.8, 2);
+    const keelMesh = new THREE.Mesh(keelGeo, keelMat);
+    keelMesh.position.y = deckY - d.freeboard - keelGeo.parameters.height * 0.5 + 0.1;
+    boatGroup.add(keelMesh);
+  }
+
+  /* ---------------------------------------------------------------
+     CABIN TYPES
+     --------------------------------------------------------------- */
+  function buildCabin(d, hullInfo) {
+    const { deckY } = hullInfo;
+    const type = d.cabinType || "trunk";
+    const cabinMat = new THREE.MeshPhongMaterial({ color: d.cabinColor, flatShading: true });
+    const cabinCenterZ = d.cabinOffsetZ;
+    const cabinLength = d.cabinLength;
+    const cabinWidth = d.cabinWidth;
+
+    if (type === "flush") {
+      /* Flush deck — no raised cabin structure at all, just a couple
+         of small low hatches for visual interest */
+      const hatchMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
+      [0.5, -0.5].forEach((zOff) => {
+        const hatchGeo = new THREE.BoxGeometry(0.5, 0.08, 0.4);
+        const hatch = new THREE.Mesh(hatchGeo, hatchMat);
+        hatch.position.set(0, deckY + 0.04, cabinCenterZ + zOff);
+        boatGroup.add(hatch);
+      });
+      return { wallHeight: 0.1 }; /* near-zero so sails/headsail math stays sane */
+    }
+
+    if (type === "pilothouse") {
+      /* Pilothouse — taller, more vertical walls, flat roof, larger
+         rectangular windows instead of round portholes */
+      const wallHeight = Math.max(d.cabinHeight, 1.2);
+      const wallGeo = new THREE.BoxGeometry(cabinWidth, wallHeight, cabinLength);
+      const wallMesh = new THREE.Mesh(wallGeo, cabinMat);
+      wallMesh.position.set(0, deckY + wallHeight / 2, cabinCenterZ);
+      boatGroup.add(wallMesh);
+
+      const roofGeo = new THREE.BoxGeometry(cabinWidth + 0.15, 0.08, cabinLength + 0.15);
+      const roofMesh = new THREE.Mesh(roofGeo, cabinMat);
+      roofMesh.position.set(0, deckY + wallHeight + 0.04, cabinCenterZ);
+      boatGroup.add(roofMesh); /* flat, no slope */
+
+      const windowMat = new THREE.MeshPhongMaterial({ color: 0x16242e });
+      for (let side = -1; side <= 1; side += 2) {
+        const windowGeo = new THREE.PlaneGeometry(cabinLength * 0.55, wallHeight * 0.45);
+        const win = new THREE.Mesh(windowGeo, windowMat);
+        win.position.set(side * (cabinWidth / 2 + 0.01), deckY + wallHeight * 0.58, cabinCenterZ);
+        win.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+        boatGroup.add(win);
+      }
+      return { wallHeight };
+    }
+
+    /* Default: trunk cabin — box walls + sloped roof + portholes */
+    const cabinWallHeight = d.cabinHeight;
+    const cabinWallGeo = new THREE.BoxGeometry(cabinWidth, cabinWallHeight, cabinLength);
+    const cabinWallMesh = new THREE.Mesh(cabinWallGeo, cabinMat);
+    cabinWallMesh.position.set(0, deckY + cabinWallHeight / 2, cabinCenterZ);
+    boatGroup.add(cabinWallMesh);
+
+    const roofGeo = new THREE.BoxGeometry(cabinWidth + 0.1, 0.08, cabinLength + 0.2);
+    const roofMesh = new THREE.Mesh(roofGeo, cabinMat);
+    roofMesh.position.set(0, deckY + cabinWallHeight + 0.04, cabinCenterZ);
+    roofMesh.rotation.x = -0.12; /* slopes down toward the bow */
+    boatGroup.add(roofMesh);
+
+    const portholeMat = new THREE.MeshPhongMaterial({ color: 0x1a2a35 });
+    const portholeGeo = new THREE.CircleGeometry(0.16, 12);
+    for (let side = -1; side <= 1; side += 2) {
+      for (let i = 0; i < 3; i++) {
+        const porthole = new THREE.Mesh(portholeGeo, portholeMat);
+        porthole.position.set(
+          side * (cabinWidth / 2 + 0.01),
+          deckY + cabinWallHeight / 2 + 0.1,
+          cabinCenterZ - cabinLength / 2 + 0.5 + i * (cabinLength / 3.5)
+        );
+        porthole.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+        boatGroup.add(porthole);
+      }
+    }
+    return { wallHeight: cabinWallHeight };
+  }
+
+  /* ---------------------------------------------------------------
+     BIMINI TYPES
+     --------------------------------------------------------------- */
+  function buildBimini(d, hullInfo) {
+    const { deckY } = hullInfo;
+    const type = d.biminiType || "bimini";
+    if (type === "none") return;
+
+    const biminiFrameMat = new THREE.MeshPhongMaterial({ color: 0xc8ccd0 });
+    const biminiHalfW = d.biminiWidth / 2 - 0.1;
+    const biminiPostPositions = [
+      [-biminiHalfW, -0.3], [biminiHalfW, -0.3],
+      [-biminiHalfW, -0.3 - (d.biminiLength - 0.2)], [biminiHalfW, -0.3 - (d.biminiLength - 0.2)]
+    ];
+    biminiPostPositions.forEach(([px, pz]) => {
+      const postGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.3, 6);
+      const post = new THREE.Mesh(postGeo, biminiFrameMat);
+      post.position.set(px, deckY + 0.65, pz);
+      boatGroup.add(post);
+    });
+
+    const isHardtop = type === "hardtop";
+    const biminiTopGeo = new THREE.BoxGeometry(d.biminiWidth, isHardtop ? 0.1 : 0.06, d.biminiLength);
+    const biminiTopMesh = new THREE.Mesh(biminiTopGeo, new THREE.MeshPhongMaterial({
+      color: d.biminiColor, flatShading: true, shininess: isHardtop ? 60 : 10
+    }));
+    biminiTopMesh.position.set(0, deckY + 1.32, -0.3 - (d.biminiLength - 0.2) / 2);
+    boatGroup.add(biminiTopMesh);
+  }
+
+  /* ---------------------------------------------------------------
+     HELM TYPES
+     --------------------------------------------------------------- */
+  function buildHelm(d, hullInfo) {
+    const { deckY } = hullInfo;
+    const type = d.helmType || "wheel";
+
+    if (type === "tiller") {
+      /* A simple tiller arm instead of a wheel — pivots at the
+         transom/stern, angled up toward the cockpit */
+      const tillerGeo = new THREE.CylinderGeometry(0.025, 0.04, 1.1, 6);
+      const tillerMesh = new THREE.Mesh(tillerGeo, new THREE.MeshPhongMaterial({ color: 0x4a3527 }));
+      tillerMesh.position.set(0, deckY + 0.35, hullInfo.sternZ + 0.5);
+      tillerMesh.rotation.x = Math.PI / 2.6;
+      boatGroup.add(tillerMesh);
+      return;
+    }
+
+    /* Default: wheel on a post, under the bimini, aft end of the cockpit */
+    const helmPostGeo = new THREE.CylinderGeometry(0.05, 0.06, 0.55, 6);
+    const helmPostMesh = new THREE.Mesh(helmPostGeo, new THREE.MeshPhongMaterial({ color: 0x3a3a3a }));
+    helmPostMesh.position.set(0, deckY + 0.37, -1.7);
+    boatGroup.add(helmPostMesh);
+
+    const helmWheelGeo = new THREE.TorusGeometry(0.3, 0.025, 6, 16);
+    const helmWheelMesh = new THREE.Mesh(helmWheelGeo, new THREE.MeshPhongMaterial({ color: 0x4a3527 }));
+    helmWheelMesh.position.set(0, deckY + 0.68, -1.7);
+    helmWheelMesh.rotation.x = Math.PI / 2.3; /* tilted back like a real boat wheel */
+    boatGroup.add(helmWheelMesh);
+  }
+
+  /* ---------------------------------------------------------------
+     LIFELINE TYPES
+     --------------------------------------------------------------- */
+  function buildLifelines(d, hullInfo) {
+    const type = d.lifelineType || "single";
+    if (type === "none") return;
+
+    const { bowZ, sternZ, halfWidth, deckY } = hullInfo;
+    const stanchionMat = new THREE.MeshPhongMaterial({ color: 0xd0d4d8 });
+    const lifelineMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e8 });
+    const deckEdgeZ = [bowZ * 0.857, bowZ * 0.571, bowZ * 0.286, 0, sternZ * 0.5, sternZ];
+    const cableHeights = type === "double" ? [0.22, 0.42] : [0.42];
+    const stanchionHeight = type === "double" ? 0.45 : 0.45;
+
+    [-1, 1].forEach((side) => {
+      const stanchionPositions = [];
+      deckEdgeZ.forEach((z) => {
+        const t = Math.max(0, Math.min(1, (bowZ - z) / (bowZ - sternZ)));
+        const hw = halfWidth * (1 - 0.5 * Math.pow(1 - t, 2));
+        const x = side * Math.min(halfWidth * 0.95, hw);
+        stanchionPositions.push([x, z]);
+
+        const stanchionGeo = new THREE.CylinderGeometry(0.025, 0.025, stanchionHeight, 5);
+        const stanchion = new THREE.Mesh(stanchionGeo, stanchionMat);
+        stanchion.position.set(x, deckY + stanchionHeight / 2, z);
+        boatGroup.add(stanchion);
+      });
+
+      cableHeights.forEach((cableY) => {
+        for (let i = 0; i < stanchionPositions.length - 1; i++) {
+          const [x1, z1] = stanchionPositions[i];
+          const [x2, z2] = stanchionPositions[i + 1];
+          const dx = x2 - x1, dz = z2 - z1;
+          const len = Math.sqrt(dx * dx + dz * dz);
+          const lineGeo = new THREE.CylinderGeometry(0.012, 0.012, len, 4);
+          const line = new THREE.Mesh(lineGeo, lifelineMat);
+          line.position.set((x1 + x2) / 2, deckY + cableY, (z1 + z2) / 2);
+          line.rotation.x = Math.PI / 2;
+          line.rotation.y = Math.atan2(dx, dz);
+          boatGroup.add(line);
+        }
+      });
+    });
   }
 
   /* jibFurlPct: 0 (fully furled) .. 100 (full jib out). Scales the
