@@ -255,28 +255,14 @@ function applyMobileWidgetOverrides() {
     if (el) el.classList.add("mobile-hidden");
   });
 
-  /* Create fixed header bar if not already present */
-  if (!document.getElementById("mobileHeader")) {
-    const header = document.createElement("div");
-    header.id = "mobileHeader";
-    header.innerHTML = `
-      <div id="mobileHeaderTemp">
-        <span id="mobileHeaderTempVal">--°</span>
-        <div id="mobileHeaderHumWrap">
-          <span id="mobileHeaderHumPct">--%</span>
-          <span id="mobileHeaderHumLabel">Humidity</span>
-        </div>
-      </div>
-      <button id="mobileEditBtn" class="mobileEditBtn">Edit</button>
-    `;
-    document.body.prepend(header);
-
-    /* Wire the header edit button to the same layoutToggle logic */
-    const mobileEditBtn = document.getElementById("mobileEditBtn");
-    const desktopToggle = document.getElementById("layoutToggle");
-    if (mobileEditBtn && desktopToggle) {
-      mobileEditBtn.addEventListener("click", () => desktopToggle.click());
-    }
+  /* The fixed top header bar (temp/humidity readout + Edit button)
+     has been removed to reclaim vertical space for the game widget.
+     The Edit button now lives in the game widget's own top-right
+     corner instead — see #osGameEditBtn in index.html, wired below. */
+  const gameEditBtn = document.getElementById("osGameEditBtn");
+  const desktopToggle = document.getElementById("layoutToggle");
+  if (gameEditBtn && desktopToggle) {
+    gameEditBtn.addEventListener("click", () => desktopToggle.click());
   }
 }
 

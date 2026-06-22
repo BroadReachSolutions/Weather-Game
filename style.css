@@ -1447,9 +1447,9 @@ html, body {
 
 #dashboardStage {
   position: fixed;
-  top: 58px; left: 0;
+  top: 0; left: 0;
   width: 100vw;
-  height: calc(100vh - 58px);
+  height: 100vh;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -1530,41 +1530,6 @@ body.layout-edit .widgetFrame {
 .lowTideAlert { font-size: 16px !important; padding-top: 6px !important; }
 
 /* Fixed header */
-#mobileHeader {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  min-height: 48px;
-  z-index: 99999;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background: rgba(5, 14, 22, 0.97);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(125, 186, 220, 0.2);
-  box-sizing: border-box;
-  gap: 10px;
-}
-#mobileHeaderTemp { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-#mobileHeaderTempVal  { font-size: 22px; font-weight: 700; color: #f5fbff; line-height: 1; }
-#mobileHeaderHumWrap  { display: flex; flex-direction: column; gap: 1px; }
-#mobileHeaderHumPct   { font-size: 13px; font-weight: 600; color: #9fc2d9; line-height: 1.2; }
-#mobileHeaderHumLabel { font-size: 10px; color: rgba(125,186,220,0.55); text-transform: uppercase; line-height: 1; }
-.mobileEditBtn {
-  flex-shrink: 0;
-  background: rgba(100,180,255,0.15);
-  border: 1px solid rgba(100,180,255,0.4);
-  border-radius: 8px;
-  color: #a8daff;
-  font-size: 13px;
-  font-weight: 700;
-  padding: 6px 14px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.mobileEditBtn.active { background: rgba(100,180,255,0.35); color: #fff; }
-
 /* Control panel */
 #layoutWidget .controlPanel {
   padding: 10px 10px 6px 10px;
@@ -1615,6 +1580,32 @@ body.layout-edit .widgetControls {
 /* widgetHandle visibility controlled by base stylesheet's
    body.layout-edit rule — no override needed here */
 body.layout-edit .widget { outline: 2px dashed rgba(140,200,230,0.4) !important; }
+
+/* Game widget's Edit button — always visible (unlike .widgetControls
+   above, which is intentionally hidden until edit mode is already
+   active). This is the only way to ever enter edit mode on mobile
+   now that the old fixed top header (which held the previous Edit
+   button) has been removed to reclaim space for the game. */
+.osGameEditBtn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 61;
+  background: rgba(100,180,255,0.15);
+  border: 1px solid rgba(100,180,255,0.4);
+  border-radius: 8px;
+  color: #a8daff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+body.layout-edit .osGameEditBtn {
+  background: rgba(100,180,255,0.35);
+  color: #fff;
+}
+
 .widget { outline: none !important; }
 
 /* Bigger touch target for resize handle on mobile */
