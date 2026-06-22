@@ -255,15 +255,11 @@ function applyMobileWidgetOverrides() {
     if (el) el.classList.add("mobile-hidden");
   });
 
-  /* The fixed top header bar (temp/humidity readout + Edit button)
-     has been removed to reclaim vertical space for the game widget.
-     The Edit button now lives in the game widget's own top-right
-     corner instead — see #osGameEditBtn in index.html, wired below. */
-  const gameEditBtn = document.getElementById("osGameEditBtn");
-  const desktopToggle = document.getElementById("layoutToggle");
-  if (gameEditBtn && desktopToggle) {
-    gameEditBtn.addEventListener("click", () => desktopToggle.click());
-  }
+  /* The fixed top header bar (temp/humidity readout) has been
+     removed to reclaim vertical space for the game widget. The
+     "Edit Layout" button already lives in the station widget
+     (#layoutToggle) and remains visible on mobile since layoutWidget
+     isn't in the hidden list above — no separate wiring needed. */
 }
 
 function removeMobileWidgetOverrides() {
