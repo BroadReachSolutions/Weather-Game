@@ -437,6 +437,8 @@
      and pitches/rolls (X/Z tilt) based on physics data.
      --------------------------------------------------------------- */
   let headsailMesh = null;
+  let spinnakerGroup = null;
+  let spinnakerMesh = null;
   let windLinesGroup = null;
 
   /* ---------------------------------------------------------------
@@ -471,7 +473,8 @@
       deckColor: 0xd8d4c8,
       cabinColor: 0xf2efe6,
       sailColor: 0xf5f5f0,
-      biminiColor: 0x2c5f73
+      biminiColor: 0x2c5f73,
+      spinnakerColor: 0xe05050
     };
   }
 
@@ -602,6 +605,39 @@
       color: d.sailColor, side: THREE.DoubleSide, transparent: true, opacity: 0.9, flatShading: true
     }));
     headsailGroup.add(headsailMesh);
+
+    /* Spinnaker — a wide, billowed downwind sail flown forward of the
+       bow, attached near the masthead (its halyard point) and pulled
+       out to a point well ahead of the bow (where the pole/guy would
+       hold it). Built as a small fan of triangles with the mid-width
+       vertices pushed outward in Y/X to fake the characteristic
+       balloon shape, rather than a single flat triangle like the
+       main/jib — a spinnaker reads as flat-and-triangular if built
+       the same way, which doesn't look right for this sail. */
+    spinnakerGroup = new THREE.Group();
+    spinnakerGroup.position.set(mastX, mastBaseY + d.mastHeight * 0.85, mastZ);
+    boatGroup.add(spinnakerGroup);
+
+    const spinHeight = d.mastHeight * 0.75;
+    const spinForward = 4.5;       /* how far ahead of the bow it's flown */
+    const spinBillowOut = 1.6;     /* sideways bulge at mid-height, the "balloon" */
+    const spinBillowFwd = 0.8;     /* forward bulge at mid-height */
+
+    const spinnakerGeo = new THREE.BufferGeometry();
+    const spinnakerVerts = new Float32Array([
+      0, 0, 0,                                   /* head, at spinnakerGroup origin (near masthead) */
+      spinBillowOut, -spinHeight * 0.45, spinForward * 0.55 + spinBillowFwd,  /* starboard belly */
+      0, -spinHeight, spinForward,                /* clew/foot point, out ahead of the bow */
+      -spinBillowOut, -spinHeight * 0.45, spinForward * 0.55 + spinBillowFwd  /* port belly */
+    ]);
+    spinnakerGeo.setAttribute("position", new THREE.BufferAttribute(spinnakerVerts, 3));
+    spinnakerGeo.setIndex([0, 1, 2, 0, 2, 3]); /* two triangles sharing the head-to-foot edge */
+    spinnakerGeo.computeVertexNormals();
+    spinnakerMesh = new THREE.Mesh(spinnakerGeo, new THREE.MeshPhongMaterial({
+      color: d.spinnakerColor || 0xe05050, side: THREE.DoubleSide, transparent: true, opacity: 0.92, flatShading: true
+    }));
+    spinnakerGroup.add(spinnakerMesh);
+    spinnakerMesh.visible = false; /* only shown when actually deployed downwind */
 
     scene.add(boatGroup);
   }
@@ -928,27 +964,34 @@
     });
   }
 
-  /* jibFurlPct: 0 (fully furled) .. 100 (full jib out). Scales the
-     headsail's visible height to match how much jib is actually
-     deployed, matching the new continuous furl control. */
   /* jibFurlPct: 0 (fully furled/rolled up) .. 100 (full jib out).
      A real roller-furling jib winds the sail around the forestay
      starting from the leech (the free aft edge, our "clew" point),
-     rolling inward toward the luff — so we shrink the sail's
-     foot/leech extent (local Z, from luff at z=0 to clew at z=3.3)
-     toward zero, which reads as the sail disappearing forward into
-     a furled roll at the mast/forestay rather than just sinking down. */
-  /* jibFurlPct: 0 (fully furled/rolled up) .. 100 (full jib out).
-     Wraps the sail around its luff (the vertical mast/forestay edge,
-     local Y axis of headsailGroup) as it furls — rotating it to the
-     port side (negative Y rotation) while shrinking its foot/leech
-     extent, reading as the sail winding itself up around the
-     forestay rather than just shrinking in place. */
+     rolling inward toward the luff, and wraps around that vertical
+     axis as it furls — reading as the sail winding itself up around
+     the forestay rather than just shrinking or sinking in place. */
   function updateHeadsailReef(jibFurlPct) {
     if (!headsailMesh) return;
     const pct = Math.max(0, Math.min(100, jibFurlPct)) / 100;
     headsailMesh.scale.z = pct;
     headsailMesh.rotation.y = -(1 - pct) * (Math.PI / 2.2); /* wraps toward the other side as it furls */
+  }
+
+  /* spinnakerFurlPct: 0 (doused, squeezed into its sock at the
+     masthead) .. 100 (fully flying). A cruising spinnaker is usually
+     doused by pulling a sock down over it from the head, squeezing
+     it into a long thin tube — visually distinct from the jib's
+     furl-toward-mast rotation, so this scales the sail vertically
+     (collapsing toward the head) and narrows it, rather than
+     rotating it around an axis. isVisible additionally requires
+     actually being on a downwind point of sail, since a spinnaker
+     deployed anywhere else doesn't make sense to render filled. */
+  function updateSpinnaker(spinnakerFurlPct, isVisible) {
+    if (!spinnakerMesh) return;
+    const pct = Math.max(0, Math.min(100, spinnakerFurlPct)) / 100;
+    spinnakerMesh.visible = isVisible && pct > 0.02;
+    spinnakerMesh.scale.y = Math.max(0.05, pct);   /* collapses toward the head as it's doused */
+    spinnakerMesh.scale.x = 0.3 + pct * 0.7;        /* narrows as the sock squeezes it in */
   }
 
   /* Rebuilds scene-wide wind streaks scattered across the visible
@@ -1131,6 +1174,7 @@
 
       updateBoom(s.boomAngleDeg || 0);
       updateHeadsailReef(s.isSailing ? (s.jibFurlPct != null ? s.jibFurlPct : 100) : 0); /* 0 = fully down, not sailing */
+      updateSpinnaker(s.spinnakerFurlPct || 0, !!s.isSailing && !!s.isDownwind);
       updateWindLines(s.windSpeedKt || 0);
 
       /* Sails visible only while sailing_active; mainsail billow is a

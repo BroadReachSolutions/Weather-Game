@@ -192,7 +192,7 @@
     const p = preset || {
       preset_key: "", display_name: "", icon: "🛥", description: "",
       hull_speed_kt: 6.5, rated_wind_mph: 15, boat_weight_class: "medium",
-      main_sail_area_sqft: 245, jib_sail_area_sqft: 105,
+      main_sail_area_sqft: 245, jib_sail_area_sqft: 105, spinnaker_sail_area_sqft: 0,
       reef_wind_limits_mph: [25, 30, 35], reef_speed_penalty: [1.0, 0.85, 0.65],
       sort_order: 0, is_active: true
     };
@@ -215,6 +215,7 @@
         </label>
         <label>Main Sail Area (sqft) <input type="number" id="dvMainArea" value="${p.main_sail_area_sqft}"></label>
         <label>Jib Sail Area (sqft) <input type="number" id="dvJibArea" value="${p.jib_sail_area_sqft}"></label>
+        <label>Spinnaker Area (sqft, 0 = none) <input type="number" id="dvSpinnakerArea" value="${p.spinnaker_sail_area_sqft || 0}"></label>
         <label>Reef Wind Limits (mph, csv) <input type="text" id="dvReefLimits" value="${(p.reef_wind_limits_mph || []).join(",")}"></label>
         <label>Reef Speed Penalty (csv) <input type="text" id="dvReefPenalty" value="${(p.reef_speed_penalty || []).join(",")}"></label>
         <label>Sort Order <input type="number" id="dvSortOrder" value="${p.sort_order}"></label>
@@ -242,6 +243,7 @@
         boat_weight_class: document.getElementById("dvWeightClass").value,
         main_sail_area_sqft: parseFloat(document.getElementById("dvMainArea").value) || 245,
         jib_sail_area_sqft: parseFloat(document.getElementById("dvJibArea").value) || 105,
+        spinnaker_sail_area_sqft: parseFloat(document.getElementById("dvSpinnakerArea").value) || 0,
         reef_wind_limits_mph: document.getElementById("dvReefLimits").value.split(",").map(s => parseFloat(s.trim())).filter(n => !isNaN(n)),
         reef_speed_penalty: document.getElementById("dvReefPenalty").value.split(",").map(s => parseFloat(s.trim())).filter(n => !isNaN(n)),
         sort_order: parseInt(document.getElementById("dvSortOrder").value, 10) || 0,
@@ -283,6 +285,7 @@
             boat_weight_class: document.getElementById("dvWeightClass").value,
             main_sail_area_sqft: parseFloat(document.getElementById("dvMainArea").value) || 245,
             jib_sail_area_sqft: parseFloat(document.getElementById("dvJibArea").value) || 105,
+            spinnaker_sail_area_sqft: parseFloat(document.getElementById("dvSpinnakerArea").value) || 0,
             reef_wind_limits_mph: document.getElementById("dvReefLimits").value.split(",").map(s => parseFloat(s.trim())).filter(n => !isNaN(n)),
             reef_speed_penalty: document.getElementById("dvReefPenalty").value.split(",").map(s => parseFloat(s.trim())).filter(n => !isNaN(n))
           };
@@ -351,7 +354,8 @@
     { key: "deckColor", label: "Deck Color" },
     { key: "cabinColor", label: "Cabin Color" },
     { key: "sailColor", label: "Sail Color" },
-    { key: "biminiColor", label: "Bimini Color" }
+    { key: "biminiColor", label: "Bimini Color" },
+    { key: "spinnakerColor", label: "Spinnaker Color" }
   ];
 
   let designerDNA = null;

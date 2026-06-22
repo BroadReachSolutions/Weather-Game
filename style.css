@@ -2963,6 +2963,18 @@ body.layout-edit .osGauge {
   flex-shrink: 0;
 }
 
+.osSpinnakerHint {
+  font-size: 7px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: rgba(159,194,217,0.5);
+}
+
+.osSpinnakerHint.warn {
+  color: #ffb84f;
+}
+
 /* Boom trim gauge (small version inside the instrument panel) */
 .osBoomSliderSmall {
   width: 100%;

@@ -591,6 +591,8 @@
       isSailing,
       reefLevel: OS.boat ? (OS.boat.reef_level || 0) : 0,
       jibFurlPct: OS.boat ? (OS.boat.jib_furl_pct != null ? OS.boat.jib_furl_pct : 100) : 100,
+      spinnakerFurlPct: OS.boat ? (OS.boat.spinnaker_furl_pct || 0) : 0,
+      isDownwind: pos.name === "Broad Reach" || pos.name === "Running",
       speedKt: OS.boat ? (OS.boat.speed_over_ground_kt || 0) : 0,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
@@ -1083,8 +1085,9 @@
     const wheelFace = document.getElementById("osWheelFace");
     const engineToggle = document.getElementById("osEngineToggle");
     const jibSlider = document.getElementById("osJibFurlSlider");
+    const spinnakerSlider = document.getElementById("osSpinnakerSlider");
 
-    if (!boomSlider || !sailsToggle || !wheelFace || !engineToggle || !jibSlider) {
+    if (!boomSlider || !sailsToggle || !wheelFace || !engineToggle || !jibSlider || !spinnakerSlider) {
       if (attemptsLeft == null) attemptsLeft = 20;
       if (attemptsLeft > 0) setTimeout(() => wireGaugeDependentControls(attemptsLeft - 1), 200);
       return;
@@ -1137,23 +1140,49 @@
       await OS.setJibFurl(parseFloat(jibSlider.value));
     });
 
+    /* Spinnaker furl — same continuous pattern as the jib, but only
+       actually contributes speed downwind (Broad Reach/Running) */
+    spinnakerSlider.value = OS.boat ? (OS.boat.spinnaker_furl_pct || 0) : 0;
+    if (window.OSInstruments) window.OSInstruments.setSpinnakerLabel(parseFloat(spinnakerSlider.value));
+    spinnakerSlider.addEventListener("input", () => {
+      const pct = parseFloat(spinnakerSlider.value);
+      if (OS.boat) OS.boat.spinnaker_furl_pct = pct; /* live in-memory, smooth dragging */
+      if (window.OSInstruments) window.OSInstruments.setSpinnakerLabel(pct);
+      updateSailAreaReadout();
+    });
+    spinnakerSlider.addEventListener("change", async () => {
+      await OS.setSpinnakerFurl(parseFloat(spinnakerSlider.value));
+    });
+
     updateSailAreaReadout();
   }
 
   /* Shows how much sail area is actually exposed right now (main
-     reef factor + jib furl combined) against the boat's full area —
-     this is the same ratio the speed formula uses, made visible so
-     the player can see why reefing/furling slows them down. */
+     reef factor + jib furl + spinnaker when downwind) against the
+     boat's full area — this is the same ratio the speed formula
+     uses, made visible so the player can see why reefing/furling
+     slows them down. */
   function updateSailAreaReadout() {
     if (!OS.boat || typeof window.OSInstruments === "undefined") return;
     const mainArea = OS.boat.main_sail_area_sqft ?? 245;
     const jibArea = OS.boat.jib_sail_area_sqft ?? 105;
-    const totalArea = mainArea + jibArea;
+    const spinnakerArea = OS.boat.spinnaker_sail_area_sqft ?? 0;
+    const totalArea = mainArea + jibArea + spinnakerArea;
     const reefPenalties = OS.boat.reef_speed_penalty ?? [1.0, 0.85, 0.65];
     const mainFactor = reefPenalties[OS.boat.reef_level || 0] ?? 1.0;
     const jibFactor = Math.max(0, Math.min(100, OS.boat.jib_furl_pct ?? 100)) / 100;
-    const exposed = mainArea * mainFactor + jibArea * jibFactor;
+    const spinnakerFactor = Math.max(0, Math.min(100, OS.boat.spinnaker_furl_pct ?? 0)) / 100;
+
+    const heading = OS.boat.course_bearing ?? 0;
+    const windDeg = typeof window.getLastWindDeg === "function" ? window.getLastWindDeg() : 0;
+    const pos = calculatePointOfSail(heading, windDeg);
+    const isDownwind = pos.name === "Broad Reach" || pos.name === "Running";
+
+    const exposed = mainArea * mainFactor + jibArea * jibFactor + (isDownwind ? spinnakerArea * spinnakerFactor : 0);
     window.OSInstruments.setSailAreaReadout(exposed, totalArea);
+    if (window.OSInstruments.setSpinnakerHint) {
+      window.OSInstruments.setSpinnakerHint(isDownwind, OS.boat.spinnaker_furl_pct ?? 0);
+    }
   }
 
   /* ---------------------------------------------------------------

@@ -275,6 +275,23 @@ OS.setJibFurl = async function (pct) {
   return { data, error };
 };
 
+/* Spinnaker furl: 0 = doused/in its sock, 100 = fully flying. Only
+   actually contributes to speed on a downwind point of sail (Broad
+   Reach or Running) — see physics.js's effectiveAreaRatio. */
+OS.setSpinnakerFurl = async function (pct) {
+  if (!OS.boat) return;
+  OS.boat.spinnaker_furl_pct = pct; /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ spinnaker_furl_pct: pct, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setSpinnakerFurl failed", error);
+  return { data, error };
+};
+
 OS.setSailingActive = async function (active) {
   if (!OS.boat) return;
   OS.boat.sailing_active = active; /* in-memory first, see note in setEngine */

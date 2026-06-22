@@ -206,6 +206,12 @@
             <div class="osGaugeUnit" id="osJibFurlLabel">Full Jib</div>
           </div>
 
+          <div class="osSailTrimSection" id="osSpinnakerSection">
+            <div class="osSailTrimSubLabel">Spinnaker <span class="osSpinnakerHint" id="osSpinnakerHint"></span></div>
+            <input type="range" id="osSpinnakerSlider" class="osBoomSliderSmall" min="0" max="100" step="1" value="0">
+            <div class="osGaugeUnit" id="osSpinnakerLabel">Doused</div>
+          </div>
+
           <div class="osSailAreaReadout" id="osSailAreaReadout">— sq ft exposed</div>
         `;
       case "wheel":
@@ -417,6 +423,29 @@
     label.textContent = rounded <= 2 ? "Furled" : rounded >= 98 ? "Full Jib" : rounded + "% Jib";
   }
 
+  function setSpinnakerLabel(pct) {
+    const label = document.getElementById("osSpinnakerLabel");
+    if (!label) return;
+    const rounded = Math.round(pct);
+    label.textContent = rounded <= 2 ? "Doused" : rounded >= 98 ? "Flying" : rounded + "% Out";
+  }
+
+  /* isDownwind: whether the boat is currently on a point of sail
+     where a spinnaker actually helps (Broad Reach/Running). Shows a
+     hint when it's deployed but not contributing, since that's a
+     real tactical state the player should notice. */
+  function setSpinnakerHint(isDownwind, furlPct) {
+    const hint = document.getElementById("osSpinnakerHint");
+    if (!hint) return;
+    if (furlPct > 2 && !isDownwind) {
+      hint.textContent = "(no benefit — not downwind)";
+      hint.classList.add("warn");
+    } else {
+      hint.textContent = "";
+      hint.classList.remove("warn");
+    }
+  }
+
   function setSailAreaReadout(exposedSqFt, totalSqFt) {
     const el = document.getElementById("osSailAreaReadout");
     if (!el) return;
@@ -481,6 +510,8 @@
     setBoomLabel,
     setReefButtons,
     setJibFurlLabel,
+    setSpinnakerLabel,
+    setSpinnakerHint,
     setSailAreaReadout,
     setSailsState,
     setWheelState,

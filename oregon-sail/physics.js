@@ -65,17 +65,26 @@
     const overFactor = overpowered ? (windSpeedMph - currentCeiling) / currentCeiling : 0;
 
     /* Effective sail area: main scaled by its reef factor, jib scaled
-       continuously by how much is furled in. This replaces using
-       reef_speed_penalty as a flat multiplier — area lost from
-       reefing the main AND furling the jib both reduce drive power
-       proportionally to how much sail is actually exposed. */
+       continuously by how much is furled in, and — when sailing deep
+       downwind (Broad Reach or Running) — a spinnaker contributes its
+       own area too. A spinnaker provides essentially no benefit on
+       any other point of sail (a real cruising chute collapses or
+       has to be doused before turning upwind), so it's deliberately
+       excluded from the area total outside those two zones rather
+       than just being weaker — this creates a real tactical choice
+       about when to fly it. */
     const mainArea = boat.main_sail_area_sqft ?? 245;
     const jibArea = boat.jib_sail_area_sqft ?? 105;
-    const totalFullArea = mainArea + jibArea;
+    const spinnakerArea = boat.spinnaker_sail_area_sqft ?? 0;
+    const spinnakerFurlFactor = Math.max(0, Math.min(100, boat.spinnaker_furl_pct ?? 0)) / 100;
+    const isDownwind = pos.name === "Broad Reach" || pos.name === "Running";
+    const effectiveSpinnakerArea = isDownwind ? spinnakerArea * spinnakerFurlFactor : 0;
+
+    const totalFullArea = mainArea + jibArea + spinnakerArea;
     const mainReefFactor = reefPenalties[reefLevel] ?? 1.0;
     const jibFurlFactor = Math.max(0, Math.min(100, boat.jib_furl_pct ?? 100)) / 100;
     const effectiveAreaRatio = totalFullArea > 0
-      ? (mainArea * mainReefFactor + jibArea * jibFurlFactor) / totalFullArea
+      ? (mainArea * mainReefFactor + jibArea * jibFurlFactor + effectiveSpinnakerArea) / totalFullArea
       : 1.0;
 
     const hullSpeed = boat.hull_speed_kt ?? 6.5;

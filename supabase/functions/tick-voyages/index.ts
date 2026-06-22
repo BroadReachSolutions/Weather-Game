@@ -124,15 +124,22 @@ function calculateSailSpeed(boat, windSpeedMph, windFromDeg) {
   const overFactor = overpowered ? (windSpeedMph - currentCeiling) / currentCeiling : 0;
 
   /* Effective sail area: main scaled by its reef factor, jib scaled
-     continuously by how much is furled in. Mirrors the client-side
-     physics.js formula exactly — keep both in sync. */
+     continuously by how much is furled in, and a spinnaker (only on
+     Broad Reach/Running, matching real downwind-only behavior).
+     Mirrors the client-side physics.js formula exactly — keep both
+     in sync. */
   const mainArea = boat.main_sail_area_sqft ?? 245;
   const jibArea = boat.jib_sail_area_sqft ?? 105;
-  const totalFullArea = mainArea + jibArea;
+  const spinnakerArea = boat.spinnaker_sail_area_sqft ?? 0;
+  const spinnakerFurlFactor = Math.max(0, Math.min(100, boat.spinnaker_furl_pct ?? 0)) / 100;
+  const isDownwind = pos.name === "Broad Reach" || pos.name === "Running";
+  const effectiveSpinnakerArea = isDownwind ? spinnakerArea * spinnakerFurlFactor : 0;
+
+  const totalFullArea = mainArea + jibArea + spinnakerArea;
   const mainReefFactor = reefPenalties[reefLevel] ?? 1.0;
   const jibFurlFactor = Math.max(0, Math.min(100, boat.jib_furl_pct ?? 100)) / 100;
   const effectiveAreaRatio = totalFullArea > 0
-    ? (mainArea * mainReefFactor + jibArea * jibFurlFactor) / totalFullArea
+    ? (mainArea * mainReefFactor + jibArea * jibFurlFactor + effectiveSpinnakerArea) / totalFullArea
     : 1.0;
 
   const hullSpeed = boat.hull_speed_kt ?? 6.5;
