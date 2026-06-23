@@ -15,7 +15,7 @@
 
 (function () {
   const STORAGE_KEY = "osTabConfig";
-  const CONFIG_VERSION = 1;
+  const CONFIG_VERSION = 2; /* bumped: helmgauges/navgauges split into individual gauge widgets */
 
   /* Which widget ids are offered for each main tab's "+ Add Widget"
      picker. Placeholders are listed here even though they're not
@@ -23,7 +23,11 @@
      exercise-able now. */
   const WIDGET_CATALOG = {
     cockpit: [
-      { id: "helmgauges", label: "Sail Trim / Wheel / Engine / Speed / Windex" },
+      { id: "sailtrim", label: "Sail Trim" },
+      { id: "wheel", label: "Wheel / Helm" },
+      { id: "engine", label: "Engine" },
+      { id: "speed", label: "Speed" },
+      { id: "windex", label: "Windex" },
       { id: "radar", label: "Radar" },
       { id: "depth", label: "Depth" },
       { id: "tridata", label: "Tri-Data" },
@@ -31,7 +35,9 @@
     ],
     navstation: [
       { id: "chartplotter", label: "Chart Plotter (Satellite Map)" },
-      { id: "navgauges", label: "Water / Food / Hull Gauges" },
+      { id: "water", label: "Water Gauge" },
+      { id: "food", label: "Food Gauge" },
+      { id: "hull", label: "Hull Gauge" },
       { id: "track", label: "Track Controls" },
       { id: "station", label: "Station" },
       { id: "forecast", label: "Forecast" },
@@ -48,10 +54,10 @@
       version: CONFIG_VERSION,
       mains: [
         { id: "cockpit", label: "Cockpit", subtabs: [
-          { id: "helm", label: "Helm", widgets: ["helmgauges"] }
+          { id: "helm", label: "Helm", widgets: ["sailtrim", "wheel", "engine", "speed", "windex"] }
         ]},
         { id: "navstation", label: "Nav Station", subtabs: [
-          { id: "weather", label: "Weather", widgets: ["chartplotter", "navgauges", "track"] }
+          { id: "weather", label: "Weather", widgets: ["chartplotter", "water", "food", "hull", "track"] }
         ]},
         { id: "crew", label: "Crew", subtabs: [
           { id: "health", label: "Health", widgets: [] },
@@ -179,6 +185,76 @@
   }
 
   /* ---------------------------------------------------------------
+     UNIVERSAL WIDGET RESIZE
+     Any widget card (gauge, chart plotter, placeholder, etc) tagged
+     .osWidgetResizable gets a drag handle in its bottom-right corner.
+     Size is stored per widget id, per sub-tab (so the same widget can
+     have a different size on different tabs), inside the sub-tab's
+     own config object — persists via the same saveConfig() as
+     everything else.
+     --------------------------------------------------------------- */
+  function applyStoredSize(node, sub, widgetId) {
+    const sizes = sub.sizes || {};
+    const saved = sizes[widgetId];
+    if (saved) {
+      node.style.width = saved.w + "px";
+      node.style.height = saved.h + "px";
+    }
+  }
+
+  function attachResizeHandle(node, sub, widgetId) {
+    if (node.querySelector(".osWidgetResizeHandle")) return; /* already has one */
+    const handle = document.createElement("div");
+    handle.className = "osWidgetResizeHandle";
+    node.appendChild(handle);
+
+    let startX = 0, startY = 0, startW = 0, startH = 0, dragging = false;
+
+    function getXY(e) {
+      if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      return { x: e.clientX, y: e.clientY };
+    }
+
+    function onDown(e) {
+      e.preventDefault();
+      e.stopPropagation(); /* don't let this also trigger the long-press editor */
+      dragging = true;
+      const { x, y } = getXY(e);
+      startX = x; startY = y;
+      startW = node.offsetWidth; startH = node.offsetHeight;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("touchend", onUp);
+    }
+
+    function onMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      const { x, y } = getXY(e);
+      const newW = Math.max(80, startW + (x - startX));
+      const newH = Math.max(70, startH + (y - startY));
+      node.style.width = newW + "px";
+      node.style.height = newH + "px";
+    }
+
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      if (!sub.sizes) sub.sizes = {};
+      sub.sizes[widgetId] = { w: node.offsetWidth, h: node.offsetHeight };
+      saveConfig();
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+    }
+
+    handle.addEventListener("mousedown", onDown);
+    handle.addEventListener("touchstart", onDown, { passive: false });
+  }
+
+  /* ---------------------------------------------------------------
      RENDER — content area for the active sub-tab
      Real widgets are MOVED here (appendChild relocates, doesn't
      clone) so instruments.js/game-ui.js's element references stay
@@ -219,7 +295,13 @@
 
     sub.widgets.forEach(widgetId => {
       const node = getWidgetNode(widgetId);
-      if (node) content.appendChild(node);
+      if (node) {
+        content.appendChild(node);
+        if (node.classList.contains("osWidgetResizable")) {
+          applyStoredSize(node, sub, widgetId);
+          attachResizeHandle(node, sub, widgetId);
+        }
+      }
       if (widgetId === "chartplotter" && typeof window.OSGameUI !== "undefined") {
         window.OSGameUI.onChartPlotterShown();
       }
@@ -231,7 +313,10 @@
   /* Returns the DOM node for a widget id — the REAL node (moved, not
      cloned) for real widgets so element-id references elsewhere in
      the app stay valid, or a fresh clone for inert placeholders. */
-  const REAL_WIDGET_IDS = ["helmgauges", "chartplotter", "navgauges", "track"];
+  const REAL_WIDGET_IDS = [
+    "sailtrim", "wheel", "engine", "speed", "windex",
+    "chartplotter", "water", "food", "hull", "track"
+  ];
 
   function getWidgetNode(widgetId) {
     const template = document.querySelector(`#osWidgetTemplates [data-widget-id="${widgetId}"]`);

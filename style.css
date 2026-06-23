@@ -2427,6 +2427,42 @@ body.layout-edit .widgetResize {
 }
 .osWidgetCardWide { width: 100%; }
 
+.osWidgetResizable {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  min-width: 80px;
+  min-height: 70px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.osWidgetResizable > div:first-child {
+  width: 100%;
+  height: 100%;
+}
+
+.osWidgetResizeHandle {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  z-index: 30;
+  touch-action: none;
+}
+.osWidgetResizeHandle::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(159,194,217,0.55);
+  border-bottom: 2px solid rgba(159,194,217,0.55);
+  border-radius: 0 0 3px 0;
+}
+
 .osWidgetPlaceholderCard {
   display: flex;
   flex-direction: column;
@@ -2548,7 +2584,10 @@ body.layout-edit .widgetResize {
 }
 
 .osGauge {
-  position: absolute;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 92px;
   background: rgba(15, 30, 42, 0.85);
   border: 1px solid rgba(125,186,220,0.25);
   border-radius: 10px;
@@ -2559,13 +2598,7 @@ body.layout-edit .widgetResize {
   gap: 4px;
   padding: 6px;
   box-sizing: border-box;
-  touch-action: none;
   user-select: none;
-}
-
-body.layout-edit .osGauge {
-  outline: 2px dashed rgba(140,200,230,0.5);
-  cursor: move;
 }
 
 /* Engine gauge is taller (1×2) — needs to stretch its throttle area */

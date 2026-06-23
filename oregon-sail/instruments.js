@@ -1,119 +1,62 @@
 /* ============================================================
-   Oregon Sail — Instrument Panel
-   A free-form grid of square gauges in the bottom half of the
-   game widget. Every player starts with a fixed default set
-   (water, fuel, food, hull, speed, windex, engine, boom trim);
-   future "instrument upgrades" can unlock additional gauges
-   (true wind, radar, etc.) using the same framework — see
-   INSTRUMENT_DEFS below, just add an entry and a render function.
-
-   Gauges are draggable/resizable only while the dashboard is in
-   Edit Layout mode (same body.layout-edit class the rest of the
-   app already uses). Positions persist per-gauge in localStorage.
+   Oregon Sail — Instrument Gauges
+   Each gauge (Speed, Windex, Engine, Sail Trim, Wheel, Water, Food,
+   Hull) is now an independent widget that can be placed on any
+   sub-tab via the dynamic tab system (tabsystem.js) and resized
+   there with the universal widget-resize handles — there is no
+   longer a single shared gauge canvas with internal drag-to-
+   reposition; that's been replaced by the tab system's own resize
+   model at the widget-card level.
    ============================================================ */
 
 (function () {
-  const PANEL_ID = "osInstrumentPanel";
-  const NAV_PANEL_ID = "osNavGauges";
-  const STORAGE_KEY = "osInstrumentLayout";
-  const GAUGE_SIZE = 92;
+  /* Each gauge has its own target container id, matching a widget
+     id in the tab system's #osWidgetTemplates pool. */
+  const GAUGE_TARGETS = {
+    sog:      "osGaugeTarget-speed",
+    windex:   "osGaugeTarget-windex",
+    engine:   "osGaugeTarget-engine",
+    sailtrim: "osGaugeTarget-sailtrim",
+    wheel:    "osGaugeTarget-wheel",
+    water:    "osGaugeTarget-water",
+    food:     "osGaugeTarget-food",
+    hull:     "osGaugeTarget-hull"
+  };
 
-  /* Helm tab instruments — speed, windex, engine (1×2), boom */
   const HELM_DEFS = [
     { id: "sog",      label: "Speed",     type: "speed" },
     { id: "windex",   label: "Windex",    type: "windex" },
-    { id: "engine",   label: "Engine",    type: "engine", w: 1, h: 2 },
-    { id: "sailtrim", label: "Sail Trim", type: "sailtrim", w: 1, h: 2 },
-    { id: "wheel",    label: "Helm",      type: "wheel", w: 2, h: 2 }
+    { id: "engine",   label: "Engine",    type: "engine" },
+    { id: "sailtrim", label: "Sail Trim", type: "sailtrim" },
+    { id: "wheel",    label: "Helm",      type: "wheel" }
   ];
 
-  /* Nav Station tab instruments — supplies. Moved here so the Helm
-     stays focused on vessel control, Nav Station on provisions/DC. */
   const NAV_DEFS = [
     { id: "water", label: "Water", type: "percent", icon: "💧" },
     { id: "food",  label: "Food",  type: "percent", icon: "🍞" },
     { id: "hull",  label: "Hull",  type: "percent", icon: "🛟" }
   ];
 
-  let gaugeLayout = loadLayout();
-  let panelEl = null;
-  let navPanelEl = null;
+  const ALL_DEFS = HELM_DEFS.concat(NAV_DEFS);
 
-  function defaultPositionFor(def, index, allDefs) {
-    const gap = 8;
-    /* Engine, sailtrim, and wheel are non-1x1 — laid out manually to
-       account for their footprints. */
-    const positions = {
-      sog:      { left: gap,               top: gap },
-      windex:   { left: gap + GAUGE_SIZE + gap, top: gap },
-      engine:   { left: gap + (GAUGE_SIZE + gap) * 2, top: gap },
-      sailtrim: { left: gap + (GAUGE_SIZE + gap) * 3, top: gap },
-      wheel:    { left: gap + GAUGE_SIZE + gap, top: gap + GAUGE_SIZE + gap }
-    };
-    if (positions[def.id]) return positions[def.id];
-    /* Nav gauges: simple row */
-    const col = index % 3;
-    return { left: gap + col * (GAUGE_SIZE + gap), top: gap };
-  }
-
-  function gaugeWidth(def) {
-    return (def.w || 1) * GAUGE_SIZE + (def.w > 1 ? (def.w - 1) * 8 : 0);
-  }
-
-  function gaugeHeight(def) {
-    return (def.h || 1) * GAUGE_SIZE + (def.h > 1 ? (def.h - 1) * 8 : 0);
-  }
-
-  function loadLayout() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) { return {}; }
-  }
-
-  function saveLayout() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(gaugeLayout));
-  }
-
+  /* Builds each gauge's inner HTML into its own target container,
+     wherever that container currently exists in the DOM (it may be
+     sitting inert inside #osWidgetTemplates, or already placed on a
+     visible sub-tab — either way getElementById finds it). Only
+     builds once per element; the gauge's own internal update
+     functions (setSpeedGauge, setWindexGauge, etc) handle all
+     subsequent live updates, so there's no need to rebuild the
+     static HTML shell every time a tab switch happens to re-show it. */
   function buildPanel() {
-    panelEl = document.getElementById(PANEL_ID);
-    navPanelEl = document.getElementById(NAV_PANEL_ID);
-
-    if (panelEl) {
-      panelEl.innerHTML = "";
-      HELM_DEFS.forEach((def, i) => {
-        const pos = gaugeLayout[def.id] || defaultPositionFor(def, i, HELM_DEFS);
-        gaugeLayout[def.id] = pos;
-        const el = createGauge(def, pos);
-        panelEl.appendChild(el);
-        makeGaugeDraggable(el, def.id);
-      });
-    }
-
-    if (navPanelEl) {
-      navPanelEl.innerHTML = "";
-      NAV_DEFS.forEach((def, i) => {
-        const pos = gaugeLayout[def.id] || defaultPositionFor(def, i, NAV_DEFS);
-        gaugeLayout[def.id] = pos;
-        const el = createGauge(def, pos);
-        navPanelEl.appendChild(el);
-        makeGaugeDraggable(el, def.id);
-      });
-    }
-
-    saveLayout();
-  }
-
-  function createGauge(def, pos) {
-    const gauge = document.createElement("div");
-    gauge.className = "osGauge osGauge-" + def.type;
-    gauge.dataset.gaugeId = def.id;
-    gauge.style.left = pos.left + "px";
-    gauge.style.top = pos.top + "px";
-    gauge.style.width = (pos.size || gaugeWidth(def)) + "px";
-    gauge.style.height = (pos.sizeH || gaugeHeight(def)) + "px";
-    gauge.innerHTML = buildGaugeInnerHtml(def);
-    return gauge;
+    ALL_DEFS.forEach(def => {
+      const targetId = GAUGE_TARGETS[def.id];
+      const targetEl = document.getElementById(targetId);
+      if (!targetEl) return; /* gauge widget not currently placed anywhere */
+      if (targetEl.dataset.built === "1") return;
+      targetEl.classList.add("osGauge", "osGauge-" + def.type);
+      targetEl.innerHTML = buildGaugeInnerHtml(def);
+      targetEl.dataset.built = "1";
+    });
   }
 
   function buildGaugeInnerHtml(def) {
@@ -265,71 +208,6 @@
       ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" class="osWindexTick"/>`;
     }
     return ticks;
-  }
-
-  /* ---------------------------------------------------------------
-     DRAG (Edit Layout mode only)
-     --------------------------------------------------------------- */
-  function makeGaugeDraggable(gauge, gaugeId) {
-    let dragState = null;
-
-    function getXY(e) {
-      if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-      return { x: e.clientX, y: e.clientY };
-    }
-
-    function onDown(e) {
-      if (!document.body.classList.contains("layout-edit")) return;
-      e.preventDefault();
-      const { x, y } = getXY(e);
-      dragState = {
-        startX: x, startY: y,
-        left: parseFloat(gauge.style.left) || 0,
-        top: parseFloat(gauge.style.top) || 0
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-      window.addEventListener("touchmove", onMove, { passive: false });
-      window.addEventListener("touchend", onUp);
-    }
-
-    function onMove(e) {
-      if (!dragState) return;
-      e.preventDefault();
-      const { x, y } = getXY(e);
-      /* Use clientWidth/clientHeight (content box, excludes any
-         scrollbar) rather than getBoundingClientRect (full border
-         box) — otherwise the right/bottom edge clamp falls short by
-         however wide the scrollbar track is. */
-      const maxLeft = panelEl.clientWidth - gauge.offsetWidth;
-      const maxTop = panelEl.clientHeight - gauge.offsetHeight;
-      let newLeft = dragState.left + (x - dragState.startX);
-      let newTop = dragState.top + (y - dragState.startY);
-      newLeft = Math.max(0, Math.min(maxLeft, newLeft));
-      newTop = Math.max(0, Math.min(maxTop, newTop));
-      gauge.style.left = newLeft + "px";
-      gauge.style.top = newTop + "px";
-    }
-
-    function onUp() {
-      if (!dragState) return;
-      dragState = null;
-      gaugeLayout[gaugeId] = {
-        left: parseFloat(gauge.style.left),
-        top: parseFloat(gauge.style.top),
-        size: parseFloat(gauge.style.width),
-        sizeH: parseFloat(gauge.style.height)
-      };
-      saveLayout();
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onUp);
-    }
-
-    gauge.addEventListener("mousedown", onDown);
-    gauge.addEventListener("touchstart", onDown, { passive: false });
   }
 
   /* ---------------------------------------------------------------
@@ -490,9 +368,8 @@
   }
 
   function initInstrumentPanel(attempts) {
-    const helm = document.getElementById(PANEL_ID);
-    const nav = document.getElementById(NAV_PANEL_ID);
-    if (helm || nav) {
+    const anyTarget = Object.values(GAUGE_TARGETS).some(id => document.getElementById(id));
+    if (anyTarget) {
       buildPanel();
       return;
     }
@@ -500,6 +377,14 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => initInstrumentPanel(20));
+
+  /* Gauges can be newly placed onto a sub-tab at any time (the player
+     adding one via the tab system's widget editor) or re-shown after
+     being moved between tabs — re-run buildPanel periodically so
+     newly-placed gauges get their HTML shell built without requiring
+     a full page reload. Cheap no-op for already-built gauges thanks
+     to the dataset.built guard in buildPanel(). */
+  setInterval(buildPanel, 1000);
 
   window.OSInstruments = {
     setPercentGauge,
