@@ -186,7 +186,22 @@
      --------------------------------------------------------------- */
   function renderContent() {
     const content = document.getElementById("osSubTabContent");
-    if (!content) return;
+    const templates = document.getElementById("osWidgetTemplates");
+    if (!content || !templates) return;
+
+    /* CRITICAL: real widget nodes (helmgauges, chartplotter, etc) are
+       MOVED into this container, not cloned. Calling content.innerHTML
+       = "" would PERMANENTLY DELETE them once they're no longer inside
+       #osWidgetTemplates — there'd be nothing left to move back next
+       time. So real nodes must be returned to the templates container
+       first; only placeholder clones (which can be freely recreated)
+       and other stray DOM are actually cleared. */
+    Array.from(content.children).forEach(child => {
+      const widgetId = child.dataset && child.dataset.widgetId;
+      if (widgetId && REAL_WIDGET_IDS.includes(widgetId)) {
+        templates.appendChild(child); /* detach safely, don't destroy */
+      }
+    });
     content.innerHTML = "";
 
     const sub = getSub(activeMainId, activeSubId);
