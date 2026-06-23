@@ -389,11 +389,37 @@
       <div class="osDevSection">
         <div class="osDevSectionHeader"><span>Boat Designer</span></div>
         <p class="osDevHint">Pick a type for each part, then use the sliders below to scale it. The boat in the Helm view above updates instantly. Nothing saves until you choose an action below.</p>
-        <div class="osDevDesignerTypes" id="osDevDesignerTypes"></div>
-        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Dimensions</span></div>
-        <div class="osDevDesignerSliders" id="osDevDesignerSliders"></div>
-        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Colors</span></div>
-        <div class="osDevDesignerColors" id="osDevDesignerColors"></div>
+
+        <div class="osDevSectionHeader" style="margin-top:4px;"><span>Model Source</span></div>
+        <div class="osDevFormGrid">
+          <label class="osDevFullWidth">
+            <select id="dsModelSource">
+              <option value="procedural" ${!designerDNA.modelUrl ? "selected" : ""}>Procedural (build from sliders below)</option>
+              <option value="imported" ${designerDNA.modelUrl ? "selected" : ""}>Imported Model (.glb/.gltf URL)</option>
+            </select>
+          </label>
+        </div>
+        <div id="osDevImportedModelRow" style="display:${designerDNA.modelUrl ? "block" : "none"};margin-bottom:12px;">
+          <div class="osDevFormGrid">
+            <label class="osDevFullWidth">
+              Model URL (.glb or .gltf)
+              <input type="text" id="dsModelUrl" value="${designerDNA.modelUrl || ""}" placeholder="https://raw.githubusercontent.com/.../boat.glb">
+            </label>
+          </div>
+          <p class="osDevHint">Free models: <strong>kenney.nl</strong>, <strong>quaternius.com</strong>, or CC0/CC-BY models from <strong>sketchfab.com</strong> — export/download as glTF Binary (.glb) and host it somewhere reachable (e.g. a GitHub repo's raw file URL). The whole boat still heels/pitches/rocks with real wind and wave data; sail/boom-specific animation only works on procedural boats for now.</p>
+          <div class="osDevFormActions">
+            <button class="osDevBtnSecondary" id="osDevPreviewModelBtn">Preview This Model</button>
+          </div>
+        </div>
+
+        <div id="osDevProceduralControls" style="display:${designerDNA.modelUrl ? "none" : "block"};">
+          <div class="osDevDesignerTypes" id="osDevDesignerTypes"></div>
+          <div class="osDevSectionHeader" style="margin-top:14px;"><span>Dimensions</span></div>
+          <div class="osDevDesignerSliders" id="osDevDesignerSliders"></div>
+          <div class="osDevSectionHeader" style="margin-top:14px;"><span>Colors</span></div>
+          <div class="osDevDesignerColors" id="osDevDesignerColors"></div>
+        </div>
+
         <div class="osDevFormActions" style="margin-top:14px;">
           <button class="osDevBtn" id="osDevApplyToMeBtn">Apply to My Boat</button>
           <button class="osDevBtnSecondary" id="osDevSaveAsPresetBtn">Save as New Preset</button>
@@ -401,6 +427,37 @@
         </div>
       </div>
     `;
+
+    document.getElementById("dsModelSource").addEventListener("change", (e) => {
+      const importedRow = document.getElementById("osDevImportedModelRow");
+      const proceduralWrap = document.getElementById("osDevProceduralControls");
+      if (e.target.value === "imported") {
+        importedRow.style.display = "block";
+        proceduralWrap.style.display = "none";
+        designerDNA.modelUrl = document.getElementById("dsModelUrl").value || null;
+      } else {
+        importedRow.style.display = "none";
+        proceduralWrap.style.display = "block";
+        designerDNA.modelUrl = null;
+      }
+      window.OSHelm3D.rebuildBoat(designerDNA);
+    });
+
+    const modelUrlInput = document.getElementById("dsModelUrl");
+    if (modelUrlInput) {
+      modelUrlInput.addEventListener("change", () => {
+        designerDNA.modelUrl = modelUrlInput.value.trim() || null;
+      });
+    }
+    const previewModelBtn = document.getElementById("osDevPreviewModelBtn");
+    if (previewModelBtn) {
+      previewModelBtn.addEventListener("click", () => {
+        designerDNA.modelUrl = document.getElementById("dsModelUrl").value.trim() || null;
+        if (!designerDNA.modelUrl) { alert("Enter a model URL first."); return; }
+        window.OSHelm3D.rebuildBoat(designerDNA);
+        logEvent("info", "Previewing imported model: " + designerDNA.modelUrl);
+      });
+    }
 
     const typeWrap = document.getElementById("osDevDesignerTypes");
     DESIGNER_TYPES.forEach(t => {

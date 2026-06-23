@@ -618,11 +618,65 @@
       cabinColor: 0xf2efe6,
       sailColor: 0xf5f5f0,
       biminiColor: 0x2c5f73,
-      spinnakerColor: 0xe05050
+      spinnakerColor: 0xe05050,
+      modelUrl: null /* if set, loads a real imported .glb/.gltf model instead of building procedurally */
     };
   }
 
   let currentBoatDNA = defaultBoatDNA();
+  let importedModelRoot = null; /* the loaded gltf.scene, when using an imported model instead of procedural geometry */
+
+  /* ---------------------------------------------------------------
+     IMPORTED MODEL LOADING
+     Loads a real .glb/.gltf model in place of the procedural
+     generator. Falls back to a procedural default boat if the load
+     fails (network issue, bad URL, CORS/CSP block) rather than
+     leaving the player with an empty boat. The loaded model is
+     scaled/centered with a best-effort heuristic since imported
+     models can come in at wildly different native scales/origins.
+     --------------------------------------------------------------- */
+  function loadImportedModel(url, targetGroup) {
+    if (typeof THREE.GLTFLoader === "undefined") {
+      console.error("Oregon Sail: GLTFLoader not available, falling back to procedural boat");
+      buildBoat(Object.assign({}, currentBoatDNA, { modelUrl: null }));
+      return;
+    }
+
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      url,
+      (gltf) => {
+        importedModelRoot = gltf.scene;
+
+        /* Best-effort auto-scale: fit the model's longest dimension
+           to roughly match our procedural boat's typical hull length,
+           since imported models can arrive at any native scale. */
+        const box = new THREE.Box3().setFromObject(importedModelRoot);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const longest = Math.max(size.x, size.y, size.z, 0.01);
+        const targetLength = 7; /* roughly our procedural hull's length before the outer DNA scale multiplier */
+        const autoScale = targetLength / longest;
+        importedModelRoot.scale.setScalar(autoScale);
+
+        /* Re-center so the model's base sits near the boatGroup origin
+           (our waterline reference), not wherever its own pivot was */
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        importedModelRoot.position.set(-center.x * autoScale, -box.min.y * autoScale, -center.z * autoScale);
+
+        targetGroup.add(importedModelRoot);
+      },
+      undefined,
+      (error) => {
+        console.error("Oregon Sail: failed to load imported model, falling back to procedural boat", error);
+        importedModelRoot = null;
+        /* Rebuild with modelUrl cleared so we don't loop trying the
+           same broken URL — uses the rest of the same DNA otherwise */
+        buildBoat(Object.assign({}, currentBoatDNA, { modelUrl: null }));
+      }
+    );
+  }
 
   function buildBoat(dna) {
     const d = dna || currentBoatDNA || defaultBoatDNA();
@@ -634,9 +688,31 @@
     currentBoatDNA = d;
 
     boatGroup = new THREE.Group();
-    /* Whole boat scaled up substantially so it reads clearly against
-       the water/waves instead of looking swamped by them */
     boatGroup.scale.set(d.scale, d.scale, d.scale);
+    scene.add(boatGroup);
+
+    /* ---------------------------------------------------------------
+       IMPORTED MODEL — if this boat's design specifies a real .glb
+       model URL instead of procedural dimensions, load that instead
+       of running the generator below. The whole imported model still
+       gets heel/pitch/roll/turn-lean animation in the main tick loop
+       (since that's applied to boatGroup as a whole, regardless of
+       what's inside it) — what it does NOT get is per-part sail/boom
+       animation, since those target specific named objects the
+       procedural builder creates that an arbitrary imported model
+       won't have. That's a deliberate, documented v1 boundary.
+       --------------------------------------------------------------- */
+    if (d.modelUrl) {
+      /* Clear references to the previous procedural build's parts —
+         without this they'd point to now-orphaned (detached, not
+         rendered) objects from the last boatGroup, and the per-frame
+         update functions (updateBoom, updateHeadsailReef, etc) would
+         silently touch dead objects instead of correctly no-op'ing. */
+      hullMesh = mastMesh = boomGroup = sailMesh = headsailMesh = headsailGroup = null;
+      spinnakerGroup = spinnakerMesh = wakeMesh = bowWaveMesh = null;
+      loadImportedModel(d.modelUrl, boatGroup);
+      return; /* skip the procedural generator entirely */
+    }
 
     /* ---------------------------------------------------------------
        HULL — dispatches to a per-type builder. Each builder returns
@@ -814,8 +890,6 @@
     }));
     spinnakerGroup.add(spinnakerMesh);
     spinnakerMesh.visible = false; /* only shown when actually deployed downwind */
-
-    scene.add(boatGroup);
   }
 
   /* ---------------------------------------------------------------
@@ -1537,6 +1611,7 @@
       if (!scene) return;
       if (boatGroup) { scene.remove(boatGroup); }
       if (wakeTrailMesh) { scene.remove(wakeTrailMesh); wakeTrailMesh = null; wakeHistory = []; }
+      importedModelRoot = null; /* old one is detached along with boatGroup above; clear the stale reference */
       buildBoat(dna || currentBoatDNA);
       buildWake();
     },
