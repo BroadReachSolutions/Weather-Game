@@ -17,6 +17,7 @@
 
 (function () {
   let scene, camera, renderer, controls;
+  let sunLight, ambientLight;
   let boatGroup, hullMesh, mastMesh, boomGroup, sailMesh, headsailGroup;
   let waterMesh, groundMesh;
   let animFrameId = null;
@@ -25,6 +26,7 @@
   let currentHeelDeg = 0;   /* side-to-side tilt from wind force on sails */
   let currentPitchDeg = 0;  /* bow-up/down from waves */
   let currentHeadingDeg = null; /* boat's facing direction, null until first state arrives */
+  let currentTurnLeanDeg = 0;   /* centrifugal lean into turns */
   let waveClock = 0;
 
   const HEEL_TIME_CONSTANT = 0.7;    /* seconds to close most of the heel gap */
@@ -53,11 +55,13 @@
     renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    /* Lighting — simple sun + ambient fill */
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-    sun.position.set(30, 50, 20);
-    scene.add(sun);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    /* Lighting — simple sun + ambient fill. Kept as module state so
+       the day/night cycle can retint/reposition them over time. */
+    sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    sunLight.position.set(30, 50, 20);
+    scene.add(sunLight);
+    ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambientLight);
 
     /* Orbit controls — drag to look around, as requested */
     controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -75,6 +79,7 @@
     buildWake();
     buildWildlife();
     buildSky();
+    buildDayNightSky();
 
     windLinesGroup = new THREE.Group();
     scene.add(windLinesGroup);
@@ -131,6 +136,115 @@
       cluster.position.x += cluster.userData.driftSpeed * elapsedFactor;
       if (cluster.position.x > 140) cluster.position.x = -140;
     });
+  }
+
+  /* ---------------------------------------------------------------
+     DAY / NIGHT CYCLE
+     Driven by the player's actual real-world local time (a sailor's
+     clock doesn't reset every few minutes) — dawn/dusk transitions
+     happen at roughly realistic hours, the sky/fog/water retint
+     smoothly through the day, the sun arcs across the sky and dims
+     into a moon at night, and a starfield fades in once the sun is
+     well below the horizon.
+     --------------------------------------------------------------- */
+  let starsMesh = null;
+  let moonMesh = null;
+  let nightSkyDome = null;
+
+  const SKY_DAY = new THREE.Color(0x7ec8e3);
+  const SKY_SUNSET = new THREE.Color(0xf2935a);
+  const SKY_NIGHT = new THREE.Color(0x0a1430);
+  const FOG_DAY = new THREE.Color(0x9fd3e8);
+  const FOG_SUNSET = new THREE.Color(0xd9a06e);
+  const FOG_NIGHT = new THREE.Color(0x0a1430);
+  const WATER_DEEP_DAY = new THREE.Color(0x1f8fd4);
+  const WATER_DEEP_NIGHT = new THREE.Color(0x041830);
+  const WATER_LIGHT_DAY = new THREE.Color(0x6bd0f0);
+  const WATER_LIGHT_NIGHT = new THREE.Color(0x163048);
+
+  function buildDayNightSky() {
+    /* Starfield — a sprite-point cloud on a large sphere, hidden by
+       day, fading in as the sun sets */
+    const starCount = 600;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      /* Random point on a large sphere above the horizon */
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI * 0.45; /* keep them in the upper sky */
+      const r = 280;
+      starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      starPositions[i * 3 + 1] = r * Math.cos(phi) + 20;
+      starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
+    const starMat = new THREE.PointsMaterial({
+      color: 0xffffff, size: 1.6, transparent: true, opacity: 0, depthWrite: false
+    });
+    starsMesh = new THREE.Points(starGeo, starMat);
+    scene.add(starsMesh);
+
+    /* Moon — a simple pale disc, opposite the sun's arc */
+    const moonGeo = new THREE.CircleGeometry(8, 20);
+    const moonMat = new THREE.MeshBasicMaterial({
+      color: 0xe8eef5, transparent: true, opacity: 0, depthWrite: false
+    });
+    moonMesh = new THREE.Mesh(moonGeo, moonMat);
+    scene.add(moonMesh);
+  }
+
+  /* Returns 0..1 representing time of day (0 = midnight, 0.5 = noon)
+     from the player's real local clock. */
+  function getTimeOfDayFraction() {
+    const now = new Date();
+    return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400;
+  }
+
+  function animateDayNight() {
+    if (!scene || !sunLight) return;
+    const t = getTimeOfDayFraction();
+
+    /* Sun angle: a full circle over 24h, peaking at noon (t=0.5) */
+    const sunAngle = (t - 0.25) * Math.PI * 2; /* sunrise ~0.25 (6am), sunset ~0.75 (6pm) */
+    const sunHeight = Math.sin(sunAngle);      /* -1 at midnight, +1 at noon */
+    const sunDist = 120;
+    sunLight.position.set(Math.cos(sunAngle) * sunDist, Math.max(-20, sunHeight * 90 + 20), -40);
+
+    /* dayFactor: 0 at deep night, 1 at full day, smoothly transitioning
+       through dawn/dusk rather than snapping */
+    const dayFactor = Math.max(0, Math.min(1, (sunHeight + 0.15) / 0.3));
+    /* sunsetFactor: peaks around dawn/dusk specifically, for the warm
+       orange tint, fading out at both full day and full night */
+    const sunsetFactor = Math.max(0, 1 - Math.abs(sunHeight) / 0.35) * (1 - Math.abs(dayFactor - 0.5) * 0.3);
+
+    const skyColor = SKY_NIGHT.clone().lerp(SKY_DAY, dayFactor).lerp(SKY_SUNSET, sunsetFactor * 0.5);
+    const fogColor = FOG_NIGHT.clone().lerp(FOG_DAY, dayFactor).lerp(FOG_SUNSET, sunsetFactor * 0.5);
+    scene.background = skyColor;
+    if (scene.fog) scene.fog.color.copy(fogColor);
+
+    sunLight.intensity = 0.15 + dayFactor * 0.9;
+    ambientLight.intensity = 0.25 + dayFactor * 0.4;
+    sunLight.color.set(sunsetFactor > 0.3 ? 0xffcfa0 : 0xffffff);
+
+    /* Water retint — darker, more muted at night */
+    waterUniforms.uDeepColor.value.copy(WATER_DEEP_NIGHT).lerp(WATER_DEEP_DAY, dayFactor);
+    waterUniforms.uLightColor.value.copy(WATER_LIGHT_NIGHT).lerp(WATER_LIGHT_DAY, dayFactor);
+
+    /* Stars fade in as the sun drops well below the horizon */
+    if (starsMesh) {
+      const starOpacity = Math.max(0, Math.min(0.9, (0.05 - sunHeight) * 2.5));
+      starsMesh.material.opacity = starOpacity;
+    }
+
+    /* Moon mirrors the sun's arc on the opposite side of the sky,
+       visible mainly at night */
+    if (moonMesh) {
+      const moonAngle = sunAngle + Math.PI;
+      const moonHeight = Math.sin(moonAngle);
+      moonMesh.position.set(Math.cos(moonAngle) * sunDist, Math.max(-20, moonHeight * 90 + 20), -40);
+      moonMesh.lookAt(0, 10, 0);
+      moonMesh.material.opacity = Math.max(0, Math.min(0.85, (1 - dayFactor) * 0.9));
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -215,20 +329,22 @@
   const waterUniforms = {
     uTime: { value: 0 },
     uAmplitude: { value: 0.4 },
-    uDeepColor: { value: new THREE.Color(0x2a73ad) },
-    uLightColor: { value: new THREE.Color(0x6bb8e0) }
+    uHeadingRad: { value: 0 },
+    uDeepColor: { value: new THREE.Color(0x1f8fd4) },
+    uLightColor: { value: new THREE.Color(0x6bd0f0) },
+    uFoamColor: { value: new THREE.Color(0xf5fcff) }
   };
 
   function buildWater() {
-    const geo = new THREE.PlaneGeometry(300, 300, 60, 60);
+    const geo = new THREE.PlaneGeometry(300, 300, 90, 90);
 
-    /* Two-tone water, computed entirely on the GPU instead of looping
-       over ~3700 vertices in JavaScript every frame (a real CPU
-       bottleneck that was contributing to the reported stutter). The
-       vertex shader displaces each point with the same layered-sine
-       ripple pattern as before; the fragment shader blends between a
-       deep and light tone based on that same displacement. JS now
-       only updates two small uniforms (time, amplitude) per frame. */
+    /* Cartoon-stylized water: bigger, chunkier swells than a
+       realistic ocean, a directional ripple layer that flows from
+       bow to stern (so the player can read which way the boat is
+       actually moving at a glance, per request), and whitecap foam
+       that brightens wave crests above a height threshold. All
+       computed on the GPU — JS only updates a few small uniforms
+       per frame. */
     const mat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
       transparent: true,
@@ -236,13 +352,38 @@
       vertexShader: `
         uniform float uTime;
         uniform float uAmplitude;
+        uniform float uHeadingRad;
         varying float vRipple;
+        varying float vFoam;
         void main() {
           float slowClock = uTime * 0.35;
-          float ripple = sin(position.x * 0.18 + slowClock) * uAmplitude * 0.6
-                       + sin(position.y * 0.14 + slowClock * 0.8) * uAmplitude * 0.4
-                       + sin((position.x - position.y) * 0.09 + slowClock * 0.5) * uAmplitude * 0.25;
+
+          /* Base swell — broad, slow, multi-directional chop */
+          float swell = sin(position.x * 0.12 + slowClock) * uAmplitude * 0.7
+                      + sin(position.y * 0.10 + slowClock * 0.75) * uAmplitude * 0.5
+                      + sin((position.x - position.y) * 0.07 + slowClock * 0.45) * uAmplitude * 0.3;
+
+          /* Directional ripple layer — rotated into the boat's heading
+             frame so its crests visibly travel from bow to stern,
+             giving a constant readable cue for which way the boat
+             points/moves regardless of camera angle. Faster and
+             tighter than the base swell so it reads as surface
+             texture riding on top of the bigger waves. */
+          float ch = cos(uHeadingRad);
+          float sh = sin(uHeadingRad);
+          float along = position.x * sh + position.y * ch;  /* distance along the heading axis */
+          float across = position.x * ch - position.y * sh; /* distance across it */
+          float dirRipple = sin(along * 0.35 - uTime * 1.8) * uAmplitude * 0.35
+                           + sin(across * 0.5 + uTime * 0.6) * uAmplitude * 0.12;
+
+          float ripple = swell + dirRipple;
           vRipple = ripple / max(uAmplitude, 0.0001);
+
+          /* Foam shows up on the sharpest/highest crests of the
+             directional ripple specifically, since that's the layer
+             that reads as "moving texture" rather than gentle swell */
+          vFoam = smoothstep(0.55, 0.95, sin(along * 0.35 - uTime * 1.8) * 0.5 + 0.5);
+
           vec3 displaced = vec3(position.x, position.y, ripple);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
         }
@@ -250,11 +391,14 @@
       fragmentShader: `
         uniform vec3 uDeepColor;
         uniform vec3 uLightColor;
+        uniform vec3 uFoamColor;
         varying float vRipple;
+        varying float vFoam;
         void main() {
           float t = clamp((vRipple + 1.0) / 2.0, 0.0, 1.0);
           vec3 color = mix(uDeepColor, uLightColor, t);
-          gl_FragColor = vec4(color, 0.6);
+          color = mix(color, uFoamColor, vFoam * 0.8);
+          gl_FragColor = vec4(color, 0.65);
         }
       `
     });
@@ -267,12 +411,12 @@
 
   function animateWater(waveHeightFt) {
     if (!waterMesh) return;
-    /* Calmer, slower amplitude than before — the previous version
-       moved noticeably too fast for a relaxed sailing feel. Just two
-       uniform writes now; the actual per-vertex work happens on the
-       GPU in the shader above. */
-    waterUniforms.uAmplitude.value = Math.min(1.8, (waveHeightFt || 1) * 0.26);
+    /* Bigger cartoon-style swell amplitude than a realistic ocean */
+    waterUniforms.uAmplitude.value = Math.min(2.6, (waveHeightFt || 1) * 0.42);
     waterUniforms.uTime.value = waveClock;
+    if (currentHeadingDeg != null) {
+      waterUniforms.uHeadingRad.value = (currentHeadingDeg * Math.PI) / 180;
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -569,20 +713,49 @@
 
     /* Mainsail — triangle from mast (at boom pivot height up to mast
        top) back to the boom tip, attached at the mast the whole time.
-       Height scales with mast height so taller masts get taller sails. */
+       Height scales with mast height so taller masts get taller sails.
+       Built as a subdivided grid (not a flat 3-vertex triangle) so
+       the leech (free trailing edge) has real geometry to animate —
+       this is what lets the sail genuinely LUFF (flutter) when
+       poorly trimmed versus pull smooth and full when well-trimmed,
+       instead of just a single static camber bend. */
     const mainsailHeight = Math.max(2, d.mastHeight - 2);
+    const sailRows = 6, sailCols = 5;
     const mainsailGeo = new THREE.BufferGeometry();
-    const mainsailVerts = new Float32Array([
-      0, 0, 0,                  /* mast base (boom pivot height) */
-      0, mainsailHeight, 0,     /* mast top */
-      0, 0, -boomLen            /* boom tip (local to boomGroup) */
-    ]);
-    mainsailGeo.setAttribute("position", new THREE.BufferAttribute(mainsailVerts, 3));
-    mainsailGeo.setIndex([0, 1, 2]);
+    const mainsailPositions = [];
+    const mainsailUVs = []; /* u = luff(0)->leech(1), v = foot(0)->head(1), used by the luff shader */
+    for (let row = 0; row <= sailRows; row++) {
+      const v = row / sailRows; /* 0 at boom/foot, 1 at masthead/head */
+      for (let col = 0; col <= sailCols; col++) {
+        const u = col / sailCols; /* 0 at the mast/luff, 1 at the leech (free edge) */
+        /* Sail tapers from full boom-length at the foot to a point at
+           the head, matching the original triangle's silhouette */
+        const widthAtThisHeight = (1 - v) * boomLen;
+        const x = 0;
+        const y = v * mainsailHeight;
+        const z = -u * widthAtThisHeight;
+        mainsailPositions.push(x, y, z);
+        mainsailUVs.push(u, v);
+      }
+    }
+    const mainsailIndices = [];
+    for (let row = 0; row < sailRows; row++) {
+      for (let col = 0; col < sailCols; col++) {
+        const a = row * (sailCols + 1) + col;
+        const b = a + 1;
+        const c = a + (sailCols + 1);
+        const dd = c + 1;
+        mainsailIndices.push(a, c, b, b, c, dd);
+      }
+    }
+    mainsailGeo.setAttribute("position", new THREE.Float32BufferAttribute(mainsailPositions, 3));
+    mainsailGeo.setAttribute("uv", new THREE.Float32BufferAttribute(mainsailUVs, 2));
+    mainsailGeo.setIndex(mainsailIndices);
     mainsailGeo.computeVertexNormals();
     sailMesh = new THREE.Mesh(mainsailGeo, new THREE.MeshPhongMaterial({
-      color: d.sailColor, side: THREE.DoubleSide, transparent: true, opacity: 0.92, flatShading: true
+      color: d.sailColor, side: THREE.DoubleSide, transparent: true, opacity: 0.92, flatShading: false
     }));
+    sailMesh.userData.basePositions = mainsailPositions.slice(); /* untouched rest shape, used each frame to compute displacement from */
     boomGroup.add(sailMesh); /* parented to boomGroup so it swings with the boom but stays mast-attached */
 
     /* Headsail (jib) — a roller-furling jib. Tack sits above the
@@ -1146,6 +1319,7 @@
     animateWater(waveHeightFt);
     animateWindLines(1);
     animateSky(1);
+    animateDayNight();
     animateWildlife(0.033); /* matches the real ~33ms frame budget at 30fps now, not a 60fps assumption */
     if (window.OSHelm3DState) {
       const speedKt = window.OSHelm3DState.speedKt || 0;
@@ -1188,11 +1362,19 @@
 
       /* Heading — the boat's actual facing direction. Smoothed with
          proper angle-wrapping so it doesn't spin the long way around
-         when crossing the 0/360 boundary (e.g. 350° -> 10°). */
+         when crossing the 0/360 boundary (e.g. 350° -> 10°). Also
+         tracks the turn RATE (degrees per frame), used below to add
+         a centrifugal lean into turns — a real boat heels into a
+         hard turn the same way a car leans, which the wind/wave heel
+         alone doesn't capture. */
+      let turnRateDegPerFrame = 0;
       if (typeof s.heading === "number") {
         if (currentHeadingDeg == null) currentHeadingDeg = s.heading;
         let delta = ((s.heading - currentHeadingDeg + 540) % 360) - 180;
+        const prevHeading = currentHeadingDeg;
         currentHeadingDeg = (currentHeadingDeg + delta * headingAlpha + 360) % 360;
+        let frameDelta = ((currentHeadingDeg - prevHeading + 540) % 360) - 180;
+        turnRateDegPerFrame = frameDelta;
       }
 
       if (boatGroup) {
@@ -1212,9 +1394,19 @@
            as actually riding over 3D swell rather than just nodding
            fore-aft — combined additively with the wind-driven heel */
         const waveRollDeg = Math.sin(waveClock * 0.7 + 1.4) * Math.min(6, effectiveWaveHeight * 0.9);
+
+        /* Turn lean — a real boat heels INTO a hard turn (centrifugal
+           effect), independent of wind heel. turnRateDegPerFrame is
+           signed (positive = turning to starboard/right), so this
+           naturally leans the correct direction either way. Smoothed
+           toward a target rather than applied instantly so it doesn't
+           jitter frame to frame. */
+        const targetTurnLean = Math.max(-10, Math.min(10, turnRateDegPerFrame * -3.5));
+        currentTurnLeanDeg += (targetTurnLean - currentTurnLeanDeg) * 0.12;
+
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
-        boatGroup.rotation.z = ((currentHeelDeg * heelSign) + waveRollDeg) * Math.PI / 180;
+        boatGroup.rotation.z = ((currentHeelDeg * heelSign) + waveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * Math.PI) / 180;
         boatGroup.position.y = 0.3 + Math.sin(waveClock * 0.7) * Math.min(0.9, effectiveWaveHeight * 0.16);
       }
@@ -1224,18 +1416,44 @@
       updateSpinnaker(s.spinnakerFurlPct || 0, !!s.isSailing && !!s.isDownwind);
       updateWindLines(s.windSpeedKt || 0);
 
-      /* Sails visible only while sailing_active; mainsail billow is a
-         subtle camber bend (Z displacement of the boom-tip vertex)
-         rather than X-scaling, since it's a flat triangle fan now.
-         Mainsail height also scales down with reef level. */
-      if (sailMesh) {
+      /* Sails visible only while sailing_active. Mainsail now animates
+         real luff/fill across its whole surface instead of a single
+         camber-bend vertex: well-trimmed sails belly out smoothly
+         (a proper curved fill), poorly trimmed ones flutter/ripple
+         along the leech like a real luffing sail, scaled by how
+         strong the wind is (stronger wind = more visible flutter
+         energy). Mainsail height also scales down with reef level. */
+      if (sailMesh && sailMesh.userData.basePositions) {
         sailMesh.visible = !!s.isSailing;
         const reefScaleMap = { 0: 1.0, 1: 0.65, 2: 0.35 };
         sailMesh.scale.y = reefScaleMap[s.reefLevel] != null ? reefScaleMap[s.reefLevel] : 1.0;
-        const fill = (s.trimFactor || 0) * 0.4; /* 0..0.4 units of camber */
+
+        const trim = s.trimFactor || 0;          /* 0 = badly trimmed/luffing, 1 = perfectly trimmed */
+        const windStrength = Math.min(1, (s.windSpeedKt || 0) / 15);
         const posAttr = sailMesh.geometry.attributes.position;
-        posAttr.setX(2, fill); /* boom-tip vertex bows outward slightly when well-trimmed */
+        const uvAttr = sailMesh.geometry.attributes.uv;
+        const base = sailMesh.userData.basePositions;
+
+        for (let i = 0; i < posAttr.count; i++) {
+          const u = uvAttr.getX(i); /* 0 at luff/mast, 1 at leech/free edge */
+          const v = uvAttr.getY(i); /* 0 at foot, 1 at head */
+          const bx = base[i * 3], by = base[i * 3 + 1], bz = base[i * 3 + 2];
+
+          /* Smooth belly fill — bows outward more toward the leech and
+             mid-height, proportional to trim quality */
+          const fillAmount = trim * 0.5 * Math.sin(u * Math.PI * 0.5) * Math.sin(v * Math.PI);
+
+          /* Luff flutter — a traveling ripple along the leech that
+             gets stronger the worse the trim and the stronger the wind,
+             and fades to zero right at the luff (u=0, attached to mast) */
+          const luffStrength = (1 - trim) * windStrength;
+          const flutter = Math.sin(u * 9 + waveClock * 14 + v * 3) * 0.12 * luffStrength * u;
+
+          posAttr.setX(i, bx + fillAmount + flutter * 0.3);
+          posAttr.setZ(i, bz - fillAmount * 0.4 + flutter);
+        }
         posAttr.needsUpdate = true;
+        sailMesh.geometry.computeVertexNormals();
       }
       if (headsailMesh) headsailMesh.visible = !!s.isSailing;
     }
