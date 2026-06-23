@@ -90,33 +90,13 @@
         </div>
 
         <!-- ═══ COMPASS / WIND WIDGET ═══ -->
-        <div class="widget" data-widget="wind" id="windWidget">
+        <div class="widget" data-widget="wind" id="windWidget" style="display:none;">
           <div class="widgetFrame">
-            <div class="widgetControls">
-              <button class="widgetSettingsBtn" type="button" title="Compass settings">⚙</button>
-              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
-            </div>
-            <div class="widgetHandle"></div>
-            <button class="osRadarCenterBtn" id="osRadarCenterBtn" title="Center radar on my vessel" style="display:none;">⛵</button>
-            <div class="windBox">
-              <div class="windReadings" id="windReadings"></div>
-              <div class="compassOuter" id="compassOuter">
-                <div class="compassCardinals" id="compassCardinals">
-                  <div class="cardinal" id="cardinalN">N</div>
-                  <div class="cardinal" id="cardinalE">E</div>
-                  <div class="cardinal" id="cardinalS">S</div>
-                  <div class="cardinal" id="cardinalW">W</div>
-                </div>
-                <div class="compass" id="compassWidget">
-                  <canvas id="compassMapCanvas"></canvas>
-                  <canvas id="radarCanvas" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;border-radius:12px;z-index:5;"></canvas>
-                  <iframe id="radarIframe" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:12px;z-index:5;" allowfullscreen></iframe>
-                  <div class="ring" id="compassRing"></div>
-                  <div class="arrow" id="windArrow"></div>
-                </div>
-              </div>
-              <div class="windDir" id="windDir"></div>
-            </div>
+            <!-- Display content (compass, wind readings) moved into
+                 the Nav Station tab — see #osWidgetTemplates. Settings
+                 gear/panel stay here, unreachable for now since
+                 script.js's settings lookup is scoped to this shell's
+                 DOM nesting; revisit as its own task later. -->
             <div class="widgetSettingsPanel" data-settings-for="wind">
               <div class="settingsHeader">
                 <div class="settingsTitle">Compass Widget</div>
@@ -191,16 +171,10 @@
         </div>
 
         <!-- ═══ FORECAST WIDGET ═══ -->
-        <div class="widget" data-widget="forecast" id="forecastWidget">
+        <div class="widget" data-widget="forecast" id="forecastWidget" style="display:none;">
           <div class="widgetFrame">
-            <div class="widgetControls">
-              <button class="widgetSettingsBtn" type="button" title="Forecast settings">⚙</button>
-              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
-            </div>
-            <div class="widgetHandle"></div>
-            <div class="forecastWrap">
-              <div class="forecast" id="forecast"></div>
-            </div>
+            <!-- Display content (forecast list) moved into the Nav
+                 Station tab — see #osWidgetTemplates. -->
             <div class="widgetSettingsPanel" data-settings-for="forecast">
               <div class="settingsHeader">
                 <div class="settingsTitle">Forecast Widget</div>
@@ -256,19 +230,10 @@
         </div>
 
         <!-- ═══ TIDE CHART WIDGET ═══ -->
-        <div class="widget" data-widget="tideChart" id="tideChartWidget">
+        <div class="widget" data-widget="tideChart" id="tideChartWidget" style="display:none;">
           <div class="widgetFrame">
-            <div class="widgetControls">
-              <button class="widgetSettingsBtn" type="button" title="Tide Chart settings">⚙</button>
-              <button class="widgetHideBtn" type="button" title="Hide widget">👁</button>
-            </div>
-            <div class="widgetHandle"></div>
-            <div class="tideSection">
-              <div class="tidePanel">
-                <canvas id="tideChart"></canvas>
-                <div id="tideLine"></div>
-              </div>
-            </div>
+            <!-- Display content (tide canvas) moved into the Nav
+                 Station tab — see #osWidgetTemplates. -->
             <div class="widgetSettingsPanel" data-settings-for="tideChart">
               <div class="settingsHeader">
                 <div class="settingsTitle">Tide Chart Widget</div>
@@ -431,6 +396,41 @@
                     </div>
                   </div>
                 </div>
+                <div class="osWidgetCard osWidgetResizable osWidgetCardWide" data-widget-id="compass">
+                  <button class="osRadarCenterBtn" id="osRadarCenterBtn" title="Center radar on my vessel" style="display:none;">⛵</button>
+                  <div class="windBox">
+                    <div class="windReadings" id="windReadings"></div>
+                    <div class="compassOuter" id="compassOuter">
+                      <div class="compassCardinals" id="compassCardinals">
+                        <div class="cardinal" id="cardinalN">N</div>
+                        <div class="cardinal" id="cardinalE">E</div>
+                        <div class="cardinal" id="cardinalS">S</div>
+                        <div class="cardinal" id="cardinalW">W</div>
+                      </div>
+                      <div class="compass" id="compassWidget">
+                        <canvas id="compassMapCanvas"></canvas>
+                        <canvas id="radarCanvas" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;border-radius:12px;z-index:5;"></canvas>
+                        <iframe id="radarIframe" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:12px;z-index:5;" allowfullscreen></iframe>
+                        <div class="ring" id="compassRing"></div>
+                        <div class="arrow" id="windArrow"></div>
+                      </div>
+                    </div>
+                    <div class="windDir" id="windDir"></div>
+                  </div>
+                </div>
+                <div class="osWidgetCard osWidgetResizable osWidgetCardWide" data-widget-id="forecast">
+                  <div class="forecastWrap">
+                    <div class="forecast" id="forecast"></div>
+                  </div>
+                </div>
+                <div class="osWidgetCard osWidgetResizable osWidgetCardWide" data-widget-id="tidechart">
+                  <div class="tideSection">
+                    <div class="tidePanel">
+                      <canvas id="tideChart"></canvas>
+                      <div id="tideLine"></div>
+                    </div>
+                  </div>
+                </div>
                 <div class="osWidgetCard osWidgetResizable" data-widget-id="sailtrim">
                   <div id="osGaugeTarget-sailtrim"></div>
                 </div>
@@ -494,12 +494,6 @@
                 </div>
                 <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="windtransducer">
                   <div class="osWidgetPlaceholderIcon">🌀</div><div class="osWidgetPlaceholderLabel">Wind Transducer</div>
-                </div>
-                <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="forecast">
-                  <div class="osWidgetPlaceholderIcon">🌤️</div><div class="osWidgetPlaceholderLabel">Forecast</div>
-                </div>
-                <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="tidechart">
-                  <div class="osWidgetPlaceholderIcon">🌊</div><div class="osWidgetPlaceholderLabel">Tide Chart</div>
                 </div>
                 <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="vhf">
                   <div class="osWidgetPlaceholderIcon">📻</div><div class="osWidgetPlaceholderLabel">VHF Radio</div>

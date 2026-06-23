@@ -15,7 +15,7 @@
 
 (function () {
   const STORAGE_KEY = "osTabConfig";
-  const CONFIG_VERSION = 3; /* bumped: station widget added to Nav Station defaults */
+  const CONFIG_VERSION = 4; /* bumped: compass/forecast/tidechart added to Nav Station defaults */
 
   /* Which widget ids are offered for each main tab's "+ Add Widget"
      picker. Placeholders are listed here even though they're not
@@ -35,13 +35,14 @@
     ],
     navstation: [
       { id: "chartplotter", label: "Chart Plotter (Satellite Map)" },
+      { id: "station", label: "Station / Tide / Edit Layout Controls" },
+      { id: "compass", label: "Wind Compass" },
+      { id: "forecast", label: "Weather Forecast" },
+      { id: "tidechart", label: "Tide Chart" },
       { id: "water", label: "Water Gauge" },
       { id: "food", label: "Food Gauge" },
       { id: "hull", label: "Hull Gauge" },
       { id: "track", label: "Track Controls" },
-      { id: "station", label: "Station / Tide / Edit Layout Controls" },
-      { id: "forecast", label: "Forecast" },
-      { id: "tidechart", label: "Tide Chart" },
       { id: "vhf", label: "VHF Radio" }
     ],
     crew: [],   /* no widgets yet — real crew system is future work */
@@ -57,7 +58,7 @@
           { id: "helm", label: "Helm", widgets: ["sailtrim", "wheel", "engine", "speed", "windex"] }
         ]},
         { id: "navstation", label: "Nav Station", subtabs: [
-          { id: "weather", label: "Weather", widgets: ["chartplotter", "station", "water", "food", "hull", "track"] }
+          { id: "weather", label: "Weather", widgets: ["chartplotter", "station", "compass", "forecast", "tidechart", "water", "food", "hull", "track"] }
         ]},
         { id: "crew", label: "Crew", subtabs: [
           { id: "health", label: "Health", widgets: [] },
@@ -385,7 +386,8 @@
      the app stay valid, or a fresh clone for inert placeholders. */
   const REAL_WIDGET_IDS = [
     "sailtrim", "wheel", "engine", "speed", "windex",
-    "chartplotter", "water", "food", "hull", "track", "station"
+    "chartplotter", "water", "food", "hull", "track", "station",
+    "compass", "forecast", "tidechart"
   ];
 
   function getWidgetNode(widgetId) {
