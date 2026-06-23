@@ -890,7 +890,153 @@
     }));
     spinnakerGroup.add(spinnakerMesh);
     spinnakerMesh.visible = false; /* only shown when actually deployed downwind */
+
+    buildLights(d, hullInfo, mastX, mastZ, mastBaseY, cabinWallHeight);
   }
+
+  /* ---------------------------------------------------------------
+     NAVIGATION / DECK LIGHTS
+     Five switchable lights, each a small THREE.PointLight or
+     THREE.SpotLight plus a glowing bulb mesh so it reads visually
+     even before the light itself illuminates anything nearby:
+       - Anchor: white, very top of the mast, omnidirectional
+       - Nav lights: red (port/left) + green (starboard/right) at the
+         bow, white at the stern — the real maritime convention
+       - Steaming: white, facing forward, halfway up the mast
+       - Deck: white, mounted high, aimed straight down at the deck
+       - Cockpit: white, low-mounted under the bimini, lighting the
+         cockpit well
+     All start OFF; game-ui.js calls setLightState() based on the
+     boat's light_* columns whenever they change.
+     --------------------------------------------------------------- */
+  const lightObjects = {}; /* { anchor, nav, steaming, deck, cockpit } -> { lights: [...], bulbs: [...] } */
+
+  function makeBulb(color, radius) {
+    const geo = new THREE.SphereGeometry(radius || 0.05, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
+    return new THREE.Mesh(geo, mat);
+  }
+
+  function buildLights(d, hullInfo, mastX, mastZ, mastBaseY, cabinWallHeight) {
+    const { bowZ, sternZ, halfWidth, deckY } = hullInfo;
+    Object.keys(lightObjects).forEach(k => delete lightObjects[k]);
+
+    /* --- ANCHOR LIGHT: white, very top of the mast, all-around --- */
+    {
+      const bulb = makeBulb(0xffffff, 0.07);
+      bulb.position.set(mastX, mastBaseY + d.mastHeight + 0.1, mastZ);
+      boatGroup.add(bulb);
+      const light = new THREE.PointLight(0xffffff, 0, 12); /* intensity 0 = off by default */
+      light.position.copy(bulb.position);
+      boatGroup.add(light);
+      lightObjects.anchor = { lights: [light], bulbs: [bulb] };
+    }
+
+    /* --- NAV LIGHTS: red port / green starboard at the bow, white stern --- */
+    {
+      const bowLightZ = bowZ * 0.85;
+      const portBulb = makeBulb(0xff2a2a, 0.05);
+      portBulb.position.set(-halfWidth * 0.9, deckY + 0.3, bowLightZ);
+      boatGroup.add(portBulb);
+      const portLight = new THREE.PointLight(0xff2a2a, 0, 6);
+      portLight.position.copy(portBulb.position);
+      boatGroup.add(portLight);
+
+      const stbdBulb = makeBulb(0x2aff5a, 0.05);
+      stbdBulb.position.set(halfWidth * 0.9, deckY + 0.3, bowLightZ);
+      boatGroup.add(stbdBulb);
+      const stbdLight = new THREE.PointLight(0x2aff5a, 0, 6);
+      stbdLight.position.copy(stbdBulb.position);
+      boatGroup.add(stbdLight);
+
+      const sternBulb = makeBulb(0xffffff, 0.05);
+      sternBulb.position.set(0, deckY + 0.4, sternZ + 0.1);
+      boatGroup.add(sternBulb);
+      const sternLight = new THREE.PointLight(0xffffff, 0, 6);
+      sternLight.position.copy(sternBulb.position);
+      boatGroup.add(sternLight);
+
+      lightObjects.nav = {
+        lights: [portLight, stbdLight, sternLight],
+        bulbs: [portBulb, stbdBulb, sternBulb]
+      };
+    }
+
+    /* --- STEAMING LIGHT: white, forward-facing, halfway up the mast --- */
+    {
+      const steamingY = mastBaseY + d.mastHeight * 0.5;
+      const bulb = makeBulb(0xffffff, 0.05);
+      bulb.position.set(mastX, steamingY, mastZ + 0.08);
+      boatGroup.add(bulb);
+      const light = new THREE.SpotLight(0xffffff, 0, 14, Math.PI / 4, 0.5);
+      light.position.set(mastX, steamingY, mastZ);
+      light.target.position.set(mastX, steamingY - 0.5, bowZ);
+      boatGroup.add(light);
+      boatGroup.add(light.target);
+      lightObjects.steaming = { lights: [light], bulbs: [bulb] };
+    }
+
+    /* --- DECK LIGHT: white, mounted high, aimed straight down --- */
+    {
+      const deckLightY = mastBaseY + d.mastHeight * 0.35;
+      const bulb = makeBulb(0xfff6d8, 0.04);
+      bulb.position.set(mastX, deckLightY, mastZ);
+      boatGroup.add(bulb);
+      const light = new THREE.SpotLight(0xfff6d8, 0, 10, Math.PI / 3, 0.6);
+      light.position.set(mastX, deckLightY, mastZ);
+      light.target.position.set(mastX, deckY, mastZ);
+      boatGroup.add(light);
+      boatGroup.add(light.target);
+      lightObjects.deck = { lights: [light], bulbs: [bulb] };
+    }
+
+    /* --- COCKPIT LIGHTS: low-mounted, lighting the cockpit well --- */
+    {
+      const cockpitZ = -1.1; /* matches cockpitFloorMesh's position */
+      const positions = [
+        { x: -0.6, z: cockpitZ + 0.6 },
+        { x: 0.6, z: cockpitZ + 0.6 },
+        { x: -0.6, z: cockpitZ - 0.6 },
+        { x: 0.6, z: cockpitZ - 0.6 }
+      ];
+      const lights = [];
+      const bulbs = [];
+      positions.forEach((p) => {
+        const bulb = makeBulb(0xfff0c8, 0.035);
+        bulb.position.set(p.x, deckY + 1.0, p.z);
+        boatGroup.add(bulb);
+        const light = new THREE.PointLight(0xfff0c8, 0, 4);
+        light.position.copy(bulb.position);
+        boatGroup.add(light);
+        lights.push(light);
+        bulbs.push(bulb);
+      });
+      lightObjects.cockpit = { lights, bulbs };
+    }
+
+    /* Apply whatever switch states are already known (e.g. surviving
+       a rebuildBoat() while lights were on) instead of always
+       resetting to off */
+    Object.keys(currentLightState).forEach(key => setLightState(key, currentLightState[key]));
+  }
+
+  /* Tracks the last-known switch state for each light so rebuildBoat()
+     (boat designer preview, etc) can restore them instead of always
+     starting dark. Updated by setLightState, read by buildLights. */
+  const currentLightState = { anchor: false, nav: false, steaming: false, deck: false, cockpit: false };
+
+  function setLightState(key, isOn) {
+    currentLightState[key] = !!isOn;
+    const obj = lightObjects[key];
+    if (!obj) return;
+    obj.lights.forEach(light => {
+      light.intensity = isOn ? (light.isSpotLight ? 1.4 : 1.1) : 0;
+    });
+    obj.bulbs.forEach(bulb => {
+      bulb.material.opacity = isOn ? 0.95 : 0.35;
+    });
+  }
+
 
   /* ---------------------------------------------------------------
      HULL TYPES
@@ -1602,6 +1748,7 @@
     setState: function (state) {
       window.OSHelm3DState = state;
     },
+    setLightState: setLightState,
     /* Tears down and regenerates the boat with a new set of design
        parameters — used by the dev console's boat designer for a
        live preview as sliders change, and to apply a saved design

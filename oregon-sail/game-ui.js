@@ -255,6 +255,13 @@
            there's a scene to rebuild into */
         setTimeout(() => window.OSHelm3D.rebuildBoat(boat.hull_design), 500);
       }
+      /* Restore saved light switch states once the scene/boat exist */
+      setTimeout(() => {
+        if (!window.OSHelm3D.setLightState) return;
+        ["anchor", "nav", "steaming", "deck", "cockpit"].forEach(key => {
+          window.OSHelm3D.setLightState(key, !!boat["light_" + key]);
+        });
+      }, boat.hull_design ? 600 : 300);
     }
 
     startSimulationLoop();
@@ -1061,6 +1068,52 @@
        directly can run before that DOM exists, so retry until it does
        rather than silently failing. */
     wireGaugeDependentControls();
+    wireLightPanel();
+  }
+
+  /* ---------------------------------------------------------------
+     DC LIGHTING PANEL
+     A widget the player can place on any Nav Station sub-tab (per
+     the tab system) with 5 toggle switches: Anchor, Nav Lights,
+     Steaming, Deck, Cockpit. Each one persists to a light_<key>
+     column and immediately turns the corresponding 3D light on/off
+     in the Helm view, regardless of which tab is currently active.
+     Retries like the gauge wiring above, since this widget can be
+     freely added/removed by the player and may not exist in the DOM
+     yet (or ever, if they've removed it) when this first runs.
+     --------------------------------------------------------------- */
+  function wireLightPanel(attemptsLeft) {
+    const panel = document.getElementById("osLightPanel");
+    if (!panel) {
+      if (attemptsLeft == null) attemptsLeft = 20;
+      if (attemptsLeft > 0) setTimeout(() => wireLightPanel(attemptsLeft - 1), 300);
+      return;
+    }
+    if (panel.dataset.wired === "1") return; /* already wired, e.g. after a tab switch re-render */
+    panel.dataset.wired = "1";
+
+    const LIGHT_KEYS = ["anchor", "nav", "steaming", "deck", "cockpit"];
+    LIGHT_KEYS.forEach(key => {
+      const btn = panel.querySelector(`.osLightSwitch[data-light="${key}"]`);
+      if (!btn) return;
+      const isOn = !!(OS.boat && OS.boat["light_" + key]);
+      updateLightSwitchUI(btn, isOn);
+
+      btn.addEventListener("click", async () => {
+        if (!OS.boat) return;
+        const newState = !OS.boat["light_" + key];
+        await OS.setLight(key, newState);
+        updateLightSwitchUI(btn, newState);
+        if (typeof window.OSHelm3D !== "undefined" && window.OSHelm3D.setLightState) {
+          window.OSHelm3D.setLightState(key, newState);
+        }
+      });
+    });
+  }
+
+  function updateLightSwitchUI(btn, isOn) {
+    btn.textContent = isOn ? "ON" : "OFF";
+    btn.classList.toggle("on", isOn);
   }
 
   function wireGaugeDependentControls(attemptsLeft) {

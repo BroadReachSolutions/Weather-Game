@@ -292,6 +292,23 @@ OS.setSpinnakerFurl = async function (pct) {
   return { data, error };
 };
 
+/* Toggles one of the five DC-panel light switches: anchor, nav,
+   steaming, deck, cockpit. Mirrors directly to a light_<key> column. */
+OS.setLight = async function (key, isOn) {
+  if (!OS.boat) return;
+  const column = "light_" + key;
+  OS.boat[column] = isOn; /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ [column]: isOn, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setLight failed", error);
+  return { data, error };
+};
+
 OS.setSailingActive = async function (active) {
   if (!OS.boat) return;
   OS.boat.sailing_active = active; /* in-memory first, see note in setEngine */

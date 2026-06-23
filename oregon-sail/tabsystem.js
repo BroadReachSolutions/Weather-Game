@@ -15,7 +15,7 @@
 
 (function () {
   const STORAGE_KEY = "osTabConfig";
-  const CONFIG_VERSION = 4; /* bumped: compass/forecast/tidechart added to Nav Station defaults */
+  const CONFIG_VERSION = 5; /* bumped: DC lighting panel added to Nav Station defaults */
 
   /* Which widget ids are offered for each main tab's "+ Add Widget"
      picker. Placeholders are listed here even though they're not
@@ -39,6 +39,7 @@
       { id: "compass", label: "Wind Compass" },
       { id: "forecast", label: "Weather Forecast" },
       { id: "tidechart", label: "Tide Chart" },
+      { id: "lightpanel", label: "DC Lighting Panel" },
       { id: "water", label: "Water Gauge" },
       { id: "food", label: "Food Gauge" },
       { id: "hull", label: "Hull Gauge" },
@@ -58,7 +59,7 @@
           { id: "helm", label: "Helm", widgets: ["sailtrim", "wheel", "engine", "speed", "windex"] }
         ]},
         { id: "navstation", label: "Nav Station", subtabs: [
-          { id: "weather", label: "Weather", widgets: ["chartplotter", "station", "compass", "forecast", "tidechart", "water", "food", "hull", "track"] }
+          { id: "weather", label: "Weather", widgets: ["chartplotter", "station", "compass", "forecast", "tidechart", "lightpanel", "water", "food", "hull", "track"] }
         ]},
         { id: "crew", label: "Crew", subtabs: [
           { id: "health", label: "Health", widgets: [] },
@@ -387,7 +388,7 @@
   const REAL_WIDGET_IDS = [
     "sailtrim", "wheel", "engine", "speed", "windex",
     "chartplotter", "water", "food", "hull", "track", "station",
-    "compass", "forecast", "tidechart"
+    "compass", "forecast", "tidechart", "lightpanel"
   ];
 
   function getWidgetNode(widgetId) {
