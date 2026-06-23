@@ -1014,27 +1014,11 @@
      CONTROLS
      --------------------------------------------------------------- */
   function wireControls() {
-    /* Tab switching */
-    const tabBar = document.getElementById("osTabBar");
-    if (tabBar) {
-      tabBar.addEventListener("click", (e) => {
-        const tab = e.target.closest(".osTab");
-        if (!tab) return;
-        const target = tab.dataset.tab;
-        document.querySelectorAll(".osTab").forEach(t => t.classList.remove("active"));
-        document.querySelectorAll(".osTabPanel").forEach(p => p.classList.remove("active"));
-        tab.classList.add("active");
-        const panel = document.getElementById("osTabPanel-" + target);
-        if (panel) panel.classList.add("active");
-
-        /* The chart plotter map lives in the Nav Station tab, which is
-           display:none while inactive — Leaflet renders incorrectly if
-           sized while hidden, so nudge it once the tab becomes visible */
-        if (target === "nav" && map) {
-          setTimeout(() => map.invalidateSize(), 50);
-        }
-      });
-    }
+    /* Tab switching is now handled by tabsystem.js (the dynamic
+       two-level tab system) — see oregon-sail/tabsystem.js. That
+       module calls window.OSGameUI.onChartPlotterShown() whenever
+       the chart plotter widget becomes visible, which is where the
+       map.invalidateSize() call below now lives instead. */
 
     document.getElementById("osSetCourseBtn").addEventListener("click", async () => {
       if (!pendingDest) return;
@@ -1331,4 +1315,13 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => waitForGameWidget(20));
+
+  /* Public hook for tabsystem.js — called whenever the chart plotter
+     widget is moved into a now-visible sub-tab, since Leaflet renders
+     incorrectly if sized while its container was display:none. */
+  window.OSGameUI = {
+    onChartPlotterShown: () => {
+      if (map) setTimeout(() => map.invalidateSize(), 50);
+    }
+  };
 })();

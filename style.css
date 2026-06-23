@@ -2211,7 +2211,6 @@ body.layout-edit .widgetResize {
 /* Map */
 /* Chart plotter tile — hosts the relocated Leaflet map inside Nav Station */
 .osChartPlotterTile {
-  display: none; /* temporarily hidden while focusing on 3D Helm polish — map/course logic underneath is untouched */
   flex-shrink: 0;
   height: 220px;
   border-bottom: 1px solid rgba(125,186,220,0.15);
@@ -2332,27 +2331,26 @@ body.layout-edit .widgetResize {
 .osHelmCompassSwatchBoat { background: #4fc3f7; }
 .osHelmCompassSwatchCam { background: #ffca4f; }
 
-/* ═══ TAB SYSTEM ═══ */
-.osTabBar {
+/* ═══ DYNAMIC TAB SYSTEM ═══ */
+.osMainTabBar {
   display: flex;
   overflow-x: auto;
   scrollbar-width: none;
   flex-shrink: 0;
-  background: rgba(4, 10, 16, 0.6);
-  border-top: 1px solid rgba(125,186,220,0.12);
-  border-bottom: 1px solid rgba(125,186,220,0.12);
-  gap: 1px;
-  padding: 0 2px;
+  background: rgba(4, 10, 16, 0.7);
+  border-top: 1px solid rgba(125,186,220,0.15);
+  border-bottom: 1px solid rgba(125,186,220,0.15);
 }
+.osMainTabBar::-webkit-scrollbar { display: none; }
 
-.osTabBar::-webkit-scrollbar { display: none; }
-
-.osTab {
+.osMainTab {
+  flex: 1;
   flex-shrink: 0;
-  padding: 7px 11px;
+  min-width: 64px;
+  padding: 9px 8px;
   font-size: 11px;
-  font-weight: 600;
-  color: rgba(159,194,217,0.7);
+  font-weight: 700;
+  color: rgba(159,194,217,0.65);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -2360,57 +2358,187 @@ body.layout-edit .widgetResize {
   white-space: nowrap;
   letter-spacing: 0.3px;
 }
-
-.osTab.active {
+.osMainTab.active {
   color: #d0ecff;
   border-bottom-color: #4fc3f7;
+  background: rgba(79,195,247,0.08);
+}
+.osMainTab:active { background: rgba(255,255,255,0.05); }
+
+.osSubTabBar {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 6px 8px;
+  background: rgba(4, 10, 16, 0.4);
+  border-bottom: 1px solid rgba(125,186,220,0.1);
+}
+.osSubTabBar::-webkit-scrollbar { display: none; }
+
+.osSubTab {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(159,194,217,0.7);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(125,186,220,0.2);
+  border-radius: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.osSubTab.active {
+  color: #0c1117;
+  background: #4fc3f7;
+  border-color: #4fc3f7;
+  font-weight: 700;
 }
 
-.osTab:active { background: rgba(255,255,255,0.04); }
-
-.osTabTba {
-  color: rgba(159,194,217,0.35);
-  font-style: italic;
+.osSubTabAdd {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(159,194,217,0.6);
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(125,186,220,0.3);
+  border-radius: 50%;
+  cursor: pointer;
 }
+.osSubTabAdd:active { background: rgba(255,255,255,0.08); }
 
-.osTabPanel {
-  display: none;
+.osSubTabContent {
   flex: 1 1 0;
   min-height: 0;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  position: relative;
 }
 
-.osTabPanel.active { display: flex; flex-direction: column; }
+.osWidgetCard {
+  flex-shrink: 0;
+}
+.osWidgetCardWide { width: 100%; }
 
-/* Placeholder content for tabs not yet built */
-.osTabPlaceholder {
+.osWidgetPlaceholderCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 22px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(125,186,220,0.25);
+  border-radius: 10px;
+  opacity: 0.6;
+}
+.osWidgetPlaceholderIcon { font-size: 24px; }
+.osWidgetPlaceholderLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9fc2d9;
+}
+
+.osTabEmptyState {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 24px 20px;
+  padding: 30px 20px;
   text-align: center;
-  opacity: 0.55;
+  opacity: 0.45;
+  min-height: 160px;
 }
-
-.osTabPlaceholderIcon { font-size: 32px; }
-
-.osTabPlaceholderTitle {
-  font-size: 14px;
-  font-weight: 700;
-  color: #d0ecff;
-}
-
-.osTabPlaceholderText {
+.osTabEmptyIcon { font-size: 26px; }
+.osTabEmptyText {
   font-size: 12px;
   color: #9fc2d9;
-  max-width: 260px;
+  max-width: 220px;
   line-height: 1.5;
 }
 
-/* ═══ INSTRUMENT PANEL (Helm tab) ═══ */
+/* Long-press widget editor overlay */
+.osWidgetEditorOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  background: rgba(5, 12, 18, 0.85);
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.osWidgetEditorPanel {
+  width: 100%;
+  max-width: 360px;
+  max-height: 80%;
+  overflow-y: auto;
+  background: #0e151c;
+  border: 1px solid rgba(125,186,220,0.3);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.osWidgetEditorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+  color: #eef7ff;
+  margin-bottom: 12px;
+}
+
+.osWidgetEditorSection { margin-bottom: 14px; }
+
+.osWidgetEditorSubhead {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(159,194,217,0.6);
+  margin-bottom: 8px;
+}
+
+.osWidgetEditorRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 7px;
+  font-size: 11px;
+  color: #d0ecff;
+  margin-bottom: 5px;
+}
+
+.osWidgetEditorAddGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.osWidgetEditorAddGrid .osDevBtnSmall {
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.osWidgetEditorEmpty {
+  font-size: 11px;
+  color: rgba(159,194,217,0.5);
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ═══ INSTRUMENT PANEL (Helm gauges widget) ═══ */
 .osInstrumentPanel {
   position: relative;
   flex: 1 1 0;

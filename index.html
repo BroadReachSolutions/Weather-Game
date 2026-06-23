@@ -404,31 +404,40 @@
               </div>
 
               <!-- Tab bar -->
-              <div class="osTabBar" id="osTabBar">
-                <button class="osTab active" data-tab="helm">Helm</button>
-                <button class="osTab" data-tab="nav">Nav Station</button>
-                <button class="osTab" data-tab="crew">Crew</button>
-                <button class="osTab" data-tab="mechanical">Mechanical</button>
-                <button class="osTab" data-tab="storage">Storage</button>
-                <button class="osTab osTabTba" data-tab="tba1">TBA</button>
-                <button class="osTab osTabTba" data-tab="tba2">TBA</button>
-                <button class="osTab osTabTba" data-tab="tba3">TBA</button>
-              </div>
+              <!-- ═══ DYNAMIC TAB SYSTEM ═══
+                   Built/populated entirely by tabsystem.js. Main tabs
+                   (Cockpit/Nav Station/Crew/Systems/Storage), their
+                   sub-tabs, and widget placement are all
+                   user-configurable and persisted to localStorage. -->
+              <div class="osMainTabBar" id="osMainTabBar"></div>
+              <div class="osSubTabBar" id="osSubTabBar"></div>
+              <div class="osSubTabContent" id="osSubTabContent"></div>
 
-              <!-- TAB CONTENT PANELS -->
+              <!-- Real widget content, built once and moved into the
+                   active sub-tab's content area by tabsystem.js.
+                   Kept outside the dynamic area so existing code
+                   (instruments.js, game-ui.js's map init, etc) that
+                   references these exact element IDs keeps working
+                   unchanged — the tab system relocates them in the
+                   DOM rather than rebuilding them.
 
-              <!-- HELM — vessel controls and instrumentation -->
-              <div class="osTabPanel active" id="osTabPanel-helm">
-                <div class="osInstrumentPanel" id="osInstrumentPanel">
-                  <!-- Gauges injected by instruments.js -->
+                   NOTE: the Helm gauge panel and Nav gauges panel are
+                   each ONE widget card containing several gauges,
+                   not five separate cards — instruments.js builds
+                   them as a single free-floating drag-position layout
+                   (sailtrim/wheel/engine/speed/windex all in one
+                   panel), and splitting that into individually
+                   relocatable per-gauge cards would mean rewriting
+                   that drag/layout system. Treating the whole panel
+                   as one widget avoids that risk for this pass. -->
+              <div id="osWidgetTemplates" style="display:none;">
+                <div class="osWidgetCard osWidgetCardWide" data-widget-id="helmgauges">
+                  <div class="osInstrumentPanel" id="osInstrumentPanel">
+                    <!-- Sail Trim, Wheel, Engine, Speed, Windex gauges injected by instruments.js -->
+                  </div>
                 </div>
-              </div>
 
-              <!-- NAV STATION — chart plotter, supply gauges, track controls -->
-              <div class="osTabPanel" id="osTabPanel-nav">
-                <div class="osNavStationLayout">
-
-                  <!-- Chart plotter — the satellite map, course setting, lives here now -->
+                <div class="osWidgetCard osWidgetCardWide" data-widget-id="chartplotter">
                   <div class="osChartPlotterTile">
                     <div class="osMapWrap" id="osMapWrap">
                       <div id="osMap"></div>
@@ -437,11 +446,13 @@
                       <button class="osMapBtn osMapBtnSecondary" id="osCancelCourseBtn" style="display:none;">Cancel</button>
                     </div>
                   </div>
-
+                </div>
+                <div class="osWidgetCard osWidgetCardWide" data-widget-id="navgauges">
                   <div class="osNavGauges" id="osNavGauges">
                     <!-- Water, Food, Hull gauges injected by instruments.js -->
                   </div>
-                  <!-- Track controls -->
+                </div>
+                <div class="osWidgetCard osWidgetCardWide" data-widget-id="track">
                   <div class="osNavControls">
                     <button class="osNavControlBtn" id="osTrackToggleBtn">
                       <span class="osNavControlIcon">📍</span>
@@ -452,67 +463,39 @@
                       <span>Clear Track</span>
                     </button>
                   </div>
-                  <div class="osTabPlaceholder osTabPlaceholderSmall">
-                    <div class="osTabPlaceholderIcon">🗺</div>
-                    <div class="osTabPlaceholderTitle">Nav Station</div>
-                    <div class="osTabPlaceholderText">Course plotting, weather radar, and DC power panel coming soon.</div>
-                  </div>
+                </div>
+
+                <!-- Placeholder widgets — not built as real systems yet,
+                     shown as labeled cards so the tab framework itself
+                     can be fully exercised ahead of those builds -->
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="radar">
+                  <div class="osWidgetPlaceholderIcon">📡</div><div class="osWidgetPlaceholderLabel">Radar</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="depth">
+                  <div class="osWidgetPlaceholderIcon">📉</div><div class="osWidgetPlaceholderLabel">Depth</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="tridata">
+                  <div class="osWidgetPlaceholderIcon">📊</div><div class="osWidgetPlaceholderLabel">Tri-Data</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="windtransducer">
+                  <div class="osWidgetPlaceholderIcon">🌀</div><div class="osWidgetPlaceholderLabel">Wind Transducer</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="station">
+                  <div class="osWidgetPlaceholderIcon">📍</div><div class="osWidgetPlaceholderLabel">Station</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="forecast">
+                  <div class="osWidgetPlaceholderIcon">🌤️</div><div class="osWidgetPlaceholderLabel">Forecast</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="tidechart">
+                  <div class="osWidgetPlaceholderIcon">🌊</div><div class="osWidgetPlaceholderLabel">Tide Chart</div>
+                </div>
+                <div class="osWidgetCard osWidgetPlaceholderCard" data-widget-id="vhf">
+                  <div class="osWidgetPlaceholderIcon">📻</div><div class="osWidgetPlaceholderLabel">VHF Radio</div>
                 </div>
               </div>
 
-              <!-- CREW — captain and crew status -->
-              <div class="osTabPanel" id="osTabPanel-crew">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">👥</div>
-                  <div class="osTabPlaceholderTitle">Crew</div>
-                  <div class="osTabPlaceholderText">Captain and crew health, morale, and roster. Bigger crew = longer offline progress but more food and water use.</div>
-                </div>
-              </div>
-
-              <!-- MECHANICAL — engine systems, power, solar, batteries -->
-              <div class="osTabPanel" id="osTabPanel-mechanical">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">⚙️</div>
-                  <div class="osTabPlaceholderTitle">Mechanical</div>
-                  <div class="osTabPlaceholderText">Engine systems, battery bank, solar, wind generator, and power management. All electronics draw from your battery bank.</div>
-                </div>
-              </div>
-
-              <!-- STORAGE — inventory, supplies, spare gear -->
-              <div class="osTabPanel" id="osTabPanel-storage">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">📦</div>
-                  <div class="osTabPlaceholderTitle">Storage</div>
-                  <div class="osTabPlaceholderText">Food, water, first aid, spare sails, repair materials, and tools. Everything you bring adds weight.</div>
-                </div>
-              </div>
-
-              <!-- TBA 1 -->
-              <div class="osTabPanel" id="osTabPanel-tba1">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">🔒</div>
-                  <div class="osTabPlaceholderTitle">Coming Soon</div>
-                  <div class="osTabPlaceholderText">This tab is reserved for a future feature.</div>
-                </div>
-              </div>
-
-              <!-- TBA 2 -->
-              <div class="osTabPanel" id="osTabPanel-tba2">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">🔒</div>
-                  <div class="osTabPlaceholderTitle">Coming Soon</div>
-                  <div class="osTabPlaceholderText">This tab is reserved for a future feature.</div>
-                </div>
-              </div>
-
-              <!-- TBA 3 -->
-              <div class="osTabPanel" id="osTabPanel-tba3">
-                <div class="osTabPlaceholder">
-                  <div class="osTabPlaceholderIcon">🔒</div>
-                  <div class="osTabPlaceholderTitle">Coming Soon</div>
-                  <div class="osTabPlaceholderText">This tab is reserved for a future feature.</div>
-                </div>
-              </div>
+              <!-- Long-press editor overlay — add/remove widgets for the active sub-tab -->
+              <div class="osWidgetEditorOverlay" id="osWidgetEditorOverlay" style="display:none;"></div>
 
             </div>
             <div class="widgetSettingsPanel" data-settings-for="game">
@@ -641,6 +624,7 @@
   <script src="oregon-sail/physics.js"></script>
   <script src="oregon-sail/game-ui.js"></script>
   <script src="oregon-sail/instruments.js"></script>
+  <script src="oregon-sail/tabsystem.js"></script>
   <script src="oregon-sail/helm3d.js"></script>
   <script src="oregon-sail/devconsole.js"></script>
   <script src="oregon-sail/draggable-buttons.js"></script>
