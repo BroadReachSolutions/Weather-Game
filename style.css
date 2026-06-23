@@ -2415,24 +2415,17 @@ body.layout-edit .widgetResize {
   flex: 1 1 0;
   min-height: 0;
   overflow: auto;
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  align-content: flex-start;
-  gap: 8px;
-  padding: 8px;
   position: relative;
+  padding: 0;
 }
 
 .osWidgetCard {
-  flex-shrink: 0;
+  position: absolute;
 }
-.osWidgetCardWide { width: 100%; }
 
 .osWidgetResizable {
-  position: relative;
-  width: 100%;
+  position: absolute;
+  width: 160px;
   height: 110px;
   min-width: 80px;
   min-height: 70px;
@@ -2442,6 +2435,11 @@ body.layout-edit .widgetResize {
 .osWidgetResizable > div:first-child {
   width: 100%;
   height: 100%;
+}
+
+.osWidgetCardWide {
+  width: 320px;
+  height: 220px;
 }
 
 .osWidgetResizeHandle {
@@ -2465,6 +2463,27 @@ body.layout-edit .widgetResize {
   border-bottom: 2px solid rgba(159,194,217,0.55);
   border-radius: 0 0 3px 0;
 }
+
+.osWidgetGripHandle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 18px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  color: rgba(159,194,217,0.6);
+  background: rgba(10, 20, 28, 0.55);
+  border-radius: 0 0 6px 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.osWidgetGripHandle:active { cursor: grabbing; }
 
 .osWidgetPlaceholderCard {
   display: flex;

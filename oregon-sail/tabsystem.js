@@ -185,21 +185,90 @@
   }
 
   /* ---------------------------------------------------------------
-     UNIVERSAL WIDGET RESIZE
-     Any widget card (gauge, chart plotter, placeholder, etc) tagged
-     .osWidgetResizable gets a drag handle in its bottom-right corner.
-     Size is stored per widget id, per sub-tab (so the same widget can
-     have a different size on different tabs), inside the sub-tab's
-     own config object — persists via the same saveConfig() as
-     everything else.
+     FREE WIDGET POSITIONING + RESIZE
+     Every widget card is absolutely positioned within its sub-tab's
+     content area, with a small grip handle (top-left) to drag it
+     anywhere and a resize handle (bottom-right) to resize it. Both
+     position and size are stored per widget id, per sub-tab, inside
+     that sub-tab's own config object.
      --------------------------------------------------------------- */
-  function applyStoredSize(node, sub, widgetId) {
+  function nextDefaultPosition(sub, index) {
+    /* Cascade new widgets diagonally so they don't all land exactly
+       on top of each other before the player has dragged anything */
+    const col = index % 4;
+    const row = Math.floor(index / 4);
+    return { x: 8 + col * 40, y: 8 + row * 40 };
+  }
+
+  function applyStoredLayout(node, sub, widgetId, index) {
+    const positions = sub.positions || {};
     const sizes = sub.sizes || {};
-    const saved = sizes[widgetId];
-    if (saved) {
-      node.style.width = saved.w + "px";
-      node.style.height = saved.h + "px";
+    const pos = positions[widgetId] || nextDefaultPosition(sub, index);
+    const size = sizes[widgetId];
+    node.style.left = pos.x + "px";
+    node.style.top = pos.y + "px";
+    if (size) {
+      node.style.width = size.w + "px";
+      node.style.height = size.h + "px";
     }
+  }
+
+  function attachGripHandle(node, sub, widgetId) {
+    if (node.querySelector(".osWidgetGripHandle")) return;
+    const grip = document.createElement("div");
+    grip.className = "osWidgetGripHandle";
+    grip.innerHTML = "⠿";
+    node.appendChild(grip);
+
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0, dragging = false;
+
+    function getXY(e) {
+      if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      return { x: e.clientX, y: e.clientY };
+    }
+
+    function onDown(e) {
+      e.preventDefault();
+      e.stopPropagation(); /* don't also trigger the long-press editor */
+      dragging = true;
+      const { x, y } = getXY(e);
+      startX = x; startY = y;
+      startLeft = node.offsetLeft; startTop = node.offsetTop;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      window.addEventListener("touchmove", onMove, { passive: false });
+      window.addEventListener("touchend", onUp);
+    }
+
+    function onMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      const { x, y } = getXY(e);
+      const parent = node.parentElement;
+      const maxLeft = Math.max(0, parent.clientWidth - node.offsetWidth);
+      const maxTop = Math.max(0, parent.clientHeight - node.offsetHeight);
+      let newLeft = startLeft + (x - startX);
+      let newTop = startTop + (y - startY);
+      newLeft = Math.max(0, Math.min(maxLeft, newLeft));
+      newTop = Math.max(0, Math.min(maxTop, newTop));
+      node.style.left = newLeft + "px";
+      node.style.top = newTop + "px";
+    }
+
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      if (!sub.positions) sub.positions = {};
+      sub.positions[widgetId] = { x: node.offsetLeft, y: node.offsetTop };
+      saveConfig();
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+    }
+
+    grip.addEventListener("mousedown", onDown);
+    grip.addEventListener("touchstart", onDown, { passive: false });
   }
 
   function attachResizeHandle(node, sub, widgetId) {
@@ -293,12 +362,13 @@
       content.appendChild(empty);
     }
 
-    sub.widgets.forEach(widgetId => {
+    sub.widgets.forEach((widgetId, index) => {
       const node = getWidgetNode(widgetId);
       if (node) {
         content.appendChild(node);
         if (node.classList.contains("osWidgetResizable")) {
-          applyStoredSize(node, sub, widgetId);
+          applyStoredLayout(node, sub, widgetId, index);
+          attachGripHandle(node, sub, widgetId);
           attachResizeHandle(node, sub, widgetId);
         }
       }
