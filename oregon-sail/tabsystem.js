@@ -15,7 +15,7 @@
 
 (function () {
   const STORAGE_KEY = "osTabConfig";
-  const CONFIG_VERSION = 2; /* bumped: helmgauges/navgauges split into individual gauge widgets */
+  const CONFIG_VERSION = 3; /* bumped: station widget added to Nav Station defaults */
 
   /* Which widget ids are offered for each main tab's "+ Add Widget"
      picker. Placeholders are listed here even though they're not
@@ -39,7 +39,7 @@
       { id: "food", label: "Food Gauge" },
       { id: "hull", label: "Hull Gauge" },
       { id: "track", label: "Track Controls" },
-      { id: "station", label: "Station" },
+      { id: "station", label: "Station / Tide / Edit Layout Controls" },
       { id: "forecast", label: "Forecast" },
       { id: "tidechart", label: "Tide Chart" },
       { id: "vhf", label: "VHF Radio" }
@@ -57,7 +57,7 @@
           { id: "helm", label: "Helm", widgets: ["sailtrim", "wheel", "engine", "speed", "windex"] }
         ]},
         { id: "navstation", label: "Nav Station", subtabs: [
-          { id: "weather", label: "Weather", widgets: ["chartplotter", "water", "food", "hull", "track"] }
+          { id: "weather", label: "Weather", widgets: ["chartplotter", "station", "water", "food", "hull", "track"] }
         ]},
         { id: "crew", label: "Crew", subtabs: [
           { id: "health", label: "Health", widgets: [] },
@@ -385,7 +385,7 @@
      the app stay valid, or a fresh clone for inert placeholders. */
   const REAL_WIDGET_IDS = [
     "sailtrim", "wheel", "engine", "speed", "windex",
-    "chartplotter", "water", "food", "hull", "track"
+    "chartplotter", "water", "food", "hull", "track", "station"
   ];
 
   function getWidgetNode(widgetId) {

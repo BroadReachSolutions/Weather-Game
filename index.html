@@ -61,25 +61,13 @@
       <div id="dashboard">
 
         <!-- ═══ CONTROL WIDGET ═══ -->
-        <div class="widget" data-widget="layout" id="layoutWidget">
+        <div class="widget" data-widget="layout" id="layoutWidget" style="display:none;">
           <div class="widgetFrame">
             <div class="widgetHandle"></div>
-            <div class="controlPanel">
-              <div class="controlRow">
-                <label for="stationSelect" class="controlLabel">Station</label>
-                <select id="stationSelect" class="controlSelect"></select>
-              </div>
-              <div class="controlRow">
-                <label for="tideDateSelect" class="controlLabel">Tide Date</label>
-                <input type="date" id="tideDateSelect" class="controlDate">
-              </div>
-              <div class="controlBtns">
-                <button id="viewDateBtn" class="ctrlBtn">View Day</button>
-                <button id="liveViewBtn" class="ctrlBtn">Return to Live</button>
-                <button id="layoutToggle" class="ctrlBtn ctrlBtnEdit">Edit Layout</button>
-                <button id="snapToggle" class="ctrlBtn ctrlBtnEdit snapToggleBtn active" style="display:none;" title="Toggle snapping while dragging/resizing">Snap: On</button>
-              </div>
-            </div>
+            <!-- controlPanel moved into the Nav Station tab's widget
+                 pool (see #osWidgetTemplates) — this shell stays
+                 hidden but intact so script.js's per-widget drag/
+                 resize/settings lifecycle isn't disturbed. -->
             <div class="widgetSettingsPanel dashboardSettingsPanel" data-settings-for="layout">
               <div class="settingsHeader">
                 <div class="settingsTitle">Dashboard Settings</div>
@@ -425,6 +413,24 @@
                    resizable widget card (osGaugeTarget-*), rather
                    than all 5 sharing one combined panel. -->
               <div id="osWidgetTemplates" style="display:none;">
+                <div class="osWidgetCard osWidgetResizable osWidgetCardWide" data-widget-id="station">
+                  <div class="controlPanel">
+                    <div class="controlRow">
+                      <label for="stationSelect" class="controlLabel">Station</label>
+                      <select id="stationSelect" class="controlSelect"></select>
+                    </div>
+                    <div class="controlRow">
+                      <label for="tideDateSelect" class="controlLabel">Tide Date</label>
+                      <input type="date" id="tideDateSelect" class="controlDate">
+                    </div>
+                    <div class="controlBtns">
+                      <button id="viewDateBtn" class="ctrlBtn">View Day</button>
+                      <button id="liveViewBtn" class="ctrlBtn">Return to Live</button>
+                      <button id="layoutToggle" class="ctrlBtn ctrlBtnEdit">Edit Layout</button>
+                      <button id="snapToggle" class="ctrlBtn ctrlBtnEdit snapToggleBtn active" style="display:none;" title="Toggle snapping while dragging/resizing">Snap: On</button>
+                    </div>
+                  </div>
+                </div>
                 <div class="osWidgetCard osWidgetResizable" data-widget-id="sailtrim">
                   <div id="osGaugeTarget-sailtrim"></div>
                 </div>
@@ -488,9 +494,6 @@
                 </div>
                 <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="windtransducer">
                   <div class="osWidgetPlaceholderIcon">🌀</div><div class="osWidgetPlaceholderLabel">Wind Transducer</div>
-                </div>
-                <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="station">
-                  <div class="osWidgetPlaceholderIcon">📍</div><div class="osWidgetPlaceholderLabel">Station</div>
                 </div>
                 <div class="osWidgetCard osWidgetResizable osWidgetPlaceholderCard" data-widget-id="forecast">
                   <div class="osWidgetPlaceholderIcon">🌤️</div><div class="osWidgetPlaceholderLabel">Forecast</div>
