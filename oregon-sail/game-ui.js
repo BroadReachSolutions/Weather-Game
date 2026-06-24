@@ -587,11 +587,34 @@
     const windSpeedKt = typeof window.getLastWindMph === "function"
       ? window.getLastWindMph() * 0.868976 : 0;
     const isSailing = !!(OS.boat && OS.boat.sailing_active);
+    const boatSpeedKt = OS.boat ? (OS.boat.speed_over_ground_kt || 0) : 0;
+
+    /* Apparent wind as a TRUE COMPASS direction/speed (not relative
+       to the bow) — the wind streak field needs this to actually
+       move correctly relative to the world, not just relative to
+       the boat's heading the way the windex gauge uses it. */
+    let apparentWindDeg = windDeg;
+    let apparentWindSpeedKt = windSpeedKt;
+    if (window.OSInstruments && window.OSInstruments.calculateApparentWind) {
+      const toRad = d => (d * Math.PI) / 180;
+      const twToward = (windDeg + 180) % 360;
+      const twX = windSpeedKt * Math.sin(toRad(twToward));
+      const twY = windSpeedKt * Math.cos(toRad(twToward));
+      const boatX = boatSpeedKt * Math.sin(toRad(heading));
+      const boatY = boatSpeedKt * Math.cos(toRad(heading));
+      const awX = twX - boatX;
+      const awY = twY - boatY;
+      apparentWindSpeedKt = Math.sqrt(awX * awX + awY * awY);
+      const awToward = (Math.atan2(awX, awY) * 180) / Math.PI;
+      apparentWindDeg = (awToward + 180 + 360) % 360; /* compass "from" direction */
+    }
 
     window.OSHelm3D.setState({
       heading,
       windDeg,
       windSpeedKt,
+      apparentWindDeg,
+      apparentWindSpeedKt,
       trimFactor: trim.pct / 100,
       pointOfSailFactor: pointOfSailFactorMap[pos.name] != null ? pointOfSailFactorMap[pos.name] : 0,
       boomAngleDeg: currentBoomAngle,
@@ -600,7 +623,7 @@
       jibFurlPct: OS.boat ? (OS.boat.jib_furl_pct != null ? OS.boat.jib_furl_pct : 100) : 100,
       spinnakerFurlPct: OS.boat ? (OS.boat.spinnaker_furl_pct || 0) : 0,
       isDownwind: pos.name === "Broad Reach" || pos.name === "Running",
-      speedKt: OS.boat ? (OS.boat.speed_over_ground_kt || 0) : 0,
+      speedKt: boatSpeedKt,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
          feed on the client */

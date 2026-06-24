@@ -329,22 +329,33 @@
   const waterUniforms = {
     uTime: { value: 0 },
     uAmplitude: { value: 0.4 },
-    uHeadingRad: { value: 0 },
+    uOffsetX: { value: 0 },
+    uOffsetZ: { value: 0 },
     uDeepColor: { value: new THREE.Color(0x1f8fd4) },
     uLightColor: { value: new THREE.Color(0x6bd0f0) },
     uFoamColor: { value: new THREE.Color(0xf5fcff) }
   };
 
+  /* Accumulated sampling offset, in world units — shifted each frame
+     opposite the boat's real travel direction at a rate matching its
+     actual speed. The water plane itself never moves; instead we
+     slide the COORDINATES we sample the swell pattern at, which is
+     the standard "scrolling texture" illusion-of-motion trick. This
+     is what makes faster boat speed = faster-looking water flow,
+     independent of the swells' own (random, not heading-tied) shape. */
+  let waterOffsetX = 0;
+  let waterOffsetZ = 0;
+
   function buildWater() {
     const geo = new THREE.PlaneGeometry(300, 300, 90, 90);
 
-    /* Cartoon-stylized water: bigger, chunkier swells than a
-       realistic ocean, a directional ripple layer that flows from
-       bow to stern (so the player can read which way the boat is
-       actually moving at a glance, per request), and whitecap foam
-       that brightens wave crests above a height threshold. All
-       computed on the GPU — JS only updates a few small uniforms
-       per frame. */
+    /* Cartoon-stylized water: big swells from several RANDOM, fixed
+       angles (not tied to heading or any other game state) layered
+       together for a natural, chaotic-looking chop — plus whitecap
+       foam on the sharpest crests. The whole pattern is sampled at
+       (position + uOffset) instead of raw position, so sliding that
+       offset opposite the boat's travel direction each frame creates
+       the illusion of the boat actually moving through the water. */
     const mat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
       transparent: true,
@@ -352,39 +363,44 @@
       vertexShader: `
         uniform float uTime;
         uniform float uAmplitude;
-        uniform float uHeadingRad;
+        uniform float uOffsetX;
+        uniform float uOffsetZ;
         varying float vRipple;
         varying float vFoam;
+
+        /* Rotates a 2D point by a fixed angle (in radians) — used to
+           give each swell layer its own arbitrary, non-aligned
+           direction so the chop looks random rather than uniform. */
+        vec2 rot(vec2 p, float a) {
+          float c = cos(a), s = sin(a);
+          return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+        }
+
         void main() {
           float slowClock = uTime * 0.35;
+          vec2 p = vec2(position.x + uOffsetX, position.y + uOffsetZ);
 
-          /* Base swell — broad, slow, multi-directional chop */
-          float swell = sin(position.x * 0.12 + slowClock) * uAmplitude * 0.7
-                      + sin(position.y * 0.10 + slowClock * 0.75) * uAmplitude * 0.5
-                      + sin((position.x - position.y) * 0.07 + slowClock * 0.45) * uAmplitude * 0.3;
+          /* Four swell layers at fixed, arbitrary (non-heading-tied)
+             angles and frequencies — this is what gives "big swells
+             moving in random directions" instead of one uniform
+             directional pattern. */
+          vec2 p1 = rot(p, 0.40);   /* ~23 degrees */
+          vec2 p2 = rot(p, 1.24);   /* ~71 degrees */
+          vec2 p3 = rot(p, 2.48);   /* ~142 degrees */
+          vec2 p4 = rot(p, 3.44);   /* ~197 degrees */
 
-          /* Directional ripple layer — rotated into the boat's heading
-             frame so its crests visibly travel from bow to stern,
-             giving a constant readable cue for which way the boat
-             points/moves regardless of camera angle. Faster and
-             tighter than the base swell so it reads as surface
-             texture riding on top of the bigger waves. */
-          float ch = cos(uHeadingRad);
-          float sh = sin(uHeadingRad);
-          float along = position.x * sh + position.y * ch;  /* distance along the heading axis */
-          float across = position.x * ch - position.y * sh; /* distance across it */
-          float dirRipple = sin(along * 0.35 - uTime * 1.8) * uAmplitude * 0.35
-                           + sin(across * 0.5 + uTime * 0.6) * uAmplitude * 0.12;
+          float swell = sin(p1.x * 0.10 + slowClock * 1.0)  * uAmplitude * 0.55
+                      + sin(p2.x * 0.085 + slowClock * 0.8) * uAmplitude * 0.45
+                      + sin(p3.x * 0.13 + slowClock * 0.65) * uAmplitude * 0.35
+                      + sin(p4.x * 0.07 + slowClock * 0.5)  * uAmplitude * 0.3;
 
-          float ripple = swell + dirRipple;
-          vRipple = ripple / max(uAmplitude, 0.0001);
+          vRipple = swell / max(uAmplitude, 0.0001);
 
-          /* Foam shows up on the sharpest/highest crests of the
-             directional ripple specifically, since that's the layer
-             that reads as "moving texture" rather than gentle swell */
-          vFoam = smoothstep(0.55, 0.95, sin(along * 0.35 - uTime * 1.8) * 0.5 + 0.5);
+          /* Foam on the sharpest combined crests, regardless of which
+             layer is contributing most at that point */
+          vFoam = smoothstep(0.6, 0.95, vRipple * 0.5 + 0.5);
 
-          vec3 displaced = vec3(position.x, position.y, ripple);
+          vec3 displaced = vec3(position.x, position.y, swell);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
         }
       `,
@@ -414,9 +430,28 @@
     /* Bigger cartoon-style swell amplitude than a realistic ocean */
     waterUniforms.uAmplitude.value = Math.min(2.6, (waveHeightFt || 1) * 0.42);
     waterUniforms.uTime.value = waveClock;
-    if (currentHeadingDeg != null) {
-      waterUniforms.uHeadingRad.value = (currentHeadingDeg * Math.PI) / 180;
+
+    /* Motion illusion: slide the swell pattern's sampling position
+       opposite the boat's real travel direction, at a rate scaled to
+       its actual speed. Since the boat never literally translates in
+       this scene, this scrolling-texture trick is what sells "we are
+       moving forward" — slower boat speed reads as slower-flowing
+       water, faster speed as faster-flowing, independent of the
+       swells' own random (not heading-tied) shape. */
+    const s = window.OSHelm3DState;
+    const speedKt = (s && s.speedKt) || 0;
+    if (currentHeadingDeg != null && speedKt > 0.05) {
+      const headingRad = (currentHeadingDeg * Math.PI) / 180;
+      /* World-units-per-knot-per-frame, tuned to roughly match the
+         wake trail's own speed-to-distance scale elsewhere in this
+         file, so the water's apparent flow rate feels consistent
+         with how fast the boat visibly covers ground */
+      const moveRate = speedKt * 0.035;
+      waterOffsetX += Math.sin(headingRad) * moveRate;
+      waterOffsetZ += Math.cos(headingRad) * moveRate;
     }
+    waterUniforms.uOffsetX.value = waterOffsetX;
+    waterUniforms.uOffsetZ.value = waterOffsetZ;
   }
 
   /* ---------------------------------------------------------------
@@ -1443,8 +1478,17 @@
 
   function updateWindLines(windSpeedKt) {
     if (!windLinesGroup) return;
-    const rounded = Math.round(windSpeedKt);
-    windStreakSpeed = windSpeedKt;
+    /* Use whichever of true wind or apparent wind is actually faster
+       — apparent wind is often stronger on a beat, true wind dominates
+       running downwind; using the max gives the most visually
+       accurate (and most dramatic, per request) streak speed. */
+    const s = window.OSHelm3DState || {};
+    const trueSpeed = (typeof windSpeedKt === "number" ? windSpeedKt : s.windSpeedKt) || 0;
+    const apparentSpeed = s.apparentWindSpeedKt || 0;
+    const effectiveSpeed = Math.max(trueSpeed, apparentSpeed);
+
+    const rounded = Math.round(effectiveSpeed);
+    windStreakSpeed = effectiveSpeed;
     if (rounded === lastWindLineSpeedKt) return; /* avoid rebuilding every frame */
     lastWindLineSpeedKt = rounded;
 
@@ -1453,19 +1497,23 @@
       windLinesGroup.remove(child);
     }
 
-    const count = Math.max(10, Math.min(50, Math.round(10 + windSpeedKt * 1.8)));
-    const length = Math.max(0.8, Math.min(3.2, 0.8 + windSpeedKt * 0.1));
-    const thickness = Math.max(0.04, Math.min(0.11, 0.04 + windSpeedKt * 0.0035));
+    /* Longer streaks, spanning from just above the water up to roughly
+       cloud altitude, scattered through that whole vertical range so
+       wind reads as filling the sky, not just a thin band near the deck */
+    const count = Math.max(16, Math.min(70, Math.round(16 + effectiveSpeed * 2.2)));
+    const length = Math.max(2.5, Math.min(9, 2.5 + effectiveSpeed * 0.3));
+    const thickness = Math.max(0.05, Math.min(0.14, 0.05 + effectiveSpeed * 0.004));
 
     for (let i = 0; i < count; i++) {
       const geo = buildWindStreakGeometry(length, thickness);
       const line = new THREE.Mesh(geo, windStreakMat);
       line.rotation.x = Math.PI / 2; /* lie flat, streaming along Z, tip pointing forward */
-      /* Scatter across a wide area around the boat at varying heights
-         just above the water, so wind reads as an ambient field */
+      /* Scatter across a wide area around the boat, at heights
+         spanning from just above the water up to cloud altitude
+         (clouds sit around y=75-105 — see buildSky) */
       line.position.set(
         (Math.random() - 0.5) * 70,
-        0.3 + Math.random() * 4,
+        0.3 + Math.random() * 95,
         (Math.random() - 0.5) * 70
       );
       line.userData.baseZ = line.position.z;
@@ -1474,21 +1522,23 @@
     }
   }
 
-  /* Streams each wind line along the wind direction over time,
-     wrapping back around so the field feels continuous */
+  /* Streams each wind line along the FASTER of true/apparent wind's
+     direction over time, wrapping back around so the field feels
+     continuous. Re-orients every frame (cheap — just a rotation
+     write) since apparent wind direction can change quickly as the
+     boat's heading/speed change, unlike the rebuild-on-speed-change
+     logic above which is intentionally throttled. */
   function animateWindLines(elapsedFactor) {
     if (!windLinesGroup) return;
-    /* Orient the whole field to blow toward where the wind is actually
-       going (windDeg is the compass direction it's coming FROM, so it
-       blows toward windDeg+180). This was previously fixed along a
-       single world axis regardless of real wind direction. */
-    if (window.OSHelm3DState && typeof window.OSHelm3DState.windDeg === "number") {
-      const towardDeg = (window.OSHelm3DState.windDeg + 180) % 360;
-      /* Same sign convention as the boat's heading rotation below
-         (negative) — using the opposite sign here previously made
-         the wind spin the wrong way relative to the boat, which is
-         what caused it to visually disagree with the real forecast
-         direction. */
+    const s = window.OSHelm3DState;
+    if (s && typeof s.windDeg === "number") {
+      const trueSpeed = s.windSpeedKt || 0;
+      const apparentSpeed = s.apparentWindSpeedKt || 0;
+      const useApparent = apparentSpeed > trueSpeed && typeof s.apparentWindDeg === "number";
+      const sourceDeg = useApparent ? s.apparentWindDeg : s.windDeg;
+
+      const towardDeg = (sourceDeg + 180) % 360;
+      /* Same sign convention as the boat's heading rotation (negative) */
       windLinesGroup.rotation.y = -(towardDeg * Math.PI) / 180;
     }
     windLinesGroup.children.forEach((line) => {
@@ -1634,7 +1684,6 @@
       updateBoom(s.boomAngleDeg || 0);
       updateHeadsailReef(s.isSailing ? (s.jibFurlPct != null ? s.jibFurlPct : 100) : 0); /* 0 = fully down, not sailing */
       updateSpinnaker(s.spinnakerFurlPct || 0, !!s.isSailing && !!s.isDownwind);
-      updateWindLines(s.windSpeedKt || 0);
 
       /* Sails visible only while sailing_active. Mainsail now animates
          real luff/fill across its whole surface instead of a single
