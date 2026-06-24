@@ -554,8 +554,15 @@
              why no veins were visible at all. This is the standard
              fix for voronoi edge detection. */
           float edgeDist = secondMinDist - minDist;
-          float vein = smoothstep(0.0, 0.08, edgeDist);
-          vec3 color = mix(uVeinColor, cellColor, vein);
+          /* Softer, wider transition than before (0.0-0.08 was a
+             sharp crisp line) so the vein fades in/out gradually
+             instead of a hard bright crack */
+          float vein = smoothstep(0.0, 0.22, edgeDist);
+          /* Vein color itself is dimmed toward the cell's own color
+             rather than pure bright white, so even at full vein
+             strength it reads as a faded seam, not a glowing line */
+          vec3 dimVeinColor = mix(uVeinColor, cellColor, 0.45);
+          vec3 color = mix(dimVeinColor, cellColor, vein);
 
           gl_FragColor = vec4(color, 0.92);
         }
@@ -806,6 +813,7 @@
       hullWidth: 2.1,         /* full beam, port to starboard */
       freeboard: 1.0,         /* topsides height above the waterline (deck height) */
       depth: 2.1,             /* how far the hull extends below the waterline */
+      waterline: 0,           /* the boat's resting vertical position relative to the true water surface (y=0) -- replaces the old dev-only buoyancy offset, now a real saved part of the design */
       cabinType: "trunk",     /* trunk | flush | pilothouse */
       cabinLength: 2.7,
       cabinWidth: 1.7,
@@ -1069,7 +1077,7 @@
     boatGroup.add(headsailGroup);
 
     const headsailHeight = forestayLen; /* head now reaches all the way to the masthead, per request */
-    const headsailFoot = 3.3; /* how far the clew extends forward/out from the luff, at the foot */
+    const headsailFoot = -3.3; /* negative = clew swings aft instead of forward, per request */
     const headsailGeo = new THREE.BufferGeometry();
     const headsailVerts = new Float32Array([
       0, 0, 0,                 /* tack, at the headsailGroup origin (forestay/bow attachment) */
@@ -1758,10 +1766,15 @@
      than a luffing one in light wind. Pitch/roll comes from wave
      height. Both are smoothed so the motion feels organic, not jumpy.
      --------------------------------------------------------------- */
-  function computeTargetHeel(windSpeedKt, trimFactor, pointOfSailFactor, isSailing) {
+  function computeTargetHeel(windSpeedKt, trimFactor, pointOfSailFactor, isSailing, ratedWindKt) {
     if (!isSailing) return 0;
-    const windLoad = Math.min(1, windSpeedKt / 20); /* normalize ~20kt as "a lot" */
-    const heelMax = 18; /* degrees, stylized not exact */
+    /* Scales from 0° at zero wind up to 30° (max leeward heel) right
+       at the boat's actual rated wind speed -- previously this was
+       normalized against a fixed, boat-agnostic 20kt assumption with
+       an 18° cap, disconnected from each boat's real rated_wind_mph. */
+    const effectiveRatedWind = ratedWindKt || 13; /* ~15mph in knots, fallback if not provided */
+    const windLoad = Math.min(1, windSpeedKt / effectiveRatedWind);
+    const heelMax = 30; /* degrees, at/above rated wind */
     return windLoad * trimFactor * pointOfSailFactor * heelMax;
   }
 
@@ -1838,7 +1851,7 @@
       const headingAlpha = 1 - Math.exp(-dt / HEADING_TIME_CONSTANT);
       const waveMotionAlpha = 1 - Math.exp(-dt / WAVE_MOTION_TIME_CONSTANT);
 
-      const targetHeel = computeTargetHeel(s.windSpeedKt, s.trimFactor, s.pointOfSailFactor, s.isSailing);
+      const targetHeel = computeTargetHeel(s.windSpeedKt, s.trimFactor, s.pointOfSailFactor, s.isSailing, s.ratedWindKt);
       currentHeelDeg += (targetHeel - currentHeelDeg) * heelAlpha;
 
       /* Gentle idle rocking even with sails down / calm water — a
@@ -1909,8 +1922,16 @@
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
-        const buoyancyOffset = (window.OSDevBuoyancyOffset != null) ? window.OSDevBuoyancyOffset : 0.3;
-        boatGroup.position.y = buoyancyOffset + currentWaveBobY; /* rides the actual swell height at the hull, smoothed rather than applied raw */
+        /* The boat's resting position is now its own real, saved
+           waterline value (currentBoatDNA.waterline) instead of a
+           disconnected dev-only global offset. The actual vertical
+           position is clamped to a tight band around that line so
+           big swells rock the boat without ever letting it fly above
+           or sink fully below the water surface. */
+        const waterlineY = (currentBoatDNA && currentBoatDNA.waterline != null) ? currentBoatDNA.waterline : 0;
+        const maxBobRange = 0.6; /* how far above/below the waterline the boat is allowed to ride */
+        const clampedBob = Math.max(-maxBobRange, Math.min(maxBobRange, currentWaveBobY));
+        boatGroup.position.y = waterlineY + clampedBob;
       }
 
       updateBoom(s.boomAngleDeg || 0);

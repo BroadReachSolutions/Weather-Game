@@ -625,6 +625,7 @@
       windSpeedKt,
       apparentWindDeg,
       apparentWindSpeedKt,
+      ratedWindKt: OS.boat ? (OS.boat.rated_wind_mph || 15) * 0.868976 : 15 * 0.868976,
       trimFactor: trim.pct / 100,
       pointOfSailFactor: pointOfSailFactorMap[pos.name] != null ? pointOfSailFactorMap[pos.name] : 0,
       boomAngleDeg: currentBoomAngle,
