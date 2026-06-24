@@ -385,7 +385,7 @@
     uDeepColor: { value: new THREE.Color(0x1565c0) },
     uLightColor: { value: new THREE.Color(0x4fa8e8) },
     uVeinColor: { value: new THREE.Color(0xeaf6ff) },
-    uCellScale: { value: 0.16 }
+    uCellScale: { value: 0.05 }
   };
 
   /* Accumulated sampling offset, in world units — shifted each frame
@@ -460,6 +460,9 @@
           p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
           return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
         }
+        float hash1(vec2 p) {
+          return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453123);
+        }
 
         void main() {
           vec2 uv = vWorldXZ * uCellScale;
@@ -467,28 +470,38 @@
           vec2 frac = fract(uv);
 
           float minDist = 8.0;
+          vec2 nearestCell = cell;
           for (int y = -1; y <= 1; y++) {
             for (int x = -1; x <= 1; x++) {
               vec2 neighbor = vec2(float(x), float(y));
               vec2 point = hash2(cell + neighbor) * 0.5 + 0.5;
               vec2 diff = neighbor + point - frac;
               float dist = length(diff);
-              minDist = min(minDist, dist);
+              if (dist < minDist) {
+                minDist = dist;
+                nearestCell = cell + neighbor;
+              }
             }
           }
 
-          /* Color the cell interior by wave height (light on crests,
-             deep on troughs — real, visible facet shading rather than
-             a flat blend, since vHeight comes from real displaced
-             geometry per-vertex) */
-          float t = clamp((vHeight + 1.0) / 2.0, 0.0, 1.0);
-          vec3 cellColor = mix(uDeepColor, uLightColor, t);
+          /* Mostly uniform mid-blue, like the reference — only a
+             gentle per-cell tone variation (each cell gets a slightly
+             different fixed shade via its own hash, not tied to wave
+             height) plus a faint wave-height tint so swells still
+             read a little, without the strong light/dark gradient
+             that made the previous version look unlike the reference. */
+          float cellShade = hash1(nearestCell);
+          vec3 baseColor = mix(uDeepColor, uLightColor, cellShade * 0.35);
+          float heightTint = clamp(vHeight * 0.12, -0.12, 0.12);
+          vec3 cellColor = baseColor + heightTint;
 
-          /* Bright white vein right at the cell boundary */
-          float vein = smoothstep(0.0, 0.06, minDist);
+          /* Bold, crisp white crack right at the cell boundary —
+             wider and sharper than before to match the reference's
+             bright distinct veins instead of a thin subtle line */
+          float vein = smoothstep(0.0, 0.16, minDist);
           vec3 color = mix(uVeinColor, cellColor, vein);
 
-          gl_FragColor = vec4(color, 0.88);
+          gl_FragColor = vec4(color, 0.92);
         }
       `
     });
@@ -974,18 +987,42 @@
     sailMesh.userData.basePositions = mainsailPositions.slice(); /* untouched rest shape, used each frame to compute displacement from */
     boomGroup.add(sailMesh); /* parented to boomGroup so it swings with the boom but stays mast-attached */
 
-    /* Headsail (jib) — a roller-furling jib. Tack sits above the
-       cabin top so it clears over it; height scales with mast height. */
+    /* Headsail (jib) — a roller-furling jib whose luff runs along the
+       REAL forestay line (bow tack at deck level up to the masthead),
+       matching the actual rigging instead of floating at an
+       unrelated position above the cabin. headsailGroup's origin
+       sits at the tack (the forestay's bow attachment point), with
+       the group itself oriented along the forestay's exact direction
+       so furling (a rotation around the local Y/luff axis below) wraps
+       the sail up around that real line, like a real roller furler. */
+    const forestayTackX = mastX, forestayTackZ = bowZ * 0.976, forestayTackY = deckY;
+    const forestayHeadX = mastX, forestayHeadZ = mastZ, forestayHeadY = mastBaseY + d.mastHeight;
+    const forestayDX = forestayHeadX - forestayTackX;
+    const forestayDY = forestayHeadY - forestayTackY;
+    const forestayDZ = forestayHeadZ - forestayTackZ;
+    const forestayLen = Math.sqrt(forestayDX * forestayDX + forestayDY * forestayDY + forestayDZ * forestayDZ);
+
     headsailGroup = new THREE.Group();
-    headsailGroup.position.set(mastX, deckY + cabinWallHeight + 0.45, mastZ);
+    headsailGroup.position.set(forestayTackX, forestayTackY, forestayTackZ);
+    /* Orient the group so its local +Y axis points exactly along the
+       real forestay (tack to masthead) — built directly from the
+       forestay's own direction vector via setFromUnitVectors, rather
+       than a lookAt+rotate combo (which is easy to get backwards
+       about which axis ends up pointing where). This makes the luff
+       (built along local Y below) sit exactly on the real rigging
+       line, and gives furling a real, unambiguous luff axis to wrap
+       around. */
+    const forestayDir = new THREE.Vector3(forestayDX, forestayDY, forestayDZ).normalize();
+    headsailGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), forestayDir);
     boatGroup.add(headsailGroup);
 
-    const headsailHeight = Math.max(1.5, d.mastHeight * 0.55);
+    const headsailHeight = Math.min(forestayLen * 0.85, Math.max(1.5, d.mastHeight * 0.55));
+    const headsailFoot = 3.3; /* how far the clew extends forward/out from the luff, at the foot */
     const headsailGeo = new THREE.BufferGeometry();
     const headsailVerts = new Float32Array([
-      0, 0, 0,                 /* tack, at the headsailGroup origin */
-      0, headsailHeight, 0,    /* head, up near the masthead */
-      0, 0, 3.3                /* clew, forward toward the bow */
+      0, 0, 0,                 /* tack, at the headsailGroup origin (forestay/bow attachment) */
+      0, headsailHeight, 0,    /* head, up along the luff toward the masthead */
+      0, 0, headsailFoot       /* clew, out from the foot (local Z, perpendicular-ish to the luff) */
     ]);
     headsailGeo.setAttribute("position", new THREE.BufferAttribute(headsailVerts, 3));
     headsailGeo.setIndex([0, 1, 2]);
