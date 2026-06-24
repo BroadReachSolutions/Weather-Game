@@ -626,8 +626,12 @@
       speedKt: boatSpeedKt,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
-         feed on the client */
-      waveHeightFt: Math.max(0.5, (windSpeedKt / 10) * 1.8)
+         feed on the client -- unless the dev console has an active
+         swell-height override, in which case that wins outright for
+         testing/tuning purposes. */
+      waveHeightFt: (window.OSDevSwellOverride && window.OSDevSwellOverride.active)
+        ? window.OSDevSwellOverride.heightFt
+        : Math.max(0.5, (windSpeedKt / 10) * 1.8)
     });
   }
 

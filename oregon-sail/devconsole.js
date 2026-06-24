@@ -638,6 +638,7 @@
   function renderWeatherTab() {
     const content = document.getElementById("osDevTabContent");
     const override = window.OSDevWeatherOverride || { active: false, speedMph: 15, dirDeg: 270 };
+    const swellOverride = window.OSDevSwellOverride || { active: false, heightFt: 3 };
 
     content.innerHTML = `
       <div class="osDevSection">
@@ -652,6 +653,21 @@
           <button class="osDevBtn" id="osDevApplyWeatherBtn">Apply</button>
         </div>
       </div>
+
+      <div class="osDevSection">
+        <div class="osDevSectionHeader"><span>Swell / Wave Height Override</span></div>
+        <p class="osDevHint">Normally swell height is just derived from wind speed (windSpeedKt / 10 * 1.8 ft). Use this to set it directly instead, for tuning how big the rolling swells in the Helm view look/feel independent of current wind.</p>
+        <div class="osDevFormGrid">
+          <label class="osDevCheckboxLabel"><input type="checkbox" id="dsSwellActive" ${swellOverride.active ? "checked" : ""}> Override active</label>
+          <label class="osDevFullWidth">
+            Swell Height (ft) <span class="osDevSliderVal" id="dsSwellVal">${swellOverride.heightFt}</span>
+            <input type="range" id="dsSwellHeight" min="0" max="15" step="0.5" value="${swellOverride.heightFt}">
+          </label>
+        </div>
+        <div class="osDevFormActions">
+          <button class="osDevBtn" id="osDevApplySwellBtn">Apply</button>
+        </div>
+      </div>
     `;
 
     document.getElementById("osDevApplyWeatherBtn").addEventListener("click", () => {
@@ -663,6 +679,21 @@
       logEvent("info", "Weather override " + (window.OSDevWeatherOverride.active ? "enabled" : "disabled") +
         ` (${window.OSDevWeatherOverride.speedMph}mph from ${window.OSDevWeatherOverride.dirDeg}°)`);
       alert("Weather override updated.");
+    });
+
+    const swellSlider = document.getElementById("dsSwellHeight");
+    swellSlider.addEventListener("input", () => {
+      document.getElementById("dsSwellVal").textContent = swellSlider.value;
+    });
+
+    document.getElementById("osDevApplySwellBtn").addEventListener("click", () => {
+      window.OSDevSwellOverride = {
+        active: document.getElementById("dsSwellActive").checked,
+        heightFt: parseFloat(swellSlider.value) || 3
+      };
+      logEvent("info", "Swell override " + (window.OSDevSwellOverride.active ? "enabled" : "disabled") +
+        ` (${window.OSDevSwellOverride.heightFt}ft)`);
+      alert("Swell override updated.");
     });
   }
 

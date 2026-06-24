@@ -428,7 +428,7 @@
   function animateWater(waveHeightFt) {
     if (!waterMesh) return;
     /* Bigger cartoon-style swell amplitude than a realistic ocean */
-    waterUniforms.uAmplitude.value = Math.min(2.6, (waveHeightFt || 1) * 0.42);
+    waterUniforms.uAmplitude.value = Math.min(3.5, (waveHeightFt || 1) * 0.65);
     waterUniforms.uTime.value = waveClock;
 
     /* Motion illusion: slide the swell pattern's sampling position
@@ -441,11 +441,12 @@
     const s = window.OSHelm3DState;
     const speedKt = (s && s.speedKt) || 0;
     if (currentHeadingDeg != null && speedKt > 0.05) {
-      const headingRad = (currentHeadingDeg * Math.PI) / 180;
-      /* World-units-per-knot-per-frame, tuned to roughly match the
-         wake trail's own speed-to-distance scale elsewhere in this
-         file, so the water's apparent flow rate feels consistent
-         with how fast the boat visibly covers ground */
+      /* Same sign convention as boatGroup's own visual rotation
+         (-heading, see the rotation.y assignment in tick()) -- using
+         the opposite (raw, un-negated) heading here made the water
+         appear to flow backwards relative to what the camera actually
+         sees, since the boat itself is visually rotated by -heading. */
+      const headingRad = -(currentHeadingDeg * Math.PI) / 180;
       const moveRate = speedKt * 0.035;
       waterOffsetX += Math.sin(headingRad) * moveRate;
       waterOffsetZ += Math.cos(headingRad) * moveRate;
@@ -1542,7 +1543,7 @@
       windLinesGroup.rotation.y = -(towardDeg * Math.PI) / 180;
     }
     windLinesGroup.children.forEach((line) => {
-      line.position.z -= windStreakSpeed * 0.01 * elapsedFactor;
+      line.position.z -= windStreakSpeed * 0.025 * elapsedFactor; /* 2.5x faster than before (was 0.01) */
       if (line.position.z < -40) line.position.z = 40;
     });
   }
@@ -1568,7 +1569,7 @@
     return windLoad * trimFactor * pointOfSailFactor * heelMax;
   }
 
-  const TARGET_FPS = 30;
+  const TARGET_FPS = 60; /* raised from 30 -- the lower cap was causing visible stutter, especially in wind particle motion */
   const FRAME_BUDGET_MS = 1000 / TARGET_FPS;
   let lastFrameTime = 0;
 
@@ -1583,17 +1584,17 @@
     if (now - lastFrameTime < FRAME_BUDGET_MS) return;
     lastFrameTime = now;
 
-    waveClock += 0.04; /* doubled from 0.02 since this now runs at 30fps (throttled) instead of 60fps, keeping the same real-time speed */
+    waveClock += 0.02; /* back to matching 60fps real-time rate (was 0.04 for the 30fps cap) */
 
     const waveHeightFt = window.OSHelm3DState ? window.OSHelm3DState.waveHeightFt : 1;
     animateWater(waveHeightFt);
     animateWindLines(1);
     animateSky(1);
     animateDayNight();
-    animateWildlife(0.033); /* matches the real ~33ms frame budget at 30fps now, not a 60fps assumption */
+    animateWildlife(0.0167); /* matches the real ~16.7ms frame budget at 60fps */
     if (window.OSHelm3DState) {
       const speedKt = window.OSHelm3DState.speedKt || 0;
-      recordWakePoint(currentHeadingDeg || window.OSHelm3DState.heading || 0, speedKt, 0.033);
+      recordWakePoint(currentHeadingDeg || window.OSHelm3DState.heading || 0, speedKt, 0.0167);
       if (bowWaveMesh) {
         const t = Math.min(1, Math.max(0, speedKt) / 6);
         bowWaveMesh.visible = speedKt > 0.5;
@@ -1601,7 +1602,7 @@
         bowWaveMesh.material.opacity = 0.35 + t * 0.45;
       }
     }
-    updateWakeTrail(0.033);
+    updateWakeTrail(0.0167);
     updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
     if (window.OSHelm3DState) {
