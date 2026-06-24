@@ -654,6 +654,14 @@
   /* ---------------------------------------------------------------
      WEATHER TAB — override wind speed/direction for testing
      --------------------------------------------------------------- */
+  /* Formats a 0-23.9 hour value as a readable HH:MM string, for the
+     day/night clock override slider's live label. */
+  function formatClockHour(hourFloat) {
+    const h = Math.floor(hourFloat) % 24;
+    const m = Math.round((hourFloat - Math.floor(hourFloat)) * 60);
+    return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+  }
+
   function renderWeatherTab() {
     const content = document.getElementById("osDevTabContent");
     const override = window.OSDevWeatherOverride || { active: false, speedMph: 15, dirDeg: 270 };
@@ -687,6 +695,21 @@
           <button class="osDevBtn" id="osDevApplySwellBtn">Apply</button>
         </div>
       </div>
+
+      <div class="osDevSection">
+        <div class="osDevSectionHeader"><span>Day / Night Clock Override</span></div>
+        <p class="osDevHint">The day/night cycle (sky color, sun/moon position, stars) normally follows your real local clock. Use this to jump straight to any time of day for testing, instead of waiting for real time to pass.</p>
+        <div class="osDevFormGrid">
+          <label class="osDevCheckboxLabel"><input type="checkbox" id="dsClockActive" ${window.OSDevClockOverride != null ? "checked" : ""}> Override active</label>
+          <label class="osDevFullWidth">
+            Time of Day <span class="osDevSliderVal" id="dsClockVal">${formatClockHour(window.OSDevClockOverride != null ? window.OSDevClockOverride : 12)}</span>
+            <input type="range" id="dsClockHour" min="0" max="23.9" step="0.1" value="${window.OSDevClockOverride != null ? window.OSDevClockOverride : 12}">
+          </label>
+        </div>
+        <div class="osDevFormActions">
+          <button class="osDevBtn" id="osDevApplyClockBtn">Apply</button>
+        </div>
+      </div>
     `;
 
     document.getElementById("osDevApplyWeatherBtn").addEventListener("click", () => {
@@ -713,6 +736,18 @@
       logEvent("info", "Swell override " + (window.OSDevSwellOverride.active ? "enabled" : "disabled") +
         ` (${window.OSDevSwellOverride.heightFt}ft)`);
       alert("Swell override updated.");
+    });
+
+    const clockSlider = document.getElementById("dsClockHour");
+    clockSlider.addEventListener("input", () => {
+      document.getElementById("dsClockVal").textContent = formatClockHour(parseFloat(clockSlider.value));
+    });
+
+    document.getElementById("osDevApplyClockBtn").addEventListener("click", () => {
+      const active = document.getElementById("dsClockActive").checked;
+      window.OSDevClockOverride = active ? parseFloat(clockSlider.value) : null;
+      logEvent("info", "Day/night clock override " + (active ? "enabled at " + formatClockHour(parseFloat(clockSlider.value)) : "disabled (following real time again)"));
+      alert("Clock override updated.");
     });
   }
 

@@ -214,24 +214,56 @@
 
   function buildDayNightSky() {
     /* Starfield — a sprite-point cloud on a large sphere, hidden by
-       day, fading in as the sun sets */
-    const starCount = 600;
+       day, fading in as the sun sets. Increased density and added
+       per-star size variation so the night sky reads as a real
+       starfield rather than a sparse scatter. */
+    const starCount = 1400;
     const starPositions = new Float32Array(starCount * 3);
+    const starSizes = new Float32Array(starCount);
     for (let i = 0; i < starCount; i++) {
       /* Random point on a large sphere above the horizon */
       const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI * 0.45; /* keep them in the upper sky */
-      const r = 280;
+      const phi = Math.random() * Math.PI * 0.48; /* keep them in the upper sky */
+      const r = 270; /* just inside the skydome's own radius (280) so stars sit right at its surface */
       starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       starPositions[i * 3 + 1] = r * Math.cos(phi) + 20;
       starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+      starSizes[i] = 0.8 + Math.random() * 2.2; /* most stars small/dim, a few bigger/brighter */
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
-    const starMat = new THREE.PointsMaterial({
-      color: 0xffffff, size: 1.6, transparent: true, opacity: 0, depthWrite: false
+    starGeo.setAttribute("size", new THREE.BufferAttribute(starSizes, 1));
+
+    /* PointsMaterial only supports a single global size, not per-
+       vertex sizes from a buffer attribute -- using a small custom
+       shader instead so the size variation set above actually has
+       an effect (most stars small/dim, a few bigger/brighter). */
+    const starOpacityUniform = { value: 0 };
+    const starMat = new THREE.ShaderMaterial({
+      uniforms: { uOpacity: starOpacityUniform },
+      transparent: true,
+      depthWrite: false,
+      vertexShader: `
+        attribute float size;
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform float uOpacity;
+        void main() {
+          /* Soft round dot instead of a square point sprite */
+          float d = length(gl_PointCoord - vec2(0.5));
+          if (d > 0.5) discard;
+          float edge = smoothstep(0.5, 0.1, d);
+          gl_FragColor = vec4(1.0, 1.0, 1.0, uOpacity * edge);
+        }
+      `
     });
     starsMesh = new THREE.Points(starGeo, starMat);
+    starsMesh.userData.opacityUniform = starOpacityUniform;
     scene.add(starsMesh);
 
     /* Moon — a simple pale disc, opposite the sun's arc */
@@ -246,6 +278,12 @@
   /* Returns 0..1 representing time of day (0 = midnight, 0.5 = noon)
      from the player's real local clock. */
   function getTimeOfDayFraction() {
+    /* Dev console override: lets the dev directly set a time of day
+       for testing the day/night cycle without waiting for real time
+       to pass. window.OSDevClockOverride is a 0..24 hour value. */
+    if (window.OSDevClockOverride != null) {
+      return (window.OSDevClockOverride % 24) / 24;
+    }
     const now = new Date();
     return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400;
   }
@@ -282,9 +320,9 @@
     waterUniforms.uLightColor.value.copy(WATER_LIGHT_NIGHT).lerp(WATER_LIGHT_DAY, dayFactor);
 
     /* Stars fade in as the sun drops well below the horizon */
-    if (starsMesh) {
+    if (starsMesh && starsMesh.userData.opacityUniform) {
       const starOpacity = Math.max(0, Math.min(0.9, (0.05 - sunHeight) * 2.5));
-      starsMesh.material.opacity = starOpacity;
+      starsMesh.userData.opacityUniform.value = starOpacity;
     }
 
     /* Moon mirrors the sun's arc on the opposite side of the sky,
@@ -366,10 +404,15 @@
      --------------------------------------------------------------- */
   function buildGroundPlane() {
     const geo = new THREE.PlaneGeometry(900, 900);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x1f5870, transparent: true, opacity: 0.5 });
+    /* Pushed well below the deepest possible swell trough (max
+       amplitude is currently capped around 10, so -15 leaves real
+       margin) and made much more transparent — this plane is just a
+       distant seafloor placeholder, not meant to be a visible surface
+       that pokes through at the waterline like it was before. */
+    const mat = new THREE.MeshBasicMaterial({ color: 0x123a4d, transparent: true, opacity: 0.25 });
     groundMesh = new THREE.Mesh(geo, mat);
     groundMesh.rotation.x = -Math.PI / 2;
-    groundMesh.position.y = -0.05;
+    groundMesh.position.y = -15;
     scene.add(groundMesh);
   }
 
@@ -1667,7 +1710,7 @@
          (clouds sit around y=75-105 — see buildSky) */
       line.position.set(
         (Math.random() - 0.5) * 70,
-        0.3 + Math.random() * 95,
+        4 + Math.random() * 91, /* raised minimum so none spawn close enough to the water to look like scattered dots on its surface */
         (Math.random() - 0.5) * 70
       );
       line.userData.baseZ = line.position.z;
@@ -1739,6 +1782,26 @@
 
     waveClock += 0.02; /* back to matching 60fps real-time rate (was 0.04 for the 30fps cap) */
 
+    /* Heading update moved here, to the very top of tick(), so it
+       runs BEFORE animateWater/animateWindLines/recordWakePoint below
+       -- previously this ran ~50 lines later in the heel/pitch block,
+       which meant water flow direction, wind streak direction, and
+       the wake trail were always one frame behind the boat's actual
+       current heading (or stuck on a stale/null value if that later
+       block hadn't executed yet for any reason). This is the real
+       fix for "water doesn't change direction when I turn." */
+    let turnRateDegPerFrame = 0;
+    if (window.OSHelm3DState && typeof window.OSHelm3DState.heading === "number") {
+      const headingDt = FRAME_BUDGET_MS / 1000;
+      const earlyHeadingAlpha = 1 - Math.exp(-headingDt / HEADING_TIME_CONSTANT);
+      const targetHeadingNow = window.OSHelm3DState.heading;
+      if (currentHeadingDeg == null) currentHeadingDeg = targetHeadingNow;
+      const delta = ((targetHeadingNow - currentHeadingDeg + 540) % 360) - 180;
+      const prevHeading = currentHeadingDeg;
+      currentHeadingDeg = (currentHeadingDeg + delta * earlyHeadingAlpha + 360) % 360;
+      turnRateDegPerFrame = ((currentHeadingDeg - prevHeading + 540) % 360) - 180;
+    }
+
     const waveHeightFt = window.OSHelm3DState ? window.OSHelm3DState.waveHeightFt : 1;
     animateWater(waveHeightFt);
     animateWindLines(1);
@@ -1785,22 +1848,10 @@
       const targetPitch = Math.sin(waveClock * 0.7) * Math.min(14, effectiveWaveHeight * 2.0);
       currentPitchDeg += (targetPitch - currentPitchDeg) * pitchAlpha;
 
-      /* Heading — the boat's actual facing direction. Smoothed with
-         proper angle-wrapping so it doesn't spin the long way around
-         when crossing the 0/360 boundary (e.g. 350° -> 10°). Also
-         tracks the turn RATE (degrees per frame), used below to add
-         a centrifugal lean into turns — a real boat heels into a
-         hard turn the same way a car leans, which the wind/wave heel
-         alone doesn't capture. */
-      let turnRateDegPerFrame = 0;
-      if (typeof s.heading === "number") {
-        if (currentHeadingDeg == null) currentHeadingDeg = s.heading;
-        let delta = ((s.heading - currentHeadingDeg + 540) % 360) - 180;
-        const prevHeading = currentHeadingDeg;
-        currentHeadingDeg = (currentHeadingDeg + delta * headingAlpha + 360) % 360;
-        let frameDelta = ((currentHeadingDeg - prevHeading + 540) % 360) - 180;
-        turnRateDegPerFrame = frameDelta;
-      }
+      /* Heading/turnRateDegPerFrame are now computed once at the very
+         top of tick() (before water/wind/wake animate), not here --
+         see the comment there for why. currentHeelDeg/turnRateDegPerFrame
+         remain in scope from outer closures for use below. */
 
       if (boatGroup) {
         /* Heel to whichever side the wind is actually hitting the
