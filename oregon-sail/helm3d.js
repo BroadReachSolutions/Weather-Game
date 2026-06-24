@@ -45,7 +45,10 @@
     if (!canvasEl || !window.THREE) return false;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x7ec8e3);
+    /* Background is now a gradient skydome (see buildSky/updateSkyGradient)
+       rather than a flat scene.background color, driven by the day/
+       night cycle — no initial color needed here, the dome takes over
+       on the very next frame. */
     scene.fog = new THREE.Fog(0x9fd3e8, 90, 320);
 
     const wrap = document.getElementById("osHelmViewWrap");
@@ -99,7 +102,34 @@
      --------------------------------------------------------------- */
   let cloudGroup = null;
 
+  let skyDomeMesh = null;
+  let skyDomeCanvas = null;
+  let skyDomeCtx = null;
+  let skyDomeTexture = null;
+
   function buildSky() {
+    /* Gradient sky — a large inverted sphere with a canvas-generated
+       texture (deep blue at the top, lighter cyan near the horizon),
+       instead of a single flat background color. Redrawn whenever
+       the day/night cycle's colors change, since a canvas texture
+       needs an explicit redraw + needsUpdate rather than a simple
+       color property like scene.background had. */
+    skyDomeCanvas = document.createElement("canvas");
+    skyDomeCanvas.width = 2;
+    skyDomeCanvas.height = 256;
+    skyDomeCtx = skyDomeCanvas.getContext("2d");
+    skyDomeTexture = new THREE.CanvasTexture(skyDomeCanvas);
+    skyDomeTexture.wrapS = THREE.ClampToEdgeWrapping;
+    skyDomeTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+    const domeGeo = new THREE.SphereGeometry(280, 24, 16);
+    const domeMat = new THREE.MeshBasicMaterial({
+      map: skyDomeTexture, side: THREE.BackSide, depthWrite: false, fog: false
+    });
+    skyDomeMesh = new THREE.Mesh(domeGeo, domeMat);
+    scene.add(skyDomeMesh);
+    scene.background = null; /* the dome itself is now the background, not a flat color */
+
     /* Soft sun glow — a large, dim sprite-like disc high in the sky */
     const sunGeo = new THREE.CircleGeometry(18, 24);
     const sunMat = new THREE.MeshBasicMaterial({
@@ -134,6 +164,19 @@
     scene.add(cloudGroup);
   }
 
+  /* Redraws the skydome's gradient texture between a top color and a
+     horizon color — called from the day/night cycle whenever those
+     colors change, instead of just setting scene.background directly. */
+  function updateSkyGradient(topColor, horizonColor) {
+    if (!skyDomeCtx) return;
+    const grad = skyDomeCtx.createLinearGradient(0, 0, 0, skyDomeCanvas.height);
+    grad.addColorStop(0, `#${topColor.getHexString()}`);
+    grad.addColorStop(1, `#${horizonColor.getHexString()}`);
+    skyDomeCtx.fillStyle = grad;
+    skyDomeCtx.fillRect(0, 0, skyDomeCanvas.width, skyDomeCanvas.height);
+    skyDomeTexture.needsUpdate = true;
+  }
+
   function animateSky(elapsedFactor) {
     if (!cloudGroup) return;
     cloudGroup.children.forEach((cluster) => {
@@ -155,9 +198,12 @@
   let moonMesh = null;
   let nightSkyDome = null;
 
-  const SKY_DAY = new THREE.Color(0x7ec8e3);
+  const SKY_DAY = new THREE.Color(0x2a6fd6);        /* deep blue, top of dome */
+  const SKY_DAY_HORIZON = new THREE.Color(0x9fe0f0); /* lighter cyan near the horizon */
   const SKY_SUNSET = new THREE.Color(0xf2935a);
-  const SKY_NIGHT = new THREE.Color(0x0a1430);
+  const SKY_SUNSET_HORIZON = new THREE.Color(0xffd9a0);
+  const SKY_NIGHT = new THREE.Color(0x040a1f);
+  const SKY_NIGHT_HORIZON = new THREE.Color(0x0a1430);
   const FOG_DAY = new THREE.Color(0x9fd3e8);
   const FOG_SUNSET = new THREE.Color(0xd9a06e);
   const FOG_NIGHT = new THREE.Color(0x0a1430);
@@ -222,8 +268,9 @@
     const sunsetFactor = Math.max(0, 1 - Math.abs(sunHeight) / 0.35) * (1 - Math.abs(dayFactor - 0.5) * 0.3);
 
     const skyColor = SKY_NIGHT.clone().lerp(SKY_DAY, dayFactor).lerp(SKY_SUNSET, sunsetFactor * 0.5);
+    const skyHorizonColor = SKY_NIGHT_HORIZON.clone().lerp(SKY_DAY_HORIZON, dayFactor).lerp(SKY_SUNSET_HORIZON, sunsetFactor * 0.5);
     const fogColor = FOG_NIGHT.clone().lerp(FOG_DAY, dayFactor).lerp(FOG_SUNSET, sunsetFactor * 0.5);
-    scene.background = skyColor;
+    updateSkyGradient(skyColor, skyHorizonColor);
     if (scene.fog) scene.fog.color.copy(fogColor);
 
     sunLight.intensity = 0.15 + dayFactor * 0.9;
@@ -335,9 +382,10 @@
     uAmplitude: { value: 0.4 },
     uOffsetX: { value: 0 },
     uOffsetZ: { value: 0 },
-    uDeepColor: { value: new THREE.Color(0x1f8fd4) },
-    uLightColor: { value: new THREE.Color(0x6bd0f0) },
-    uFoamColor: { value: new THREE.Color(0xf5fcff) }
+    uDeepColor: { value: new THREE.Color(0x1565c0) },
+    uLightColor: { value: new THREE.Color(0x4fa8e8) },
+    uVeinColor: { value: new THREE.Color(0xeaf6ff) },
+    uCellScale: { value: 0.16 }
   };
 
   /* Accumulated sampling offset, in world units — shifted each frame
@@ -353,13 +401,14 @@
   function buildWater() {
     const geo = new THREE.PlaneGeometry(300, 300, 90, 90);
 
-    /* Cartoon-stylized water: big swells from several RANDOM, fixed
-       angles (not tied to heading or any other game state) layered
-       together for a natural, chaotic-looking chop — plus whitecap
-       foam on the sharpest crests. The whole pattern is sampled at
-       (position + uOffset) instead of raw position, so sliding that
-       offset opposite the boat's travel direction each frame creates
-       the illusion of the boat actually moving through the water. */
+    /* Stylized cracked-cell/voronoi water: irregular polygon "ice
+       floe" cells of flat color, separated by bright white veins at
+       the cell boundaries — matching the requested reference look.
+       Swell displacement is unchanged (still real, already verified
+       to dip symmetrically below as well as above zero); per-cell
+       FLAT shading is what makes those dips actually read as
+       depressions instead of a flat color blend, since each facet
+       now visibly tilts with the underlying geometry. */
     const mat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
       transparent: true,
@@ -369,12 +418,9 @@
         uniform float uAmplitude;
         uniform float uOffsetX;
         uniform float uOffsetZ;
-        varying float vRipple;
-        varying float vFoam;
+        varying float vHeight;
+        varying vec2 vWorldXZ;
 
-        /* Rotates a 2D point by a fixed angle (in radians) — used to
-           give each swell layer its own arbitrary, non-aligned
-           direction so the chop looks random rather than uniform. */
         vec2 rot(vec2 p, float a) {
           float c = cos(a), s = sin(a);
           return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
@@ -384,25 +430,18 @@
           float slowClock = uTime * 0.35;
           vec2 p = vec2(position.x + uOffsetX, position.y + uOffsetZ);
 
-          /* Four swell layers at fixed, arbitrary (non-heading-tied)
-             angles and frequencies — this is what gives "big swells
-             moving in random directions" instead of one uniform
-             directional pattern. */
-          vec2 p1 = rot(p, 0.40);   /* ~23 degrees */
-          vec2 p2 = rot(p, 1.24);   /* ~71 degrees */
-          vec2 p3 = rot(p, 2.48);   /* ~142 degrees */
-          vec2 p4 = rot(p, 3.44);   /* ~197 degrees */
+          vec2 p1 = rot(p, 0.40);
+          vec2 p2 = rot(p, 1.24);
+          vec2 p3 = rot(p, 2.48);
+          vec2 p4 = rot(p, 3.44);
 
           float swell = sin(p1.x * 0.10 + slowClock * 1.0)  * uAmplitude * 0.55
                       + sin(p2.x * 0.085 + slowClock * 0.8) * uAmplitude * 0.45
                       + sin(p3.x * 0.13 + slowClock * 0.65) * uAmplitude * 0.35
                       + sin(p4.x * 0.07 + slowClock * 0.5)  * uAmplitude * 0.3;
 
-          vRipple = swell / max(uAmplitude, 0.0001);
-
-          /* Foam on the sharpest combined crests, regardless of which
-             layer is contributing most at that point */
-          vFoam = smoothstep(0.6, 0.95, vRipple * 0.5 + 0.5);
+          vHeight = swell / max(uAmplitude, 0.0001); /* -1..1 */
+          vWorldXZ = p; /* pass the (offset) world position for the cell pattern */
 
           vec3 displaced = vec3(position.x, position.y, swell);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
@@ -411,14 +450,45 @@
       fragmentShader: `
         uniform vec3 uDeepColor;
         uniform vec3 uLightColor;
-        uniform vec3 uFoamColor;
-        varying float vRipple;
-        varying float vFoam;
+        uniform vec3 uVeinColor;
+        uniform float uCellScale;
+        varying float vHeight;
+        varying vec2 vWorldXZ;
+
+        /* Standard hash-based 2D voronoi: jittered grid cell centers */
+        vec2 hash2(vec2 p) {
+          p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+          return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+        }
+
         void main() {
-          float t = clamp((vRipple + 1.0) / 2.0, 0.0, 1.0);
-          vec3 color = mix(uDeepColor, uLightColor, t);
-          color = mix(color, uFoamColor, vFoam * 0.8);
-          gl_FragColor = vec4(color, 0.65);
+          vec2 uv = vWorldXZ * uCellScale;
+          vec2 cell = floor(uv);
+          vec2 frac = fract(uv);
+
+          float minDist = 8.0;
+          for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+              vec2 neighbor = vec2(float(x), float(y));
+              vec2 point = hash2(cell + neighbor) * 0.5 + 0.5;
+              vec2 diff = neighbor + point - frac;
+              float dist = length(diff);
+              minDist = min(minDist, dist);
+            }
+          }
+
+          /* Color the cell interior by wave height (light on crests,
+             deep on troughs — real, visible facet shading rather than
+             a flat blend, since vHeight comes from real displaced
+             geometry per-vertex) */
+          float t = clamp((vHeight + 1.0) / 2.0, 0.0, 1.0);
+          vec3 cellColor = mix(uDeepColor, uLightColor, t);
+
+          /* Bright white vein right at the cell boundary */
+          float vein = smoothstep(0.0, 0.06, minDist);
+          vec3 color = mix(uVeinColor, cellColor, vein);
+
+          gl_FragColor = vec4(color, 0.88);
         }
       `
     });
@@ -669,7 +739,8 @@
       hullType: "cruiser",     /* cruiser | racer | trawler | catamaran */
       hullLength: 6.8,        /* bow point (4.2) to transom (-2.6) */
       hullWidth: 2.1,         /* full beam, port to starboard */
-      freeboard: 2.1,         /* hull depth — waterline to deck */
+      freeboard: 1.0,         /* topsides height above the waterline (deck height) */
+      depth: 2.1,             /* how far the hull extends below the waterline */
       cabinType: "trunk",     /* trunk | flush | pilothouse */
       cabinLength: 2.7,
       cabinWidth: 1.7,
@@ -1142,10 +1213,10 @@
       const hullMat = new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true });
       [-1, 1].forEach((side) => {
         const shape = buildSingleHullShape(bowZ, sternZ, hullHalfWidth, 0.7);
-        const extrude = new THREE.ExtrudeGeometry(shape, { depth: d.freeboard, bevelEnabled: false });
+        const extrude = new THREE.ExtrudeGeometry(shape, { depth: d.depth, bevelEnabled: false });
         extrude.rotateX(Math.PI / 2);
         const mesh = new THREE.Mesh(extrude, hullMat);
-        mesh.position.set(side * spacing / 2, 1.0, 0);
+        mesh.position.set(side * spacing / 2, d.freeboard, 0);
         boatGroup.add(mesh);
         if (side === -1) hullMesh = mesh; /* keep a reference for anything that expects one */
       });
@@ -1154,10 +1225,10 @@
          tying the catamaran together under the cockpit/cabin */
       const bridgeGeo = new THREE.BoxGeometry(spacing - hullHalfWidth, 0.12, d.hullLength * 0.6);
       const bridgeMesh = new THREE.Mesh(bridgeGeo, new THREE.MeshPhongMaterial({ color: d.deckColor }));
-      bridgeMesh.position.set(0, 1.0 - d.freeboard + 0.3, 0);
+      bridgeMesh.position.set(0, d.freeboard - d.depth + 0.3, 0);
       boatGroup.add(bridgeMesh);
 
-      return { bowZ, sternZ, halfWidth: spacing / 2 + hullHalfWidth, deckY: 1.0, hullCount: 2 };
+      return { bowZ, sternZ, halfWidth: spacing / 2 + hullHalfWidth, deckY: d.freeboard, hullCount: 2 };
     }
 
     /* Single-hull types: cruiser (balanced), racer (finer entry, narrower),
@@ -1175,20 +1246,23 @@
     const halfWidth = (d.hullWidth * profile.widthMult) / 2;
 
     const hullShape = buildSingleHullShape(bowZ, sternZ, halfWidth, profile.sharpness);
-    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: d.freeboard, bevelEnabled: false });
+    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: d.depth, bevelEnabled: false });
     hullExtrude.rotateX(Math.PI / 2);
     const hullMat = new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true });
     hullMesh = new THREE.Mesh(hullExtrude, hullMat);
-    /* Raised so most of the hull sits above the waterline (y=0),
-       giving real visible freeboard instead of riding low */
-    hullMesh.position.y = 1.0;
+    /* Deck sits at y = freeboard (raising this is what actually adds
+       visible topsides above the waterline now, instead of the old
+       fixed-at-1.0 deck height); the hull extends DOWN from there by
+       `depth` units, controlling how far it reaches below the
+       waterline independently of freeboard. */
+    hullMesh.position.y = d.freeboard;
     boatGroup.add(hullMesh);
 
     /* ExtrudeGeometry extrudes along local +Z from 0 to depth; our
        rotateX(90°) on the geometry maps local +Z to world -Y, so the
        hull's deck (top edge, local z=0) ends up at hullMesh.position.y
        itself, and the keel/bottom (local z=depth) ends up BELOW that. */
-    return { bowZ, sternZ, halfWidth, deckY: 1.0, hullCount: 1 };
+    return { bowZ, sternZ, halfWidth, deckY: d.freeboard, hullCount: 1 };
   }
 
   /* ---------------------------------------------------------------
@@ -1204,9 +1278,9 @@
          hull rather than one central fin */
       const spacing = (hullInfo.halfWidth) * 1.1;
       [-1, 1].forEach((side) => {
-        const geo = new THREE.BoxGeometry(0.18, d.freeboard * 0.35, 1.4);
+        const geo = new THREE.BoxGeometry(0.18, d.depth * 0.35, 1.4);
         const mesh = new THREE.Mesh(geo, keelMat);
-        mesh.position.set(side * spacing * 0.5, deckY - d.freeboard - geo.parameters.height * 0.5 + 0.1, 0);
+        mesh.position.set(side * spacing * 0.5, deckY - d.depth - geo.parameters.height * 0.5 + 0.1, 0);
         boatGroup.add(mesh);
       });
       return;
@@ -1215,18 +1289,18 @@
     if (type === "full") {
       /* Full keel: longer and shallower, running most of the hull's
          length — classic heavy-cruiser look */
-      const geo = new THREE.BoxGeometry(0.28, d.freeboard * 0.5, hullInfo.bowZ - hullInfo.sternZ - 1.0);
+      const geo = new THREE.BoxGeometry(0.28, d.depth * 0.5, hullInfo.bowZ - hullInfo.sternZ - 1.0);
       const mesh = new THREE.Mesh(geo, keelMat);
-      mesh.position.set(0, deckY - d.freeboard - geo.parameters.height * 0.5 + 0.15, (hullInfo.bowZ + hullInfo.sternZ) / 2 * 0.3);
+      mesh.position.set(0, deckY - d.depth - geo.parameters.height * 0.5 + 0.15, (hullInfo.bowZ + hullInfo.sternZ) / 2 * 0.3);
       boatGroup.add(mesh);
       return;
     }
 
     if (type === "wing") {
       /* Fin keel plus small winglets at the bottom */
-      const finGeo = new THREE.BoxGeometry(0.3, d.freeboard * 0.8, 2);
+      const finGeo = new THREE.BoxGeometry(0.3, d.depth * 0.8, 2);
       const finMesh = new THREE.Mesh(finGeo, keelMat);
-      const finY = deckY - d.freeboard - finGeo.parameters.height * 0.5 + 0.1;
+      const finY = deckY - d.depth - finGeo.parameters.height * 0.5 + 0.1;
       finMesh.position.y = finY;
       boatGroup.add(finMesh);
 
@@ -1238,9 +1312,9 @@
     }
 
     /* Default: fin keel — a single rectangular blade */
-    const keelGeo = new THREE.BoxGeometry(0.3, d.freeboard * 0.8, 2);
+    const keelGeo = new THREE.BoxGeometry(0.3, d.depth * 0.8, 2);
     const keelMesh = new THREE.Mesh(keelGeo, keelMat);
-    keelMesh.position.y = deckY - d.freeboard - keelGeo.parameters.height * 0.5 + 0.1;
+    keelMesh.position.y = deckY - d.depth - keelGeo.parameters.height * 0.5 + 0.1;
     boatGroup.add(keelMesh);
   }
 
@@ -1738,7 +1812,8 @@
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
-        boatGroup.position.y = 0.3 + currentWaveBobY; /* rides the actual swell height at the hull, smoothed rather than applied raw */
+        const buoyancyOffset = (window.OSDevBuoyancyOffset != null) ? window.OSDevBuoyancyOffset : 0.3;
+        boatGroup.position.y = buoyancyOffset + currentWaveBobY; /* rides the actual swell height at the hull, smoothed rather than applied raw */
       }
 
       updateBoom(s.boomAngleDeg || 0);

@@ -340,7 +340,8 @@
   const DESIGNER_FIELDS = [
     { key: "hullLength", label: "Hull Length", min: 4, max: 12, step: 0.1 },
     { key: "hullWidth", label: "Hull Width (Beam)", min: 1.2, max: 4, step: 0.1 },
-    { key: "freeboard", label: "Freeboard Height", min: 0.8, max: 4, step: 0.1 },
+    { key: "freeboard", label: "Freeboard (above water)", min: 0.4, max: 3, step: 0.1 },
+    { key: "depth", label: "Hull Depth (below water)", min: 0.4, max: 3, step: 0.1 },
     { key: "mastHeight", label: "Mast Height", min: 4, max: 16, step: 0.2 },
     { key: "cabinLength", label: "Cabin Length", min: 1, max: 5, step: 0.1 },
     { key: "cabinWidth", label: "Cabin Width", min: 0.8, max: 3, step: 0.1 },
@@ -420,6 +421,15 @@
           <div class="osDevDesignerColors" id="osDevDesignerColors"></div>
         </div>
 
+        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Buoyancy</span></div>
+        <p class="osDevHint">How high or low the boat sits relative to the water surface — raise this if big swells are taking the deck underwater, lower it if the boat looks like it's floating above the water instead of sitting in it. This is a live rendering tweak, not saved with the boat design.</p>
+        <div class="osDevFormGrid">
+          <label class="osDevFullWidth">
+            Float Height <span class="osDevSliderVal" id="dsBuoyancyVal">${(window.OSDevBuoyancyOffset != null ? window.OSDevBuoyancyOffset : 0.3).toFixed(2)}</span>
+            <input type="range" id="dsBuoyancyOffset" min="-1" max="2" step="0.05" value="${window.OSDevBuoyancyOffset != null ? window.OSDevBuoyancyOffset : 0.3}">
+          </label>
+        </div>
+
         <div class="osDevFormActions" style="margin-top:14px;">
           <button class="osDevBtn" id="osDevApplyToMeBtn">Apply to My Boat</button>
           <button class="osDevBtnSecondary" id="osDevSaveAsPresetBtn">Save as New Preset</button>
@@ -456,6 +466,15 @@
         if (!designerDNA.modelUrl) { alert("Enter a model URL first."); return; }
         window.OSHelm3D.rebuildBoat(designerDNA);
         logEvent("info", "Previewing imported model: " + designerDNA.modelUrl);
+      });
+    }
+
+    const buoyancySlider = document.getElementById("dsBuoyancyOffset");
+    if (buoyancySlider) {
+      buoyancySlider.addEventListener("input", () => {
+        const val = parseFloat(buoyancySlider.value);
+        window.OSDevBuoyancyOffset = val;
+        document.getElementById("dsBuoyancyVal").textContent = val.toFixed(2);
       });
     }
 
