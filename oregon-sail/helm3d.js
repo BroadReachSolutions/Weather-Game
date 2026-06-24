@@ -430,17 +430,20 @@
           float slowClock = uTime * 0.35;
           vec2 p = vec2(position.x + uOffsetX, position.y + uOffsetZ);
 
-          vec2 p1 = rot(p, 0.40);
-          vec2 p2 = rot(p, 1.24);
-          vec2 p3 = rot(p, 2.48);
-          vec2 p4 = rot(p, 3.44);
+          /* One DOMINANT low-frequency sine wave along a single fixed
+             direction — this is what gives clean, real rolling-swell
+             dips (a proper sine-wave trough) instead of the previous
+             four-layer chop, which read as choppy noise rather than
+             smooth rolling waves. A second, much smaller/faster layer
+             at a different angle adds natural variation without
+             fighting the primary roll. */
+          vec2 primary = rot(p, 0.0);
+          vec2 secondary = rot(p, 1.1);
 
-          float swell = sin(p1.x * 0.10 + slowClock * 1.0)  * uAmplitude * 0.55
-                      + sin(p2.x * 0.085 + slowClock * 0.8) * uAmplitude * 0.45
-                      + sin(p3.x * 0.13 + slowClock * 0.65) * uAmplitude * 0.35
-                      + sin(p4.x * 0.07 + slowClock * 0.5)  * uAmplitude * 0.3;
+          float swell = sin(primary.x * 0.045 + slowClock * 0.9) * uAmplitude
+                      + sin(secondary.x * 0.11 + slowClock * 1.3) * uAmplitude * 0.22;
 
-          vHeight = swell / max(uAmplitude, 0.0001); /* -1..1 */
+          vHeight = swell / max(uAmplitude * 1.22, 0.0001); /* -1..1, normalized against the combined peak amplitude */
           vWorldXZ = p; /* pass the (offset) world position for the cell pattern */
 
           vec3 displaced = vec3(position.x, position.y, swell);
@@ -470,16 +473,20 @@
           vec2 frac = fract(uv);
 
           float minDist = 8.0;
+          float secondMinDist = 8.0;
           vec2 nearestCell = cell;
-          for (int y = -1; y <= 1; y++) {
-            for (int x = -1; x <= 1; x++) {
+          for (int y = -2; y <= 2; y++) {
+            for (int x = -2; x <= 2; x++) {
               vec2 neighbor = vec2(float(x), float(y));
               vec2 point = hash2(cell + neighbor) * 0.5 + 0.5;
               vec2 diff = neighbor + point - frac;
               float dist = length(diff);
               if (dist < minDist) {
+                secondMinDist = minDist;
                 minDist = dist;
                 nearestCell = cell + neighbor;
+              } else if (dist < secondMinDist) {
+                secondMinDist = dist;
               }
             }
           }
@@ -495,10 +502,16 @@
           float heightTint = clamp(vHeight * 0.12, -0.12, 0.12);
           vec3 cellColor = baseColor + heightTint;
 
-          /* Bold, crisp white crack right at the cell boundary —
-             wider and sharper than before to match the reference's
-             bright distinct veins instead of a thin subtle line */
-          float vein = smoothstep(0.0, 0.16, minDist);
+          /* The real cell boundary is where the distance to the
+             nearest seed and the SECOND-nearest seed are close to
+             equal (the point is roughly equidistant between two
+             cells) — thresholding distance-to-nearest alone (the
+             previous version) only ever lit up right at the seed
+             points themselves, never at the actual edges, which is
+             why no veins were visible at all. This is the standard
+             fix for voronoi edge detection. */
+          float edgeDist = secondMinDist - minDist;
+          float vein = smoothstep(0.0, 0.08, edgeDist);
           vec3 color = mix(uVeinColor, cellColor, vein);
 
           gl_FragColor = vec4(color, 0.92);
@@ -560,15 +573,11 @@
       return x * Math.cos(a) - z * Math.sin(a);
     }
 
-    const p1x = rotX(px, pz, 0.40);
-    const p2x = rotX(px, pz, 1.24);
-    const p3x = rotX(px, pz, 2.48);
-    const p4x = rotX(px, pz, 3.44);
+    const primaryX = rotX(px, pz, 0.0);
+    const secondaryX = rotX(px, pz, 1.1);
 
-    return Math.sin(p1x * 0.10 + slowClock * 1.0) * amplitude * 0.55
-         + Math.sin(p2x * 0.085 + slowClock * 0.8) * amplitude * 0.45
-         + Math.sin(p3x * 0.13 + slowClock * 0.65) * amplitude * 0.35
-         + Math.sin(p4x * 0.07 + slowClock * 0.5) * amplitude * 0.3;
+    return Math.sin(primaryX * 0.045 + slowClock * 0.9) * amplitude
+         + Math.sin(secondaryX * 0.11 + slowClock * 1.3) * amplitude * 0.22;
   }
 
   /* ---------------------------------------------------------------
@@ -1016,7 +1025,7 @@
     headsailGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), forestayDir);
     boatGroup.add(headsailGroup);
 
-    const headsailHeight = Math.min(forestayLen * 0.85, Math.max(1.5, d.mastHeight * 0.55));
+    const headsailHeight = forestayLen; /* head now reaches all the way to the masthead, per request */
     const headsailFoot = 3.3; /* how far the clew extends forward/out from the luff, at the foot */
     const headsailGeo = new THREE.BufferGeometry();
     const headsailVerts = new Float32Array([
@@ -1550,7 +1559,7 @@
     if (!headsailMesh) return;
     const pct = Math.max(0, Math.min(100, jibFurlPct)) / 100;
     headsailMesh.scale.z = pct;
-    headsailMesh.rotation.y = -(1 - pct) * (Math.PI / 2.2); /* wraps toward the other side as it furls */
+    headsailMesh.rotation.y = (1 - pct) * (Math.PI / 2.2); /* opens toward the mast/luff as it furls in, flipped from before */
   }
 
   /* spinnakerFurlPct: 0 (doused, squeezed into its sock at the
