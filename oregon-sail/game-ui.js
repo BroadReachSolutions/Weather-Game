@@ -184,7 +184,13 @@
       beginBtn.textContent = "Setting sail…";
       beginBtn.disabled = true;
 
-      const isDeveloper = captainName.toLowerCase() === "sonic" && vesselName.toLowerCase() === "sonic";
+      /* Two developer-mode triggers: "Sonic"/"Sonic" gets console
+         access AND the 100x speed multiplier (see physics.js, kept
+         for quick playtesting); "Dev"/"Dev" gets console access only,
+         with normal speed/physics, for testing the dev tools
+         themselves without the boat behaving unrealistically. */
+      const isDeveloper = (captainName.toLowerCase() === "sonic" && vesselName.toLowerCase() === "sonic") ||
+                           (captainName.toLowerCase() === "dev" && vesselName.toLowerCase() === "dev");
       const boat = await OS.createBoat({
         captain_name: captainName,
         vessel_name: vesselName,
@@ -266,11 +272,15 @@
 
     startSimulationLoop();
 
-    /* Developer mode — unlocked when captain/vessel are both "Sonic".
-       Backfills the flag for boats created before this column existed
-       too, so returning Sonic/Sonic players don't need to start over. */
-    if (boat.is_developer ||
-        ((boat.captain_name || "").toLowerCase() === "sonic" && (boat.vessel_name || "").toLowerCase() === "sonic")) {
+    /* Developer mode — unlocked when captain/vessel are both "Sonic"
+       (also gets the 100x speed multiplier, see physics.js) or both
+       "Dev" (console access only, normal speed/physics). Backfills
+       the flag for boats created before this column existed too, so
+       returning Sonic/Sonic or Dev/Dev players don't need to start over. */
+    const nameMatchesDeveloper =
+      ((boat.captain_name || "").toLowerCase() === "sonic" && (boat.vessel_name || "").toLowerCase() === "sonic") ||
+      ((boat.captain_name || "").toLowerCase() === "dev" && (boat.vessel_name || "").toLowerCase() === "dev");
+    if (boat.is_developer || nameMatchesDeveloper) {
       if (!boat.is_developer) await OS.setDeveloperFlag(true);
       if (typeof window.OSDevConsole !== "undefined") window.OSDevConsole.init();
     }
