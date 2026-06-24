@@ -25,6 +25,9 @@
 
   let currentHeelDeg = 0;   /* side-to-side tilt from wind force on sails */
   let currentPitchDeg = 0;  /* bow-up/down from waves */
+  let currentWaveRollDeg = 0;   /* smoothed wave-driven roll, eased to avoid per-frame jitter */
+  let currentWavePitchDeg = 0;  /* smoothed wave-driven pitch */
+  let currentWaveBobY = 0;      /* smoothed vertical bob from riding the swell */
   let currentHeadingDeg = null; /* boat's facing direction, null until first state arrives */
   let currentTurnLeanDeg = 0;   /* centrifugal lean into turns */
   let waveClock = 0;
@@ -32,6 +35,7 @@
   const HEEL_TIME_CONSTANT = 0.7;    /* seconds to close most of the heel gap */
   const PITCH_TIME_CONSTANT = 0.5;
   const HEADING_TIME_CONSTANT = 0.65; /* slowed further for a smoother, less abrupt turn — was 0.35 */
+  const WAVE_MOTION_TIME_CONSTANT = 0.35; /* smooths wave-driven roll/pitch/bob so riding the swells reads as fluid motion instead of frame-to-frame jitter */
 
   /* ---------------------------------------------------------------
      SCENE SETUP
@@ -1649,6 +1653,7 @@
       const heelAlpha = 1 - Math.exp(-dt / HEEL_TIME_CONSTANT);
       const pitchAlpha = 1 - Math.exp(-dt / PITCH_TIME_CONSTANT);
       const headingAlpha = 1 - Math.exp(-dt / HEADING_TIME_CONSTANT);
+      const waveMotionAlpha = 1 - Math.exp(-dt / WAVE_MOTION_TIME_CONSTANT);
 
       const targetHeel = computeTargetHeel(s.windSpeedKt, s.trimFactor, s.pointOfSailFactor, s.isSailing);
       currentHeelDeg += (targetHeel - currentHeelDeg) * heelAlpha;
@@ -1705,10 +1710,20 @@
         const heightFwd = sampleSwellHeight(0, sampleDist);
         const heightAft = sampleSwellHeight(0, -sampleDist);
 
-        const realRollDeg = Math.atan2(heightStbd - heightPort, sampleDist * 2) * (180 / Math.PI) * 3.5;
-        const realPitchDeg = Math.atan2(heightFwd - heightAft, sampleDist * 2) * (180 / Math.PI) * 3.5;
-        const waveRollDeg = Math.max(-8, Math.min(8, realRollDeg));
-        const wavePitchDeg = Math.max(-8, Math.min(8, realPitchDeg));
+        const targetWaveRollDeg = Math.max(-8, Math.min(8,
+          Math.atan2(heightStbd - heightPort, sampleDist * 2) * (180 / Math.PI) * 3.5));
+        const targetWavePitchDeg = Math.max(-8, Math.min(8,
+          Math.atan2(heightFwd - heightAft, sampleDist * 2) * (180 / Math.PI) * 3.5));
+        const targetWaveBobY = heightAtBoat * 0.5;
+
+        /* Smoothed toward their targets rather than applied raw every
+           frame — these are slope/derivative values riding on top of
+           an already-oscillating swell function, so without easing
+           any small per-frame timing irregularity reads as visible
+           jitter. This is the fix for the reported stuttering. */
+        currentWaveRollDeg += (targetWaveRollDeg - currentWaveRollDeg) * waveMotionAlpha;
+        currentWavePitchDeg += (targetWavePitchDeg - currentWavePitchDeg) * waveMotionAlpha;
+        currentWaveBobY += (targetWaveBobY - currentWaveBobY) * waveMotionAlpha;
 
         /* Turn lean — a real boat heels INTO a hard turn (centrifugal
            effect), independent of wind heel. turnRateDegPerFrame is
@@ -1721,9 +1736,9 @@
 
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
-        boatGroup.rotation.z = ((currentHeelDeg * heelSign) + waveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
-        boatGroup.rotation.x = (currentPitchDeg * 0.4 + wavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
-        boatGroup.position.y = 0.3 + heightAtBoat * 0.5; /* rides the actual swell height at the hull, not a disconnected sine wave */
+        boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
+        boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
+        boatGroup.position.y = 0.3 + currentWaveBobY; /* rides the actual swell height at the hull, smoothed rather than applied raw */
       }
 
       updateBoom(s.boomAngleDeg || 0);
