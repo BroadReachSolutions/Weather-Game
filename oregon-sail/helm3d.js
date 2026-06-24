@@ -428,7 +428,7 @@
   function animateWater(waveHeightFt) {
     if (!waterMesh) return;
     /* Bigger cartoon-style swell amplitude than a realistic ocean */
-    waterUniforms.uAmplitude.value = Math.min(3.5, (waveHeightFt || 1) * 0.65);
+    waterUniforms.uAmplitude.value = Math.min(10, (waveHeightFt || 1) * 0.583);
     waterUniforms.uTime.value = waveClock;
 
     /* Motion illusion: slide the swell pattern's sampling position
@@ -448,11 +448,40 @@
          sees, since the boat itself is visually rotated by -heading. */
       const headingRad = -(currentHeadingDeg * Math.PI) / 180;
       const moveRate = speedKt * 0.035;
-      waterOffsetX += Math.sin(headingRad) * moveRate;
-      waterOffsetZ += Math.cos(headingRad) * moveRate;
+      waterOffsetX -= Math.sin(headingRad) * moveRate;
+      waterOffsetZ -= Math.cos(headingRad) * moveRate;
     }
     waterUniforms.uOffsetX.value = waterOffsetX;
     waterUniforms.uOffsetZ.value = waterOffsetZ;
+  }
+
+  /* JS port of the water shader's swell formula above — lets the
+     boat sample its OWN real height at its position and actually
+     ride the swells, instead of bobbing on a generic disconnected
+     sine wave (which was the "driving through waves" complaint: the
+     boat's bob and the water's real shape were unrelated oscillators
+     with no connection to each other). Must stay numerically
+     identical to the vertex shader above, or the boat will visibly
+     float above/below the surface it's supposed to be sitting on. */
+  function sampleSwellHeight(worldX, worldZ) {
+    const amplitude = waterUniforms.uAmplitude.value;
+    const slowClock = waveClock * 0.35;
+    const px = worldX + waterUniforms.uOffsetX.value;
+    const pz = worldZ + waterUniforms.uOffsetZ.value;
+
+    function rotX(x, z, a) {
+      return x * Math.cos(a) - z * Math.sin(a);
+    }
+
+    const p1x = rotX(px, pz, 0.40);
+    const p2x = rotX(px, pz, 1.24);
+    const p3x = rotX(px, pz, 2.48);
+    const p4x = rotX(px, pz, 3.44);
+
+    return Math.sin(p1x * 0.10 + slowClock * 1.0) * amplitude * 0.55
+         + Math.sin(p2x * 0.085 + slowClock * 0.8) * amplitude * 0.45
+         + Math.sin(p3x * 0.13 + slowClock * 0.65) * amplitude * 0.35
+         + Math.sin(p4x * 0.07 + slowClock * 0.5) * amplitude * 0.3;
   }
 
   /* ---------------------------------------------------------------
@@ -1661,10 +1690,25 @@
           const relative = ((s.windDeg - s.heading) + 360) % 360;
           heelSign = relative > 180 ? 1 : -1; /* wind on port heels to starboard (-1 here), and vice versa */
         }
-        /* Wave-driven roll, out of phase with pitch so the boat reads
-           as actually riding over 3D swell rather than just nodding
-           fore-aft — combined additively with the wind-driven heel */
-        const waveRollDeg = Math.sin(waveClock * 0.7 + 1.4) * Math.min(6, effectiveWaveHeight * 0.9);
+        /* Real wave-driven roll/pitch — sampled directly from the
+           water's actual swell height at points just to port/
+           starboard and fore/aft of the boat (it sits at world
+           origin in XZ, never translating), instead of a generic
+           sine wave disconnected from the real surface. This is what
+           makes the boat genuinely RIDE the swells rather than drive
+           through them: the deck's height and tilt now reflect what
+           the water is actually doing right under the hull. */
+        const sampleDist = 2.2;
+        const heightAtBoat = sampleSwellHeight(0, 0);
+        const heightPort = sampleSwellHeight(-sampleDist, 0);
+        const heightStbd = sampleSwellHeight(sampleDist, 0);
+        const heightFwd = sampleSwellHeight(0, sampleDist);
+        const heightAft = sampleSwellHeight(0, -sampleDist);
+
+        const realRollDeg = Math.atan2(heightStbd - heightPort, sampleDist * 2) * (180 / Math.PI) * 3.5;
+        const realPitchDeg = Math.atan2(heightFwd - heightAft, sampleDist * 2) * (180 / Math.PI) * 3.5;
+        const waveRollDeg = Math.max(-8, Math.min(8, realRollDeg));
+        const wavePitchDeg = Math.max(-8, Math.min(8, realPitchDeg));
 
         /* Turn lean — a real boat heels INTO a hard turn (centrifugal
            effect), independent of wind heel. turnRateDegPerFrame is
@@ -1678,8 +1722,8 @@
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + waveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
-        boatGroup.rotation.x = (currentPitchDeg * Math.PI) / 180;
-        boatGroup.position.y = 0.3 + Math.sin(waveClock * 0.7) * Math.min(0.9, effectiveWaveHeight * 0.16);
+        boatGroup.rotation.x = (currentPitchDeg * 0.4 + wavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
+        boatGroup.position.y = 0.3 + heightAtBoat * 0.5; /* rides the actual swell height at the hull, not a disconnected sine wave */
       }
 
       updateBoom(s.boomAngleDeg || 0);
