@@ -50,13 +50,13 @@
        rather than a flat scene.background color, driven by the day/
        night cycle — no initial color needed here, the dome takes over
        on the very next frame. */
-    scene.fog = new THREE.Fog(0x9fd3e8, 90, 320);
+    scene.fog = new THREE.Fog(0x9fd3e8, 90, 300); /* fog now reaches out to the full 5nm (300-unit) view radius instead of fading things out well before it */
 
     const wrap = document.getElementById("osHelmViewWrap");
     const w = wrap.clientWidth || 360;
     const h = wrap.clientHeight || 240;
 
-    camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 1000); /* generously larger than the 300-unit (5nm) view radius below */
     camera.position.set(0, 18, 32);
 
     renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
@@ -123,7 +123,7 @@
     skyDomeTexture.wrapS = THREE.ClampToEdgeWrapping;
     skyDomeTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-    const domeGeo = new THREE.SphereGeometry(280, 24, 16);
+    const domeGeo = new THREE.SphereGeometry(450, 24, 16); /* comfortably exceeds the 300-unit (5nm) water radius */
     const domeMat = new THREE.MeshBasicMaterial({
       map: skyDomeTexture, side: THREE.BackSide, depthWrite: false, fog: false
     });
@@ -225,7 +225,7 @@
       /* Random point on a large sphere above the horizon */
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI * 0.48; /* keep them in the upper sky */
-      const r = 270; /* just inside the skydome's own radius (280) so stars sit right at its surface */
+      const r = 440; /* just inside the skydome's own radius (450) so stars sit right at its surface */
       starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       starPositions[i * 3 + 1] = r * Math.cos(phi) + 20;
       starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
@@ -443,7 +443,7 @@
   let waterOffsetZ = 0;
 
   function buildWater() {
-    const geo = new THREE.PlaneGeometry(300, 300, 90, 90);
+    const geo = new THREE.PlaneGeometry(600, 600, 90, 90); /* stretched to a 5nm (300-unit) radius; same 90x90 subdivision count as before, so distant water is lower-resolution rather than costing more to render */
 
     /* Stylized cracked-cell/voronoi water: irregular polygon "ice
        floe" cells of flat color, separated by bright white veins at
