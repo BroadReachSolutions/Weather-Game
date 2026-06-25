@@ -1898,7 +1898,7 @@
           Math.atan2(heightStbd - heightPort, sampleDist * 2) * (180 / Math.PI) * 3.5));
         const targetWavePitchDeg = Math.max(-8, Math.min(8,
           Math.atan2(heightFwd - heightAft, sampleDist * 2) * (180 / Math.PI) * 3.5));
-        const targetWaveBobY = heightAtBoat * 0.5;
+        const targetWaveBobY = heightAtBoat * 0.7; /* raised from 0.5 -- now that the clamp isn't artificially limiting things, the boat can follow more of the real swell height */
 
         /* Smoothed toward their targets rather than applied raw every
            frame — these are slope/derivative values riding on top of
@@ -1922,14 +1922,17 @@
         boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
-        /* The boat's resting position is now its own real, saved
-           waterline value (currentBoatDNA.waterline) instead of a
-           disconnected dev-only global offset. The actual vertical
-           position is clamped to a tight band around that line so
-           big swells rock the boat without ever letting it fly above
-           or sink fully below the water surface. */
+        /* The boat's resting position is its own real, saved
+           waterline value (currentBoatDNA.waterline). The vertical
+           bob is only loosely safety-clamped (not tightly pinned)
+           so the boat genuinely RIDES the real swell height instead
+           of being constrained to a near-fixed position -- the
+           previous 0.6-unit range was far smaller than the actual
+           swell height the water shader can produce at bigger swell
+           settings, which is why the boat looked locked to one
+           height instead of following the waves. */
         const waterlineY = (currentBoatDNA && currentBoatDNA.waterline != null) ? currentBoatDNA.waterline : 0;
-        const maxBobRange = 0.6; /* how far above/below the waterline the boat is allowed to ride */
+        const maxBobRange = 10; /* generous outer safety bound -- covers even the highest swell settings without clipping, not a normal-operation limiter */
         const clampedBob = Math.max(-maxBobRange, Math.min(maxBobRange, currentWaveBobY));
         boatGroup.position.y = waterlineY + clampedBob;
       }
