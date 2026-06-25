@@ -1890,11 +1890,21 @@
            visually disagree with where the wind streaks show the
            wind actually coming from (e.g. while poorly trimmed or
            motor-sailing). relative 0-360, 0=wind dead ahead,
-           >180 = wind from the port side. */
-        let heelSign = -1;
+           0-180=wind hitting the STARBOARD side, 180-360=wind hitting
+           the PORT side.
+
+           Sign was confirmed backwards by working through a concrete
+           example: with our hull's +X=starboard convention,
+           boatGroup.rotation.z follows the standard right-hand rule
+           around +Z, so a POSITIVE rotation.z lifts starboard up
+           (heels toward PORT), and a NEGATIVE rotation.z heels toward
+           STARBOARD. Wind hitting the starboard side (relative 0-180)
+           pushes the boat away from that side, heeling it to PORT --
+           which needs heelSign=+1, not -1 as the code previously had. */
+        let heelSign = 1;
         if (typeof s.heading === "number" && typeof s.windDeg === "number") {
           const relative = ((s.windDeg - s.heading) + 360) % 360;
-          heelSign = relative > 180 ? 1 : -1; /* wind on port heels to starboard (-1 here), and vice versa */
+          heelSign = relative > 180 ? -1 : 1; /* wind on starboard (0-180) heels to port (+1); wind on port (180-360) heels to starboard (-1) */
         }
         /* Real wave-driven roll/pitch — sampled directly from the
            water's actual swell height at points just to port/
