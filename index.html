@@ -615,6 +615,14 @@
         if (devOverrides.compassMapMode) defaults["compassMapMode"] = devOverrides.compassMapMode;
         if (devOverrides.compassStyle) defaults["compassStyle"] = devOverrides.compassStyle;
         if (devOverrides.compassZoom) defaults["compassZoom"] = String(devOverrides.compassZoom);
+        if (devOverrides.defaultTabConfig) {
+          /* Seeds the tab system's whole layout (main tabs, sub-tabs,
+             widget placement/positions/sizes) for brand-new players
+             only -- same protection as every other key below, since
+             this only ever applies if osTabConfig doesn't already
+             exist on this device. */
+          defaults["osTabConfig"] = JSON.stringify(devOverrides.defaultTabConfig);
+        }
       }
 
       Object.keys(defaults).forEach(function (k) {

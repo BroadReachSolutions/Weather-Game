@@ -843,6 +843,19 @@
       </div>
 
       <div class="osDevSection">
+        <div class="osDevSectionHeader"><span>Layout Export / Import</span></div>
+        <p class="osDevHint">Your tab/widget layout (main tabs, sub-tabs, widget placement, positions, and sizes) is saved on this device only, under one config blob. Export it as a file to back it up or move it to another device, or push it as the default new players start with.</p>
+        <div class="osDevFormActions">
+          <button class="osDevBtn" id="osDevExportLayoutBtn">Download My Layout (.json)</button>
+          <button class="osDevBtnSecondary" id="osDevImportLayoutBtn">Upload / Restore Layout</button>
+          <input type="file" id="osDevLayoutFileInput" accept="application/json" style="display:none;">
+        </div>
+        <div class="osDevFormActions" style="margin-top:8px;">
+          <button class="osDevBtn" id="osDevPushDefaultLayoutBtn">Set My Current Layout as New-Player Default</button>
+        </div>
+      </div>
+
+      <div class="osDevSection">
         <div class="osDevSectionHeader"><span>Raw Config (advanced)</span></div>
         <p class="osDevHint">Full JSON for anything not covered above. Editing the friendly fields and saving above also updates these same keys here.</p>
         <textarea id="dcConfigJson" class="osDevJsonEditor" rows="10">${JSON.stringify(config, null, 2)}</textarea>
@@ -883,6 +896,87 @@
         .eq("id", 1);
       if (saveErr) { alert("Save failed: " + saveErr.message); logEvent("error", "UI config save failed: " + saveErr.message); }
       else { logEvent("info", "Global UI config saved."); alert("Saved — will apply to all players on their next load."); }
+    });
+
+    /* Layout export: bundle osTabConfig (the tab system's whole
+       localStorage blob -- main tabs, sub-tabs, widget placement,
+       positions/sizes) into a small versioned envelope and offer it
+       as a downloadable .json file. */
+    document.getElementById("osDevExportLayoutBtn").addEventListener("click", () => {
+      const raw = localStorage.getItem("osTabConfig");
+      if (!raw) { alert("No layout found to export yet — customize your tabs first."); return; }
+      const envelope = {
+        type: "oregon-sail-layout",
+        exportedAt: new Date().toISOString(),
+        tabConfig: JSON.parse(raw)
+      };
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `oregon-sail-layout-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      logEvent("info", "Exported personal layout to a downloaded file.");
+    });
+
+    /* Layout import: read an uploaded file, validate its shape, and
+       write it back into osTabConfig -- then refresh the live tab
+       system immediately so it applies without needing a reload. */
+    const layoutFileInput = document.getElementById("osDevLayoutFileInput");
+    document.getElementById("osDevImportLayoutBtn").addEventListener("click", () => {
+      layoutFileInput.click();
+    });
+    layoutFileInput.addEventListener("change", () => {
+      const file = layoutFileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        let envelope;
+        try {
+          envelope = JSON.parse(reader.result);
+        } catch (e) {
+          alert("That file isn't valid JSON.");
+          return;
+        }
+        const tabConfig = envelope && envelope.tabConfig ? envelope.tabConfig : envelope; /* accept either the wrapped envelope or a raw osTabConfig blob */
+        if (!tabConfig || !Array.isArray(tabConfig.mains)) {
+          alert("That file doesn't look like a valid Oregon Sail layout export.");
+          return;
+        }
+        if (!confirm("This will replace your current tab layout (main tabs, sub-tabs, widget placement/sizes) on this device. Continue?")) return;
+        localStorage.setItem("osTabConfig", JSON.stringify(tabConfig));
+        if (typeof window.OSTabSystem !== "undefined" && window.OSTabSystem.refresh) {
+          window.OSTabSystem.refresh();
+        }
+        logEvent("info", "Imported layout from file: " + file.name);
+        alert("Layout restored.");
+      };
+      reader.readAsText(file);
+      layoutFileInput.value = ""; /* reset so the same file can be re-selected later if needed */
+    });
+
+    /* Push current layout as the new-player default: stores it in
+       app_config under a dedicated key, which the dashboard's
+       bootstrap script (index.html) would need to seed new players'
+       first-run osTabConfig from -- this just saves the data side;
+       see the note in the success message about the bootstrap wiring. */
+    document.getElementById("osDevPushDefaultLayoutBtn").addEventListener("click", async () => {
+      const raw = localStorage.getItem("osTabConfig");
+      if (!raw) { alert("No layout found on this device to push as the default."); return; }
+      if (!confirm("This will set YOUR current tab layout as the starting layout for all new players. Continue?")) return;
+      const updated = { ...config, defaultTabConfig: JSON.parse(raw) };
+      const { error: pushErr } = await sbClient
+        .from("app_config")
+        .update({ config: updated, updated_at: new Date().toISOString() })
+        .eq("id", 1);
+      if (pushErr) { alert("Save failed: " + pushErr.message); logEvent("error", "Push default layout failed: " + pushErr.message); }
+      else {
+        logEvent("info", "Pushed current layout as the new-player default.");
+        alert("Saved — new players will now start with this exact layout on their first load. Your own and other existing players' layouts are untouched.");
+      }
     });
   }
 
