@@ -852,6 +852,8 @@
         </div>
         <div class="osDevFormActions" style="margin-top:8px;">
           <button class="osDevBtn" id="osDevPushDefaultLayoutBtn">Set My Current Layout as New-Player Default</button>
+          <button class="osDevBtnSecondary" id="osDevPushFileAsDefaultBtn">Push a Layout File as Default (skip import step)</button>
+          <input type="file" id="osDevDefaultLayoutFileInput" accept="application/json" style="display:none;">
         </div>
       </div>
 
@@ -977,6 +979,48 @@
         logEvent("info", "Pushed current layout as the new-player default.");
         alert("Saved — new players will now start with this exact layout on their first load. Your own and other existing players' layouts are untouched.");
       }
+    });
+
+    /* Push a layout file straight to app_config as the new-player
+       default, skipping the import-into-my-own-browser step -- useful
+       when setting the default from an export someone else made, or
+       when you don't want the file to also overwrite your own
+       current local layout just to push it as the default. */
+    const defaultLayoutFileInput = document.getElementById("osDevDefaultLayoutFileInput");
+    document.getElementById("osDevPushFileAsDefaultBtn").addEventListener("click", () => {
+      defaultLayoutFileInput.click();
+    });
+    defaultLayoutFileInput.addEventListener("change", () => {
+      const file = defaultLayoutFileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        let envelope;
+        try {
+          envelope = JSON.parse(reader.result);
+        } catch (e) {
+          alert("That file isn't valid JSON.");
+          return;
+        }
+        const tabConfig = envelope && envelope.tabConfig ? envelope.tabConfig : envelope; /* accept either the wrapped envelope or a raw osTabConfig blob */
+        if (!tabConfig || !Array.isArray(tabConfig.mains)) {
+          alert("That file doesn't look like a valid Oregon Sail layout export.");
+          return;
+        }
+        if (!confirm(`This will set the layout from "${file.name}" as the starting layout for all new players. Continue?`)) return;
+        const updated = { ...config, defaultTabConfig: tabConfig };
+        const { error: pushErr } = await sbClient
+          .from("app_config")
+          .update({ config: updated, updated_at: new Date().toISOString() })
+          .eq("id", 1);
+        if (pushErr) { alert("Save failed: " + pushErr.message); logEvent("error", "Push file as default layout failed: " + pushErr.message); }
+        else {
+          logEvent("info", "Pushed layout file as the new-player default: " + file.name);
+          alert("Saved — new players will now start with this layout on their first load.");
+        }
+      };
+      reader.readAsText(file);
+      defaultLayoutFileInput.value = "";
     });
   }
 
