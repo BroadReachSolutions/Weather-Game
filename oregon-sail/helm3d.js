@@ -2076,7 +2076,7 @@
        compass bearing needs atan2(-dx, -dz). */
     const dx = controls.target.x - camera.position.x;
     const dz = controls.target.z - camera.position.z;
-    const camBearingRad = Math.atan2(dx, dz);
+    const camBearingRad = Math.atan2(dx, -dz);
     const camBearingDeg = ((camBearingRad * 180) / Math.PI + 360) % 360;
     const camX = 50 + Math.sin(camBearingRad) * r;
     const camY = 50 - Math.cos(camBearingRad) * r;
