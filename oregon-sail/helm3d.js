@@ -592,18 +592,18 @@
     const s = window.OSHelm3DState;
     const speedKt = (s && s.speedKt) || 0;
     if (waterFlowHeadingDeg != null && speedKt > 0.05) {
-      /* Same sign convention as boatGroup's own visual rotation
-         (-heading, see the rotation.y assignment in tick()) -- using
-         the opposite (raw, un-negated) heading here made the water
-         appear to flow backwards relative to what the camera actually
-         sees, since the boat itself is visually rotated by -heading.
-         Uses waterFlowHeadingDeg (fast-reacting) rather than the
-         boat's own currentHeadingDeg (intentionally slow/smooth), so
-         the flow direction actually keeps up with turns. */
-      const headingRad = -(waterFlowHeadingDeg * Math.PI) / 180;
+      /* Re-derived cleanly now that boatGroup's heading rotation bug
+         is fixed (see tick(), was inverted). Real travel direction at
+         a given heading is exactly (sin(heading), cos(heading)) in
+         world (X,Z) -- verified directly from the corrected rotation
+         matrix. Accumulating the offset in that SAME direction each
+         frame is what makes the swell pattern visually slide toward
+         the stern (the standard scrolling-texture motion illusion),
+         so no extra negation is needed here at all. */
+      const headingRad = (waterFlowHeadingDeg * Math.PI) / 180;
       const moveRate = speedKt * 0.035;
-      waterOffsetX -= Math.sin(headingRad) * moveRate;
-      waterOffsetZ -= Math.cos(headingRad) * moveRate;
+      waterOffsetX += Math.sin(headingRad) * moveRate;
+      waterOffsetZ += Math.cos(headingRad) * moveRate;
     }
     waterUniforms.uOffsetX.value = waterOffsetX;
     waterUniforms.uOffsetZ.value = waterOffsetZ;
@@ -1946,7 +1946,7 @@
         currentTurnLeanDeg += (targetTurnLean - currentTurnLeanDeg) * 0.12;
 
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
-        boatGroup.rotation.y = currentHeadingDeg != null ? -(currentHeadingDeg * Math.PI) / 180 : 0;
+        boatGroup.rotation.y = currentHeadingDeg != null ? (currentHeadingDeg * Math.PI) / 180 : 0; /* FIXED: was -heading, which verifiably pointed the bow opposite to the real heading (confirmed via direct rotation-matrix calculation) -- this was the true root cause behind the compass/spinnaker/heel sign confusion in earlier fixes */
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
         /* The boat's resting position is its own real, saved
@@ -2027,16 +2027,16 @@
     if (!boatLine || !camLine || !camera || !controls) return;
 
     /* Boat heading: currentHeadingDeg is compass-style (0=N, 90=E).
-       The compass SVG's "up" tick mark is N at (50,14). Uses the same
-       -Z-is-north convention as the camera bearing line below (atan2
-       with a negated Z) -- these two lines previously used OPPOSITE
-       Z sign conventions, which is exactly why the boat's heading
-       indicator pointed backwards relative to where the boat (and
-       camera) actually face. */
+       The compass SVG's "up" tick mark is N at (50,14). Now that
+       boatGroup's actual rotation.y is fixed (see tick(), was
+       inverted -- the true root cause of all the heading-related
+       sign confusion across previous fix attempts), the bow's real
+       world bearing directly equals currentHeadingDeg, so this line
+       uses the standard compass mapping directly. */
     const r = 36;
     if (currentHeadingDeg != null) {
       const rad = (currentHeadingDeg * Math.PI) / 180;
-      const x = 50 - Math.sin(rad) * r;
+      const x = 50 + Math.sin(rad) * r;
       const y = 50 - Math.cos(rad) * r;
       boatLine.setAttribute("x2", x.toFixed(1));
       boatLine.setAttribute("y2", y.toFixed(1));
