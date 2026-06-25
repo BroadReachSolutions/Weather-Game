@@ -1956,7 +1956,7 @@
            -heading, both of which were tried and failed against the
            user's concrete, confirmed test case: hdg=90 must visually
            face world (-1,0), per the wake formula above). */
-        boatGroup.rotation.y = currentHeadingDeg != null ? ((currentHeadingDeg + 180) * Math.PI) / 180 : Math.PI;
+        boatGroup.rotation.y = currentHeadingDeg != null ? -((currentHeadingDeg + 180) * Math.PI) / 180 : -Math.PI; /* flipped sign based on direct visual confirmation: bow pointed left when blue line pointed right (east) with the previous formula */
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
         /* TEMPORARY DEBUG: show heading, rotation, and camera position
