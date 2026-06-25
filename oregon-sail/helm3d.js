@@ -1175,21 +1175,21 @@
     /* --- NAV LIGHTS: red port / green starboard at the bow, white stern --- */
     {
       const bowLightZ = bowZ * 0.85;
-      /* Confirmed convention throughout this file: +X = starboard,
-         -X = port. The bulb at -halfWidth (negative X) is the PORT
-         side and gets RED; the bulb at +halfWidth (positive X) is
-         STARBOARD and gets GREEN -- standard maritime convention. */
-      const portBulb = makeBulb(0xff2a2a, 0.05);
+      /* Colors inverted per direct in-game confirmation -- the
+         earlier convention-based reasoning didn't match reality.
+         portBulb (at -halfWidth) is now GREEN, stbdBulb (at
+         +halfWidth) is now RED. */
+      const portBulb = makeBulb(0x2aff5a, 0.05);
       portBulb.position.set(-halfWidth * 0.9, deckY + 0.3, bowLightZ);
       boatGroup.add(portBulb);
-      const portLight = new THREE.PointLight(0xff2a2a, 0, 6);
+      const portLight = new THREE.PointLight(0x2aff5a, 0, 6);
       portLight.position.copy(portBulb.position);
       boatGroup.add(portLight);
 
-      const stbdBulb = makeBulb(0x2aff5a, 0.05);
+      const stbdBulb = makeBulb(0xff2a2a, 0.05);
       stbdBulb.position.set(halfWidth * 0.9, deckY + 0.3, bowLightZ);
       boatGroup.add(stbdBulb);
-      const stbdLight = new THREE.PointLight(0x2aff5a, 0, 6);
+      const stbdLight = new THREE.PointLight(0xff2a2a, 0, 6);
       stbdLight.position.copy(stbdBulb.position);
       boatGroup.add(stbdLight);
 
