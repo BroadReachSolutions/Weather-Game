@@ -343,6 +343,8 @@
     { key: "freeboard", label: "Freeboard (above water)", min: 0.4, max: 3, step: 0.1 },
     { key: "depth", label: "Hull Depth (below water)", min: 0.4, max: 3, step: 0.1 },
     { key: "waterline", label: "Waterline (float height)", min: -0.6, max: 0.6, step: 0.02 },
+    { key: "bowWaterlineZ", label: "Bow Waterline Point", min: 0.5, max: 6, step: 0.1 },
+    { key: "sternWaterlineZ", label: "Stern Waterline Point", min: -6, max: -0.5, step: 0.1 },
     { key: "mastHeight", label: "Mast Height", min: 4, max: 16, step: 0.2 },
     { key: "cabinLength", label: "Cabin Length", min: 1, max: 5, step: 0.1 },
     { key: "cabinWidth", label: "Cabin Width", min: 0.8, max: 3, step: 0.1 },

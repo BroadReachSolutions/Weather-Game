@@ -817,6 +817,8 @@
       freeboard: 1.0,         /* topsides height above the waterline (deck height) */
       depth: 2.1,             /* how far the hull extends below the waterline */
       waterline: 0,           /* the boat's resting vertical position relative to the true water surface (y=0) -- replaces the old dev-only buoyancy offset, now a real saved part of the design */
+      bowWaterlineZ: 3.57,     /* local Z of the point on the bow that actually touches the water surface -- the hull is made to "ride" this exact point, not just bob as a whole */
+      sternWaterlineZ: -2.21,  /* local Z of the equivalent point on the stern */
       cabinType: "trunk",     /* trunk | flush | pilothouse */
       cabinLength: 2.7,
       cabinWidth: 1.7,
@@ -1917,18 +1919,36 @@
            makes the boat genuinely RIDE the swells rather than drive
            through them: the deck's height and tilt now reflect what
            the water is actually doing right under the hull. */
-        const sampleDist = 2.2;
-        const heightAtBoat = sampleSwellHeight(0, 0);
+        const sampleDist = 2.2; /* still used for roll (port/starboard), which isn't part of this request */
         const heightPort = sampleSwellHeight(-sampleDist, 0);
         const heightStbd = sampleSwellHeight(sampleDist, 0);
-        const heightFwd = sampleSwellHeight(0, sampleDist);
-        const heightAft = sampleSwellHeight(0, -sampleDist);
 
+        /* Bow/stern waterline riding: sample the real swell height at
+           the boat's own actual bow and stern waterline contact
+           points (adjustable boat design properties, not a generic
+           fixed distance) and derive BOTH the pitch angle and the
+           hull's vertical position directly from those two real
+           points -- this is what makes the boat genuinely "clip" to
+           the wave surface at the bow and stern rather than just
+           bobbing as a whole based on an approximated center sample. */
+        const bowZ2 = currentBoatDNA.bowWaterlineZ != null ? currentBoatDNA.bowWaterlineZ : 3.57;
+        const sternZ2 = currentBoatDNA.sternWaterlineZ != null ? currentBoatDNA.sternWaterlineZ : -2.21;
+        const heightBow = sampleSwellHeight(0, bowZ2);
+        const heightStern = sampleSwellHeight(0, sternZ2);
+
+        /* Real geometric pitch angle between the two actual waterline
+           points -- no arbitrary multiplier needed, since the real
+           horizontal distance (bowZ2 - sternZ2) is used directly. */
         const targetWaveRollDeg = Math.max(-8, Math.min(8,
           Math.atan2(heightStbd - heightPort, sampleDist * 2) * (180 / Math.PI) * 3.5));
-        const targetWavePitchDeg = Math.max(-8, Math.min(8,
-          Math.atan2(heightFwd - heightAft, sampleDist * 2) * (180 / Math.PI) * 3.5));
-        const targetWaveBobY = heightAtBoat * 0.7; /* raised from 0.5 -- now that the clamp isn't artificially limiting things, the boat can follow more of the real swell height */
+        const targetWavePitchDeg = Math.max(-12, Math.min(12,
+          Math.atan2(heightBow - heightStern, bowZ2 - sternZ2) * (180 / Math.PI)));
+
+        /* Hull's vertical position is the average of where its two
+           real ends actually sit on the wave surface -- physically
+           the point the hull "rides" if both the bow and stern
+           waterline points are constrained to touch the real surface. */
+        const targetWaveBobY = (heightBow + heightStern) / 2;
 
         /* Smoothed toward their targets rather than applied raw every
            frame — these are slope/derivative values riding on top of
