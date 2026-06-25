@@ -1959,6 +1959,20 @@
         boatGroup.rotation.y = currentHeadingDeg != null ? ((currentHeadingDeg + 180) * Math.PI) / 180 : Math.PI;
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
+        /* TEMPORARY DEBUG: show heading, rotation, and camera position
+           together so we can settle the orientation bug with real
+           numbers from an actual session, instead of more theoretical
+           derivation that keeps disagreeing with direct observation. */
+        let dbg2 = document.getElementById("osHeadingDebug2");
+        if (!dbg2) {
+          dbg2 = document.createElement("div");
+          dbg2.id = "osHeadingDebug2";
+          dbg2.style.cssText = "position:absolute;top:120px;right:8px;background:rgba(0,0,0,0.7);color:#ff0;font-size:9px;padding:3px 6px;border-radius:4px;z-index:999;font-family:monospace;white-space:pre;";
+          document.getElementById("osHelmViewWrap").appendChild(dbg2);
+        }
+        if (camera) {
+          dbg2.textContent = `hdg=${currentHeadingDeg.toFixed(0)} rot.y=${(boatGroup.rotation.y*180/Math.PI).toFixed(0)}\ncam=(${camera.position.x.toFixed(1)},${camera.position.z.toFixed(1)})`;
+        }
         /* The boat's resting position is its own real, saved
            waterline value (currentBoatDNA.waterline). The vertical
            bob is only loosely safety-clamped (not tightly pinned)
