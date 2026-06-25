@@ -29,6 +29,7 @@
   let currentWavePitchDeg = 0;  /* smoothed wave-driven pitch */
   let currentWaveBobY = 0;      /* smoothed vertical bob from riding the swell */
   let currentHeadingDeg = null; /* boat's facing direction, null until first state arrives */
+  let waterFlowHeadingDeg = null; /* separate, faster-reacting heading reference for water flow direction specifically -- decoupled from the boat's own intentionally slow/smooth visual turn rate, so the water doesn't visually lag behind a turn */
   let currentTurnLeanDeg = 0;   /* centrifugal lean into turns */
   let waveClock = 0;
 
@@ -590,13 +591,16 @@
        swells' own random (not heading-tied) shape. */
     const s = window.OSHelm3DState;
     const speedKt = (s && s.speedKt) || 0;
-    if (currentHeadingDeg != null && speedKt > 0.05) {
+    if (waterFlowHeadingDeg != null && speedKt > 0.05) {
       /* Same sign convention as boatGroup's own visual rotation
          (-heading, see the rotation.y assignment in tick()) -- using
          the opposite (raw, un-negated) heading here made the water
          appear to flow backwards relative to what the camera actually
-         sees, since the boat itself is visually rotated by -heading. */
-      const headingRad = -(currentHeadingDeg * Math.PI) / 180;
+         sees, since the boat itself is visually rotated by -heading.
+         Uses waterFlowHeadingDeg (fast-reacting) rather than the
+         boat's own currentHeadingDeg (intentionally slow/smooth), so
+         the flow direction actually keeps up with turns. */
+      const headingRad = -(waterFlowHeadingDeg * Math.PI) / 180;
       const moveRate = speedKt * 0.035;
       waterOffsetX -= Math.sin(headingRad) * moveRate;
       waterOffsetZ -= Math.cos(headingRad) * moveRate;
@@ -1108,9 +1112,9 @@
     boatGroup.add(spinnakerGroup);
 
     const spinHeight = d.mastHeight * 1.1;
-    const spinForward = -9;         /* negative = flipped 180°, now pops out toward the bow correctly */
+    const spinForward = 9; /* positive = pops out toward the bow (+Z), matching the hull's actual bow direction */
     const spinBillowOut = 3.0;      /* sideways bulge at mid-height, the "balloon" — much bigger */
-    const spinBillowFwd = -1.6;     /* forward bulge, same flipped sign as spinForward */
+    const spinBillowFwd = 1.6; /* forward bulge, matches the corrected spinForward sign */
 
     const spinnakerGeo = new THREE.BufferGeometry();
     const spinnakerVerts = new Float32Array([
@@ -1813,6 +1817,19 @@
       const prevHeading = currentHeadingDeg;
       currentHeadingDeg = (currentHeadingDeg + delta * earlyHeadingAlpha + 360) % 360;
       turnRateDegPerFrame = ((currentHeadingDeg - prevHeading + 540) % 360) - 180;
+
+      /* Water flow heading updates MUCH faster than the boat's own
+         smooth visual turn (short time constant, not the boat's
+         slower HEADING_TIME_CONSTANT) -- this is what fixes the
+         water appearing to "stay in one direction" while turning:
+         it was tracking the same slow-smoothed value as the boat's
+         visual rotation, so during a turn the flow direction lagged
+         far enough behind that it read as the boat drifting sideways
+         rather than the water correctly redirecting with the turn. */
+      const waterFlowAlpha = 1 - Math.exp(-headingDt / 0.15);
+      if (waterFlowHeadingDeg == null) waterFlowHeadingDeg = targetHeadingNow;
+      const flowDelta = ((targetHeadingNow - waterFlowHeadingDeg + 540) % 360) - 180;
+      waterFlowHeadingDeg = (waterFlowHeadingDeg + flowDelta * waterFlowAlpha + 360) % 360;
     }
 
     const waveHeightFt = window.OSHelm3DState ? window.OSHelm3DState.waveHeightFt : 1;
@@ -2000,12 +2017,16 @@
     if (!boatLine || !camLine || !camera || !controls) return;
 
     /* Boat heading: currentHeadingDeg is compass-style (0=N, 90=E).
-       The compass SVG's "up" tick mark is N at (50,14), so we just
-       rotate a line of that same length by the heading. */
+       The compass SVG's "up" tick mark is N at (50,14). Uses the same
+       -Z-is-north convention as the camera bearing line below (atan2
+       with a negated Z) -- these two lines previously used OPPOSITE
+       Z sign conventions, which is exactly why the boat's heading
+       indicator pointed backwards relative to where the boat (and
+       camera) actually face. */
     const r = 36;
     if (currentHeadingDeg != null) {
       const rad = (currentHeadingDeg * Math.PI) / 180;
-      const x = 50 + Math.sin(rad) * r;
+      const x = 50 - Math.sin(rad) * r;
       const y = 50 - Math.cos(rad) * r;
       boatLine.setAttribute("x2", x.toFixed(1));
       boatLine.setAttribute("y2", y.toFixed(1));
