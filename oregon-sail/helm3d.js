@@ -592,18 +592,17 @@
     const s = window.OSHelm3DState;
     const speedKt = (s && s.speedKt) || 0;
     if (waterFlowHeadingDeg != null && speedKt > 0.05) {
-      /* Re-derived cleanly now that boatGroup's heading rotation bug
-         is fixed (see tick(), was inverted). Real travel direction at
-         a given heading is exactly (sin(heading), cos(heading)) in
-         world (X,Z) -- verified directly from the corrected rotation
-         matrix. Accumulating the offset in that SAME direction each
-         frame is what makes the swell pattern visually slide toward
-         the stern (the standard scrolling-texture motion illusion),
-         so no extra negation is needed here at all. */
+      /* Verified against the pre-existing, working wake-trail formula
+         (recordWakePoint): real travel direction at a given heading
+         is (-sin(heading), -cos(heading)) in world (X,Z) -- NOT
+         (sin,cos) as an earlier pass through this code incorrectly
+         assumed. Accumulating the offset in that direction is what
+         makes the swell pattern visually slide toward the stern (the
+         standard scrolling-texture motion illusion). */
       const headingRad = (waterFlowHeadingDeg * Math.PI) / 180;
       const moveRate = speedKt * 0.035;
-      waterOffsetX += Math.sin(headingRad) * moveRate;
-      waterOffsetZ += Math.cos(headingRad) * moveRate;
+      waterOffsetX -= Math.sin(headingRad) * moveRate;
+      waterOffsetZ -= Math.cos(headingRad) * moveRate;
     }
     waterUniforms.uOffsetX.value = waterOffsetX;
     waterUniforms.uOffsetZ.value = waterOffsetZ;
@@ -1946,7 +1945,18 @@
         currentTurnLeanDeg += (targetTurnLean - currentTurnLeanDeg) * 0.12;
 
         boatGroup.rotation.order = "YXZ"; /* apply heading first, then pitch/heel relative to it */
-        boatGroup.rotation.y = currentHeadingDeg != null ? (currentHeadingDeg * Math.PI) / 180 : 0; /* FIXED: was -heading, which verifiably pointed the bow opposite to the real heading (confirmed via direct rotation-matrix calculation) -- this was the true root cause behind the compass/spinnaker/heel sign confusion in earlier fixes */
+        /* ROOT CAUSE, finally verified against real ground truth: the
+           wake trail's travel-direction formula (recordWakePoint,
+           pre-existing and independently working) uses
+           moveX=-sin(heading), moveZ=-cos(heading) for the boat's
+           real world travel direction at a given heading. The bow's
+           visual rotation must produce that SAME world direction.
+           Given the bow is built at local +Z, matching that requires
+           rotation.y = heading + 180° (not bare +heading or bare
+           -heading, both of which were tried and failed against the
+           user's concrete, confirmed test case: hdg=90 must visually
+           face world (-1,0), per the wake formula above). */
+        boatGroup.rotation.y = currentHeadingDeg != null ? ((currentHeadingDeg + 180) * Math.PI) / 180 : Math.PI;
         boatGroup.rotation.z = ((currentHeelDeg * heelSign) + currentWaveRollDeg + currentTurnLeanDeg) * Math.PI / 180;
         boatGroup.rotation.x = (currentPitchDeg * 0.4 + currentWavePitchDeg) * Math.PI / 180; /* wind-heel pitch contribution reduced, real wave pitch now does most of the work */
         /* The boat's resting position is its own real, saved
@@ -2040,30 +2050,19 @@
       const y = 50 - Math.cos(rad) * r;
       boatLine.setAttribute("x2", x.toFixed(1));
       boatLine.setAttribute("y2", y.toFixed(1));
-      /* TEMPORARY DEBUG: surface the raw value so we can see actual
-         live numbers instead of reasoning about the formula blind.
-         Remove once the mismatch is actually found. */
-      let dbg = document.getElementById("osHeadingDebug");
-      if (!dbg) {
-        dbg = document.createElement("div");
-        dbg.id = "osHeadingDebug";
-        dbg.style.cssText = "position:absolute;top:90px;right:8px;background:rgba(0,0,0,0.7);color:#0f0;font-size:10px;padding:3px 6px;border-radius:4px;z-index:999;font-family:monospace;";
-        document.getElementById("osHelmViewWrap").appendChild(dbg);
-      }
-      dbg.textContent = `hdg=${currentHeadingDeg.toFixed(1)} rot.y=${boatGroup ? (boatGroup.rotation.y * 180 / Math.PI).toFixed(1) : "?"}`;
     }
 
     /* Camera direction: derive compass bearing from the camera's
        position relative to its orbit target (where it's looking
        FROM, reversed, since we want which way it's looking AT).
-       +Z is "north" in our scene (verified directly from the
-       boatGroup rotation fix earlier: bow direction at heading=0 is
-       world +Z) -- the previous "-Z is north" comment/formula here
-       was simply wrong, which is exactly why looking forward off the
-       bow at heading=0 reported as facing south instead of north. */
+       Matches the confirmed bow-direction convention (verified
+       against the pre-existing, working wake-trail formula): at
+       heading h, the bow's real world direction is
+       (-sin(h), -cos(h)), so converting a world direction back to a
+       compass bearing needs atan2(-dx, -dz). */
     const dx = controls.target.x - camera.position.x;
     const dz = controls.target.z - camera.position.z;
-    const camBearingRad = Math.atan2(dx, dz);
+    const camBearingRad = Math.atan2(-dx, -dz);
     const camBearingDeg = ((camBearingRad * 180) / Math.PI + 360) % 360;
     const camX = 50 + Math.sin(camBearingRad) * r;
     const camY = 50 - Math.cos(camBearingRad) * r;
