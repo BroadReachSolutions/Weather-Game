@@ -490,24 +490,34 @@
           float slowClock = uTime * 0.35;
           vec2 p = vec2(position.x + uOffsetX, position.y + uOffsetZ);
 
-          /* Three swell layers at angles spread far enough apart
-             (0°, 63°, 124°) that their combination doesn't read as
-             parallel "rows" anymore, even at larger amplitudes — the
-             previous two-layer version (0° and 63°, too close
-             together) let the dominant layer's straight-line crests
-             show through clearly once waves got big. Slightly
-             irregular relative frequencies (not simple multiples of
-             each other) further help avoid any obvious repeating
-             pattern. */
+          /* Seven swell layers total now, at angles spread across the
+             full circle (0°, 63°, 124°, then four more well-scattered
+             random angles below) so the combination never reads as
+             coming from just one or two directions — this is what
+             genuinely kills any sense of "rows," rather than relying
+             on just a few hand-picked angles. Amplitude weight tapers
+             down for the later layers so they add scattered texture
+             and chop without overwhelming the main rolling motion
+             from the first two. Frequencies are all slightly
+             irregular relative to each other (no simple multiples) to
+             avoid any obvious repeating pattern. */
           vec2 primary = rot(p, 0.0);
           vec2 secondary = rot(p, 1.1);
           vec2 tertiary = rot(p, 2.16);
+          vec2 layer4 = rot(p, 0.95);
+          vec2 layer5 = rot(p, 4.09);
+          vec2 layer6 = rot(p, 3.37);
+          vec2 layer7 = rot(p, 0.36);
 
           float swell = sin(primary.x * 0.045 + slowClock * 0.9) * uAmplitude
                       + sin(secondary.x * 0.11 + slowClock * 1.3) * uAmplitude * 0.22
-                      + sin(tertiary.x * 0.071 + slowClock * 0.61 + 1.7) * uAmplitude * 0.16;
+                      + sin(tertiary.x * 0.071 + slowClock * 0.61 + 1.7) * uAmplitude * 0.16
+                      + sin(layer4.x * 0.093 + slowClock * 1.07 + 0.6) * uAmplitude * 0.12
+                      + sin(layer5.x * 0.058 + slowClock * 0.78 + 3.2) * uAmplitude * 0.10
+                      + sin(layer6.x * 0.082 + slowClock * 1.21 + 4.8) * uAmplitude * 0.09
+                      + sin(layer7.x * 0.066 + slowClock * 0.52 + 2.1) * uAmplitude * 0.08;
 
-          vHeight = swell / max(uAmplitude * 1.38, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 3 layers) */
+          vHeight = swell / max(uAmplitude * 1.77, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 7 layers) */
           vWorldXZ = p; /* pass the (offset) world position for the cell pattern */
           vRippleClock = uTime; /* drives the vein ripple animation in the fragment shader */
 
@@ -667,11 +677,25 @@
       return x * Math.cos(a) - z * Math.sin(a);
     }
 
+    /* Must stay numerically identical to the water shader's vertex
+       shader (see buildWater) -- seven layers at the same angles,
+       frequencies, phase offsets, and amplitude weights, so the
+       boat's buoyancy/pitch physics matches the visual water exactly. */
     const primaryX = rotX(px, pz, 0.0);
     const secondaryX = rotX(px, pz, 1.1);
+    const tertiaryX = rotX(px, pz, 2.16);
+    const layer4X = rotX(px, pz, 0.95);
+    const layer5X = rotX(px, pz, 4.09);
+    const layer6X = rotX(px, pz, 3.37);
+    const layer7X = rotX(px, pz, 0.36);
 
     return Math.sin(primaryX * 0.045 + slowClock * 0.9) * amplitude
-         + Math.sin(secondaryX * 0.11 + slowClock * 1.3) * amplitude * 0.22;
+         + Math.sin(secondaryX * 0.11 + slowClock * 1.3) * amplitude * 0.22
+         + Math.sin(tertiaryX * 0.071 + slowClock * 0.61 + 1.7) * amplitude * 0.16
+         + Math.sin(layer4X * 0.093 + slowClock * 1.07 + 0.6) * amplitude * 0.12
+         + Math.sin(layer5X * 0.058 + slowClock * 0.78 + 3.2) * amplitude * 0.10
+         + Math.sin(layer6X * 0.082 + slowClock * 1.21 + 4.8) * amplitude * 0.09
+         + Math.sin(layer7X * 0.066 + slowClock * 0.52 + 2.1) * amplitude * 0.08;
   }
 
   /* ---------------------------------------------------------------
