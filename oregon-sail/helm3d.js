@@ -479,6 +479,7 @@
         uniform float uOffsetZ;
         varying float vHeight;
         varying vec2 vWorldXZ;
+        varying float vRippleClock;
 
         vec2 rot(vec2 p, float a) {
           float c = cos(a), s = sin(a);
@@ -489,21 +490,26 @@
           float slowClock = uTime * 0.35;
           vec2 p = vec2(position.x + uOffsetX, position.y + uOffsetZ);
 
-          /* One DOMINANT low-frequency sine wave along a single fixed
-             direction — this is what gives clean, real rolling-swell
-             dips (a proper sine-wave trough) instead of the previous
-             four-layer chop, which read as choppy noise rather than
-             smooth rolling waves. A second, much smaller/faster layer
-             at a different angle adds natural variation without
-             fighting the primary roll. */
+          /* Three swell layers at angles spread far enough apart
+             (0°, 63°, 124°) that their combination doesn't read as
+             parallel "rows" anymore, even at larger amplitudes — the
+             previous two-layer version (0° and 63°, too close
+             together) let the dominant layer's straight-line crests
+             show through clearly once waves got big. Slightly
+             irregular relative frequencies (not simple multiples of
+             each other) further help avoid any obvious repeating
+             pattern. */
           vec2 primary = rot(p, 0.0);
           vec2 secondary = rot(p, 1.1);
+          vec2 tertiary = rot(p, 2.16);
 
           float swell = sin(primary.x * 0.045 + slowClock * 0.9) * uAmplitude
-                      + sin(secondary.x * 0.11 + slowClock * 1.3) * uAmplitude * 0.22;
+                      + sin(secondary.x * 0.11 + slowClock * 1.3) * uAmplitude * 0.22
+                      + sin(tertiary.x * 0.071 + slowClock * 0.61 + 1.7) * uAmplitude * 0.16;
 
-          vHeight = swell / max(uAmplitude * 1.22, 0.0001); /* -1..1, normalized against the combined peak amplitude */
+          vHeight = swell / max(uAmplitude * 1.38, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 3 layers) */
           vWorldXZ = p; /* pass the (offset) world position for the cell pattern */
+          vRippleClock = uTime; /* drives the vein ripple animation in the fragment shader */
 
           vec3 displaced = vec3(position.x, position.y, swell);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
@@ -516,6 +522,7 @@
         uniform float uCellScale;
         varying float vHeight;
         varying vec2 vWorldXZ;
+        varying float vRippleClock;
 
         /* Standard hash-based 2D voronoi: jittered grid cell centers */
         vec2 hash2(vec2 p) {
@@ -527,7 +534,18 @@
         }
 
         void main() {
-          vec2 uv = vWorldXZ * uCellScale;
+          /* Ripple the sampling coordinate back and forth over time
+             before computing the cell pattern -- this is what makes
+             the white veins themselves visibly flow/wobble rather
+             than sitting static while only the underlying swell
+             height changes. Small amplitude relative to cell size so
+             it reads as a gentle ripple, not a distortion of the
+             cell shapes themselves. */
+          vec2 rippleOffset = vec2(
+            sin(vWorldXZ.y * 0.08 + vRippleClock * 0.6) * 0.35,
+            cos(vWorldXZ.x * 0.08 + vRippleClock * 0.5) * 0.35
+          );
+          vec2 uv = (vWorldXZ + rippleOffset) * uCellScale;
           vec2 cell = floor(uv);
           vec2 frac = fract(uv);
 
