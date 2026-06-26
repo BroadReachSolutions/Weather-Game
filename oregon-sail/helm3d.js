@@ -896,6 +896,226 @@
     );
   }
 
+  /* ---------------------------------------------------------------
+     AI / AMBIANCE BOATS
+     Random other boats wandering the same 5nm world, purely for
+     atmosphere — client-side only, no database presence. Each one
+     gets a fully randomized hull/cabin/mast/sail combination (same
+     ranges as the dev console's Boat Designer sliders) and a random
+     heading/speed, moves in a straight line, and despawns once it
+     drifts beyond render distance. Solid (real collision geometry)
+     so the player can physically run into one. A new one spawns at a
+     random interval to replace whatever's despawned, keeping the
+     world feeling populated without a fixed boat count.
+     --------------------------------------------------------------- */
+  let aiBoats = []; /* { group, velocityX, velocityZ, collider } */
+  const AI_BOAT_WORLD_RADIUS = 300; /* matches the 5nm view radius */
+  const AI_BOAT_MAX_COUNT = 5;
+  let aiBoatSpawnClock = 0;
+  let aiBoatSpawnInterval = 15 + Math.random() * 20; /* next spawn in 15-35s, re-rolled after each spawn */
+
+  function randomBetween(min, max) {
+    return min + Math.random() * (max - min);
+  }
+  function randomColor() {
+    return Math.floor(Math.random() * 0xffffff);
+  }
+
+  function randomBoatDNA() {
+    const hullTypes = ["cruiser", "racer", "trawler"]; /* catamaran excluded -- the simplified AI builder below assumes a single hull */
+    const cabinTypes = ["trunk", "flush", "pilothouse"];
+    return {
+      scale: randomBetween(1.8, 3.0),
+      hullType: hullTypes[Math.floor(Math.random() * hullTypes.length)],
+      hullLength: randomBetween(4, 12),
+      hullWidth: randomBetween(1.2, 4),
+      freeboard: randomBetween(0.4, 3),
+      depth: randomBetween(0.4, 3),
+      mastHeight: randomBetween(4, 16),
+      cabinType: cabinTypes[Math.floor(Math.random() * cabinTypes.length)],
+      cabinLength: randomBetween(1, 5),
+      cabinWidth: randomBetween(0.8, 3),
+      cabinHeight: randomBetween(0.4, 1.6),
+      cabinOffsetZ: randomBetween(-1.5, 1.5),
+      hullColor: randomColor(),
+      deckColor: randomColor(),
+      cabinColor: randomColor(),
+      sailColor: randomColor()
+    };
+  }
+
+  /* Simplified visual build for ambiance boats — hull, mast, boom,
+     one mainsail triangle, one cabin box. Deliberately skips the
+     player boat's full detail (lifelines, bimini, helm wheel,
+     portholes, rigging, spinnaker) since these are distant/passing
+     boats, not the player's own — this keeps the per-boat cost much
+     lower than the full player-boat pipeline, important since
+     several of these can exist at once. */
+  function buildAIBoatMesh(d) {
+    const group = new THREE.Group();
+    group.scale.set(d.scale, d.scale, d.scale);
+
+    const profiles = {
+      cruiser: { widthMult: 1.0, sharpness: 0.3 },
+      racer:   { widthMult: 0.88, sharpness: 0.85 },
+      trawler: { widthMult: 1.15, sharpness: -0.2 }
+    };
+    const profile = profiles[d.hullType] || profiles.cruiser;
+    const bowZ = d.hullLength * 0.618;
+    const sternZ = -(d.hullLength - bowZ);
+    const halfWidth = (d.hullWidth * profile.widthMult) / 2;
+
+    const hullShape = buildSingleHullShape(bowZ, sternZ, halfWidth, profile.sharpness);
+    const hullExtrude = new THREE.ExtrudeGeometry(hullShape, { depth: d.depth, bevelEnabled: false });
+    hullExtrude.rotateX(Math.PI / 2);
+    const hull = new THREE.Mesh(hullExtrude, new THREE.MeshPhongMaterial({ color: d.hullColor, flatShading: true }));
+    hull.position.y = d.freeboard;
+    group.add(hull);
+    const deckY = d.freeboard;
+
+    /* Simple cabin box */
+    const cabinW = d.cabinWidth, cabinL = d.cabinLength, cabinH = d.cabinHeight;
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(cabinW, cabinH, cabinL),
+      new THREE.MeshPhongMaterial({ color: d.cabinColor, flatShading: true })
+    );
+    cabin.position.set(0, deckY + cabinH / 2, d.cabinOffsetZ);
+    group.add(cabin);
+
+    /* Mast + boom + one mainsail triangle */
+    const mastX = 0, mastZ = 0.6;
+    const mast = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, d.mastHeight, 6),
+      new THREE.MeshPhongMaterial({ color: 0x5a4632 })
+    );
+    mast.position.set(mastX, deckY + d.mastHeight / 2, mastZ);
+    group.add(mast);
+
+    const boomLen = Math.max(1.5, d.hullLength * 0.4);
+    const boomGroup = new THREE.Group();
+    boomGroup.position.set(mastX, deckY + 1.6, mastZ);
+    group.add(boomGroup);
+    const boom = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.04, boomLen, 5),
+      new THREE.MeshPhongMaterial({ color: 0xcfd8df })
+    );
+    boom.rotation.x = Math.PI / 2;
+    boom.position.set(0, 0, -boomLen / 2);
+    boomGroup.add(boom);
+
+    const sailHeight = Math.max(1.5, d.mastHeight - 2);
+    const sailGeo = new THREE.BufferGeometry();
+    sailGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
+      0, 0, 0,
+      0, sailHeight, 0,
+      0, 0, -boomLen
+    ]), 3));
+    sailGeo.setIndex([0, 1, 2]);
+    sailGeo.computeVertexNormals();
+    const sail = new THREE.Mesh(sailGeo, new THREE.MeshPhongMaterial({
+      color: d.sailColor, side: THREE.DoubleSide, transparent: true, opacity: 0.92, flatShading: true
+    }));
+    boomGroup.add(sail);
+
+    /* Collision footprint used for player-collision checks — a
+       simple box matching the hull's real length/width/freeboard
+       rather than a precise hull-shaped volume, which is plenty for
+       "can I crash into this boat" purposes */
+    group.userData.colliderHalfLength = (bowZ - sternZ) / 2 * d.scale;
+    group.userData.colliderHalfWidth = halfWidth * d.scale;
+
+    return group;
+  }
+
+  function spawnAIBoat() {
+    if (aiBoats.length >= AI_BOAT_MAX_COUNT) return;
+    const dna = randomBoatDNA();
+    const group = buildAIBoatMesh(dna);
+
+    /* Spawn at a random point on the edge of the visible world,
+       heading on a random course that isn't guaranteed to immediately
+       exit again (mostly aimed back toward the general vicinity of
+       the center, with enough randomness to still feel organic) */
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const spawnDist = AI_BOAT_WORLD_RADIUS * 0.95;
+    const spawnX = Math.cos(spawnAngle) * spawnDist;
+    const spawnZ = Math.sin(spawnAngle) * spawnDist;
+    group.position.set(spawnX, 0.3, spawnZ);
+
+    const headingDeg = Math.random() * 360;
+    const headingRad = (headingDeg * Math.PI) / 180;
+    group.rotation.y = ((headingDeg + 180) * Math.PI) / 180; /* matches the confirmed player-boat heading convention */
+
+    const speedKt = randomBetween(2, 8);
+    /* Correct units-per-second derivation: 60 world units per nm
+       (the established, verified convention from the wake trail
+       system), converted through nm-per-second at this speed. The
+       water-flow visual effect uses its own separately-tuned
+       constant (0.035) that does NOT represent real distance/time --
+       reusing it here would have made AI boats move at roughly double
+       their assigned speed. */
+    const unitsPerSecond = (speedKt / 3600) * 60;
+    const velocityX = -Math.sin(headingRad) * unitsPerSecond;
+    const velocityZ = -Math.cos(headingRad) * unitsPerSecond;
+
+    scene.add(group);
+    aiBoats.push({ group, velocityX, velocityZ });
+  }
+
+  function updateAIBoats(elapsedFactor) {
+    if (!scene) return;
+    aiBoatSpawnClock += elapsedFactor;
+    if (aiBoatSpawnClock > aiBoatSpawnInterval) {
+      aiBoatSpawnClock = 0;
+      aiBoatSpawnInterval = 15 + Math.random() * 20;
+      spawnAIBoat();
+    }
+
+    for (let i = aiBoats.length - 1; i >= 0; i--) {
+      const ai = aiBoats[i];
+      ai.group.position.x += ai.velocityX * elapsedFactor; /* velocity is already in correct world-units-per-second */
+      ai.group.position.z += ai.velocityZ * elapsedFactor;
+
+      const dist = Math.sqrt(ai.group.position.x ** 2 + ai.group.position.z ** 2);
+      if (dist > AI_BOAT_WORLD_RADIUS * 1.05) {
+        /* Out of render distance — despawn and free its geometry */
+        scene.remove(ai.group);
+        ai.group.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        });
+        aiBoats.splice(i, 1);
+      }
+    }
+  }
+
+  /* Checks the player's boat against every AI boat's collision
+     footprint, in world space (both the player and AI boats have
+     real world positions/rotations now). Returns the first AI boat
+     mesh group found to be overlapping, or null. Called from the
+     main tick loop; actual collision RESPONSE (stopping, bouncing,
+     damage, etc) is intentionally left for a follow-up — this just
+     detects it, since "make them solid so you can crash into them"
+     is the scoped request for this pass. */
+  function checkAIBoatCollision(playerWorldX, playerWorldZ, playerHalfLength, playerHalfWidth, playerHeadingRad) {
+    for (const ai of aiBoats) {
+      const dx = playerWorldX - ai.group.position.x;
+      const dz = playerWorldZ - ai.group.position.z;
+      /* Rough circle-circle check first (cheap), using each boat's
+         largest half-dimension as an approximate radius — good
+         enough for "are these two boats close enough to matter"
+         before bothering with anything more precise */
+      const aiRadius = Math.max(ai.group.userData.colliderHalfLength || 3, ai.group.userData.colliderHalfWidth || 1);
+      const playerRadius = Math.max(playerHalfLength || 3, playerHalfWidth || 1);
+      const distSq = dx * dx + dz * dz;
+      const combinedRadius = aiRadius + playerRadius;
+      if (distSq < combinedRadius * combinedRadius) {
+        return ai.group;
+      }
+    }
+    return null;
+  }
+
   function buildBoat(dna) {
     const d = dna || currentBoatDNA || defaultBoatDNA();
     /* Backfill type fields for any DNA saved before this update, so
@@ -1854,6 +2074,16 @@
       }
     }
     updateWakeTrail(0.0167);
+    updateAIBoats(0.0167);
+    if (currentBoatDNA && aiBoats.length) {
+      const playerHalfLength = (currentBoatDNA.hullLength || 6.8) / 2 * (currentBoatDNA.scale || 2.4);
+      const playerHalfWidth = (currentBoatDNA.hullWidth || 2.1) / 2 * (currentBoatDNA.scale || 2.4);
+      const headingRadNow = currentHeadingDeg != null ? (currentHeadingDeg * Math.PI) / 180 : 0;
+      const collidedWith = checkAIBoatCollision(0, 0, playerHalfLength, playerHalfWidth, headingRadNow);
+      if (collidedWith && typeof window.OSOnBoatCollision === "function") {
+        window.OSOnBoatCollision(); /* hook for game-ui.js to react (sound, damage, etc) in a follow-up -- detection only for this pass */
+      }
+    }
     updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
     if (window.OSHelm3DState) {
