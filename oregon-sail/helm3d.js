@@ -32,6 +32,7 @@
   const UNITS_PER_FOOT = 12 / 50; /* 0.24 */
   const FEET_PER_UNIT = 1 / UNITS_PER_FOOT;
   const UNITS_PER_NM = UNITS_PER_FOOT * 6076.12; /* derived, not a separate tuned constant */
+  const WATER_VISUAL_SPEED_MULTIPLIER = 2; /* purely visual -- water surface scrolls twice as fast as real boat speed would imply, per request, without touching actual boat physics/movement */
   let sunLight, ambientLight;
   let boatGroup, hullMesh, mastMesh, boomGroup, sailMesh, headsailGroup;
   let waterMesh, groundMesh;
@@ -501,6 +502,14 @@
              from the first two. Frequencies are all slightly
              irregular relative to each other (no simple multiples) to
              avoid any obvious repeating pattern. */
+          /* Eight swell layers total now: the original seven
+             scattered-angle layers, PLUS a real perpendicular swell
+             system at exactly 90° from the primary direction (a
+             second distinct wave train crossing the main swell at a
+             right angle, per request) -- this is intentionally a
+             meaningful, real layer rather than just another
+             scattered-angle texture pass, since it's specifically
+             meant to be felt as waves crossing the existing ones. */
           vec2 primary = rot(p, 0.0);
           vec2 secondary = rot(p, 1.1);
           vec2 tertiary = rot(p, 2.16);
@@ -508,6 +517,7 @@
           vec2 layer5 = rot(p, 4.09);
           vec2 layer6 = rot(p, 3.37);
           vec2 layer7 = rot(p, 0.36);
+          vec2 perpendicular = rot(p, 1.5708); /* exactly 90 degrees (pi/2) from the primary swell */
 
           float swell = sin(primary.x * 0.045 + slowClock * 0.9) * uAmplitude
                       + sin(secondary.x * 0.11 + slowClock * 1.3) * uAmplitude * 0.22
@@ -515,9 +525,10 @@
                       + sin(layer4.x * 0.093 + slowClock * 1.07 + 0.6) * uAmplitude * 0.12
                       + sin(layer5.x * 0.058 + slowClock * 0.78 + 3.2) * uAmplitude * 0.10
                       + sin(layer6.x * 0.082 + slowClock * 1.21 + 4.8) * uAmplitude * 0.09
-                      + sin(layer7.x * 0.066 + slowClock * 0.52 + 2.1) * uAmplitude * 0.08;
+                      + sin(layer7.x * 0.066 + slowClock * 0.52 + 2.1) * uAmplitude * 0.08
+                      + sin(perpendicular.x * 0.052 + slowClock * 0.75 + 5.5) * uAmplitude * 0.35;
 
-          vHeight = swell / max(uAmplitude * 1.77, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 7 layers) */
+          vHeight = swell / max(uAmplitude * 2.12, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 8 layers) */
           vWorldXZ = p; /* pass the (offset) world position for the cell pattern */
           vRippleClock = uTime; /* drives the vein ripple animation in the fragment shader */
 
@@ -643,15 +654,18 @@
          makes the swell pattern visually slide toward the stern (the
          standard scrolling-texture motion illusion). */
       const headingRad = (waterFlowHeadingDeg * Math.PI) / 180;
-      /* Correctly derived from the new global scale (UNITS_PER_FOOT)
-         instead of a separately-tuned, disconnected constant: real
-         feet/hour at this speed, converted to scene units, divided by
-         60 since this runs once per rendered frame at our 60fps
-         target. This is what makes the water's visual flow rate
-         genuinely match the boat's real speed in knots. */
+      /* Correctly derived from the new global scale (UNITS_PER_FOOT):
+         real feet/hour at this speed, converted to scene units,
+         divided by 60 since this runs once per rendered frame at our
+         60fps target. WATER_VISUAL_SPEED_MULTIPLIER is then applied
+         on top, purely for visual effect (per request: "make the
+         water graphics move like twice as fast so it looks like
+         you're going faster") -- it does NOT touch speedKt itself or
+         any other part of the boat's real physics/movement, only how
+         fast the water's surface pattern visually scrolls. */
       const feetPerHour = speedKt * 6076.12;
       const unitsPerSecond = (feetPerHour / 3600) * UNITS_PER_FOOT;
-      const moveRate = unitsPerSecond / 60;
+      const moveRate = (unitsPerSecond / 60) * WATER_VISUAL_SPEED_MULTIPLIER;
       waterOffsetX += Math.sin(headingRad) * moveRate;
       waterOffsetZ += Math.cos(headingRad) * moveRate;
     }
@@ -678,9 +692,11 @@
     }
 
     /* Must stay numerically identical to the water shader's vertex
-       shader (see buildWater) -- seven layers at the same angles,
-       frequencies, phase offsets, and amplitude weights, so the
-       boat's buoyancy/pitch physics matches the visual water exactly. */
+       shader (see buildWater) -- eight layers (seven scattered-angle
+       plus one real perpendicular swell at exactly 90 degrees from
+       the primary) at the same angles, frequencies, phase offsets,
+       and amplitude weights, so the boat's buoyancy/pitch physics
+       matches the visual water exactly. */
     const primaryX = rotX(px, pz, 0.0);
     const secondaryX = rotX(px, pz, 1.1);
     const tertiaryX = rotX(px, pz, 2.16);
@@ -688,6 +704,7 @@
     const layer5X = rotX(px, pz, 4.09);
     const layer6X = rotX(px, pz, 3.37);
     const layer7X = rotX(px, pz, 0.36);
+    const perpendicularX = rotX(px, pz, 1.5708);
 
     return Math.sin(primaryX * 0.045 + slowClock * 0.9) * amplitude
          + Math.sin(secondaryX * 0.11 + slowClock * 1.3) * amplitude * 0.22
@@ -695,7 +712,8 @@
          + Math.sin(layer4X * 0.093 + slowClock * 1.07 + 0.6) * amplitude * 0.12
          + Math.sin(layer5X * 0.058 + slowClock * 0.78 + 3.2) * amplitude * 0.10
          + Math.sin(layer6X * 0.082 + slowClock * 1.21 + 4.8) * amplitude * 0.09
-         + Math.sin(layer7X * 0.066 + slowClock * 0.52 + 2.1) * amplitude * 0.08;
+         + Math.sin(layer7X * 0.066 + slowClock * 0.52 + 2.1) * amplitude * 0.08
+         + Math.sin(perpendicularX * 0.052 + slowClock * 0.75 + 5.5) * amplitude * 0.35;
   }
 
   /* ---------------------------------------------------------------
