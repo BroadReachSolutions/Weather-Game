@@ -17,6 +17,21 @@
 
 (function () {
   let scene, camera, renderer, controls;
+
+  /* ---------------------------------------------------------------
+     GLOBAL SCALE CONVENTION
+     The Boat Designer's max Hull Length slider value (12 scene
+     units) now represents a real 50ft boat -- this is the one
+     conversion factor everything distance-related in the scene
+     derives from (render distance, water flow speed, AI boat speed),
+     replacing the previous disconnected conventions (a separate
+     60-units-per-nm rule for the wake trail, an unrelated tuned
+     constant for the water-flow visual effect) that didn't agree
+     with each other or with the boat's own actual size.
+     --------------------------------------------------------------- */
+  const UNITS_PER_FOOT = 12 / 50; /* 0.24 */
+  const FEET_PER_UNIT = 1 / UNITS_PER_FOOT;
+  const UNITS_PER_NM = UNITS_PER_FOOT * 6076.12; /* derived, not a separate tuned constant */
   let sunLight, ambientLight;
   let boatGroup, hullMesh, mastMesh, boomGroup, sailMesh, headsailGroup;
   let waterMesh, groundMesh;
@@ -50,13 +65,13 @@
        rather than a flat scene.background color, driven by the day/
        night cycle — no initial color needed here, the dome takes over
        on the very next frame. */
-    scene.fog = new THREE.Fog(0x9fd3e8, 90, 300); /* fog now reaches out to the full 5nm (300-unit) view radius instead of fading things out well before it */
+    scene.fog = new THREE.Fog(0x9fd3e8, 444, 634); /* slight fog starting at ~70% of the new 0.5mi (634-unit) render radius, full fog at the radius itself */
 
     const wrap = document.getElementById("osHelmViewWrap");
     const w = wrap.clientWidth || 360;
     const h = wrap.clientHeight || 240;
 
-    camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 1000); /* generously larger than the 300-unit (5nm) view radius below */
+    camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 1267); /* generously exceeds the new 634-unit (0.5mi) view radius */
     camera.position.set(0, 18, 32);
 
     renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
@@ -123,7 +138,7 @@
     skyDomeTexture.wrapS = THREE.ClampToEdgeWrapping;
     skyDomeTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-    const domeGeo = new THREE.SphereGeometry(450, 24, 16); /* comfortably exceeds the 300-unit (5nm) water radius */
+    const domeGeo = new THREE.SphereGeometry(887, 24, 16); /* comfortably exceeds the new 634-unit (0.5mi) water radius */
     const domeMat = new THREE.MeshBasicMaterial({
       map: skyDomeTexture, side: THREE.BackSide, depthWrite: false, fog: false
     });
@@ -225,7 +240,7 @@
       /* Random point on a large sphere above the horizon */
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI * 0.48; /* keep them in the upper sky */
-      const r = 440; /* just inside the skydome's own radius (450) so stars sit right at its surface */
+      const r = 877; /* just inside the skydome's own radius (887) so stars sit right at its surface */
       starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       starPositions[i * 3 + 1] = r * Math.cos(phi) + 20;
       starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
@@ -404,7 +419,7 @@
      enough to trigger a refresh).
      --------------------------------------------------------------- */
   function buildGroundPlane() {
-    const geo = new THREE.PlaneGeometry(900, 900);
+    const geo = new THREE.PlaneGeometry(1400, 1400); /* exceeds the new 1267-unit water plane diameter */
     /* Pushed well below the deepest possible swell trough (max
        amplitude is currently capped around 10, so -15 leaves real
        margin) and made much more transparent — this plane is just a
@@ -443,7 +458,7 @@
   let waterOffsetZ = 0;
 
   function buildWater() {
-    const geo = new THREE.PlaneGeometry(600, 600, 90, 90); /* stretched to a 5nm (300-unit) radius; same 90x90 subdivision count as before, so distant water is lower-resolution rather than costing more to render */
+    const geo = new THREE.PlaneGeometry(1267, 1267, 90, 90); /* stretched to the new 0.5mi (634-unit radius) view distance; same 90x90 subdivision count as before, no added performance cost */
 
     /* Stylized cracked-cell/voronoi water: irregular polygon "ice
        floe" cells of flat color, separated by bright white veins at
@@ -600,7 +615,15 @@
          makes the swell pattern visually slide toward the stern (the
          standard scrolling-texture motion illusion). */
       const headingRad = (waterFlowHeadingDeg * Math.PI) / 180;
-      const moveRate = speedKt * 0.035;
+      /* Correctly derived from the new global scale (UNITS_PER_FOOT)
+         instead of a separately-tuned, disconnected constant: real
+         feet/hour at this speed, converted to scene units, divided by
+         60 since this runs once per rendered frame at our 60fps
+         target. This is what makes the water's visual flow rate
+         genuinely match the boat's real speed in knots. */
+      const feetPerHour = speedKt * 6076.12;
+      const unitsPerSecond = (feetPerHour / 3600) * UNITS_PER_FOOT;
+      const moveRate = unitsPerSecond / 60;
       waterOffsetX += Math.sin(headingRad) * moveRate;
       waterOffsetZ += Math.cos(headingRad) * moveRate;
     }
@@ -724,10 +747,12 @@
     /* Age every existing point and push them further behind by how
        far the boat has traveled in this sample interval */
     const headingRad = (headingDeg * Math.PI) / 180;
-    const nm = (speedKt || 0) * (interval / 3600);
-    /* World-units-per-nm is arbitrary in this stylized scene; reuse
-       the same rough scale the wake/boat geometry already uses */
-    const moveDist = nm * 60;
+    /* Now uses the same global UNITS_PER_FOOT conversion as
+       everything else in the scene (water flow speed, AI boat speed)
+       instead of the old arbitrary 60-units-per-nm convention, which
+       was disconnected from the boat's own actual real-world size. */
+    const feetPerHourWake = (speedKt || 0) * 6076.12;
+    const moveDist = (feetPerHourWake / 3600) * interval * UNITS_PER_FOOT;
     const moveX = -Math.sin(headingRad) * moveDist;
     const moveZ = -Math.cos(headingRad) * moveDist;
 
@@ -909,7 +934,7 @@
      world feeling populated without a fixed boat count.
      --------------------------------------------------------------- */
   let aiBoats = []; /* { group, velocityX, velocityZ, collider } */
-  const AI_BOAT_WORLD_RADIUS = 300; /* matches the 5nm view radius */
+  const AI_BOAT_WORLD_RADIUS = 634; /* matches the new 0.5mi view radius */
   const AI_BOAT_MAX_COUNT = 5;
   let aiBoatSpawnClock = 0;
   let aiBoatSpawnInterval = 15 + Math.random() * 20; /* next spawn in 15-35s, re-rolled after each spawn */
@@ -1047,14 +1072,12 @@
     group.rotation.y = ((headingDeg + 180) * Math.PI) / 180; /* matches the confirmed player-boat heading convention */
 
     const speedKt = randomBetween(2, 8);
-    /* Correct units-per-second derivation: 60 world units per nm
-       (the established, verified convention from the wake trail
-       system), converted through nm-per-second at this speed. The
-       water-flow visual effect uses its own separately-tuned
-       constant (0.035) that does NOT represent real distance/time --
-       reusing it here would have made AI boats move at roughly double
-       their assigned speed. */
-    const unitsPerSecond = (speedKt / 3600) * 60;
+    /* Correctly derived from the new global scale (UNITS_PER_FOOT),
+       consistent with the water flow speed fix above -- replaces the
+       old 60-units-per-nm convention, which was a separate, earlier
+       calibration disconnected from the boat's own real size. */
+    const feetPerHourAI = speedKt * 6076.12;
+    const unitsPerSecond = (feetPerHourAI / 3600) * UNITS_PER_FOOT;
     const velocityX = -Math.sin(headingRad) * unitsPerSecond;
     const velocityZ = -Math.cos(headingRad) * unitsPerSecond;
 
