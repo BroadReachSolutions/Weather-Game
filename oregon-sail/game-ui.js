@@ -694,6 +694,8 @@
       spinnakerFurlPct: OS.boat ? (OS.boat.spinnaker_furl_pct || 0) : 0,
       isDownwind: pos.name === "Broad Reach" || pos.name === "Running",
       speedKt: boatSpeedKt,
+      boatLat: OS.boat ? OS.boat.lat : null,
+      boatLon: OS.boat ? OS.boat.lon : null,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
          feed on the client -- unless the dev console has an active

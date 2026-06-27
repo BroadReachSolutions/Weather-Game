@@ -434,6 +434,54 @@
   }
 
   /* ---------------------------------------------------------------
+     TERRAIN — real land generated from satellite imagery, anchored
+     to wherever the player's boat actually is. The boat itself never
+     translates in this scene (everything else moves/scrolls around
+     it instead, per the existing convention), so the generated
+     terrain group is positioned RELATIVE to the boat's current
+     position using the same lat/lon-delta-to-world-units approach
+     the wake trail and water flow already use, rather than moving
+     the boat itself.
+
+     Phase 1 scope: generates and places the mesh only. No collision
+     detection or shoreline wave effects yet — those are separate,
+     later phases.
+     --------------------------------------------------------------- */
+  let terrainGroup = null;
+  let terrainGeneratedForLatLon = null; /* avoids re-generating on every frame; only regenerates if the boat has moved meaningfully */
+
+  async function updateTerrain(boatLat, boatLon) {
+    if (typeof window.OSTerrain === "undefined" || boatLat == null || boatLon == null) return;
+
+    /* Only regenerate if we don't have terrain yet, or the boat has
+       moved far enough that the current terrain may no longer cover
+       the area around it (roughly a third of the generated tile's
+       real-world span, so there's always a comfortable margin left
+       before the player could sail off the edge of what's generated). */
+    if (terrainGeneratedForLatLon) {
+      const distFt = window.OSPhysics
+        ? window.OSPhysics.haversineNm(boatLat, boatLon, terrainGeneratedForLatLon.lat, terrainGeneratedForLatLon.lon) * 6076.12
+        : 0;
+      if (distFt < 1000) return; /* still well within the generated area */
+    }
+
+    const newTerrainGroup = await window.OSTerrain.generateTerrainForLocation(boatLat, boatLon, AI_BOAT_WORLD_RADIUS, UNITS_PER_FOOT);
+    if (!newTerrainGroup) return;
+
+    if (terrainGroup) {
+      scene.remove(terrainGroup);
+      terrainGroup.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+    }
+
+    terrainGroup = newTerrainGroup;
+    terrainGeneratedForLatLon = { lat: boatLat, lon: boatLon };
+    scene.add(terrainGroup);
+  }
+
+  /* ---------------------------------------------------------------
      WATER — animated plane using vertex displacement for a simple
      rolling-wave look, not a real ocean simulation.
      --------------------------------------------------------------- */
@@ -2158,6 +2206,9 @@
     }
     updateWakeTrail(0.0167);
     updateAIBoats(0.0167);
+    if (window.OSHelm3DState && window.OSHelm3DState.boatLat != null) {
+      updateTerrain(window.OSHelm3DState.boatLat, window.OSHelm3DState.boatLon);
+    }
     if (currentBoatDNA && aiBoats.length) {
       const playerHalfLength = (currentBoatDNA.hullLength || 6.8) / 2 * (currentBoatDNA.scale || 2.4);
       const playerHalfWidth = (currentBoatDNA.hullWidth || 2.1) / 2 * (currentBoatDNA.scale || 2.4);
