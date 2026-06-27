@@ -337,6 +337,41 @@
     ]}
   ];
 
+  /* Electrical equipment definitions — data-driven generation of
+     the boat-design checkboxes/fields below, instead of hand-writing
+     ~25 nearly-identical blocks. */
+  const ELEC_BATTERY_DEFS = [
+    { key: "start", label: "Start Battery", capacityCol: "start_battery_capacity_wh", hasCol: "has_start_battery", hasBankCount: false },
+    { key: "house", label: "House Battery", capacityCol: "house_battery_capacity_wh", hasCol: "has_house_battery", hasBankCount: true },
+    { key: "generator", label: "Generator Start Battery", capacityCol: "generator_battery_capacity_wh", hasCol: "has_generator_battery", hasBankCount: false },
+    { key: "bow_thruster", label: "Bow Thruster Battery", capacityCol: "bow_thruster_battery_capacity_wh", hasCol: "has_bow_thruster_battery", hasBankCount: false }
+  ];
+
+  const ELEC_GENERATION_DEFS = [
+    { key: "solar", label: "Solar", hasCol: "has_solar", wattsCol: "solar_rated_watts" },
+    { key: "wind_generator", label: "Wind Generator", hasCol: "has_wind_generator", wattsCol: "wind_generator_rated_watts" },
+    { key: "generator", label: "Generator", hasCol: "has_generator", wattsCol: "generator_rated_watts", extraCol: "generator_fuel_consumption_gph", extraLabel: "Fuel (gal/hr at rated output)" },
+    { key: "alternator", label: "Alternator", hasCol: "has_alternator", wattsCol: "alternator_rated_watts" }
+  ];
+
+  const ELEC_LOAD_DEFS = [
+    { key: "radar", label: "Weather Radar", hasCol: "has_radar", wattsCol: "radar_watts" },
+    { key: "fridge", label: "Fridge", hasCol: "has_fridge", wattsCol: "fridge_watts" },
+    { key: "ac", label: "A/C", hasCol: "has_ac", wattsCol: "ac_watts" },
+    { key: "watermaker", label: "Water Maker", hasCol: "has_watermaker", wattsCol: "watermaker_watts", extraCol: "watermaker_gph", extraLabel: "Output (gal/hr while running)" },
+    { key: "inverter", label: "Inverter", hasCol: "has_inverter", wattsCol: "inverter_watts" },
+    { key: "electric_head", label: "Electric Head", hasCol: "has_electric_head", wattsCol: "electric_head_watts" },
+    { key: "instruments", label: "Instruments (per gauge)", hasCol: "has_instruments", wattsCol: "instruments_watts_each" },
+    { key: "microwave", label: "Microwave", hasCol: "has_microwave", wattsCol: "microwave_watts" },
+    { key: "cooktop", label: "Electric Cooktop", hasCol: "has_cooktop", wattsCol: "cooktop_watts" },
+    { key: "vhf", label: "VHF", hasCol: "has_vhf", wattsCol: "vhf_watts" },
+    { key: "ais", label: "AIS", hasCol: "has_ais", wattsCol: "ais_watts" },
+    { key: "bilge_pump", label: "Bilge Pump", hasCol: "has_bilge_pump", wattsCol: "bilge_pump_watts" },
+    { key: "fans", label: "Fans", hasCol: "has_fans", wattsCol: "fans_watts" },
+    { key: "cabin_lights", label: "Cabin Lights", hasCol: "has_cabin_lights", wattsCol: "cabin_lights_watts" },
+    { key: "bow_thruster", label: "Bow Thruster", hasCol: "has_bow_thruster", wattsCol: "bow_thruster_watts" }
+  ];
+
   const DESIGNER_FIELDS = [
     { key: "hullLength", label: "Hull Length", min: 4, max: 12, step: 0.1 },
     { key: "hullWidth", label: "Hull Width (Beam)", min: 1.2, max: 4, step: 0.1 },
@@ -369,6 +404,125 @@
   }
   function hexToColorInt(hex) {
     return parseInt(hex.replace("#", ""), 16);
+  }
+
+  /* Builds the three Electrical sections (batteries, generation,
+     loads) data-driven from ELEC_BATTERY_DEFS / ELEC_GENERATION_DEFS
+     / ELEC_LOAD_DEFS. Unlike the hull/sail design fields above (which
+     live in hull_design and only apply on Save/Apply), these write
+     DIRECTLY to the real boat record on every change -- they're real
+     game-state columns (battery capacity, equipment ratings), not 3D
+     shape data, so there's no separate "apply" step needed. */
+  function renderElectricalEquipment() {
+    if (!window.OS.boat) return;
+    const boat = window.OS.boat;
+
+    const batteryWrap = document.getElementById("osDevElecBatteries");
+    if (batteryWrap) {
+      batteryWrap.innerHTML = "";
+      ELEC_BATTERY_DEFS.forEach(def => {
+        const row = document.createElement("div");
+        row.className = "osDevElecRow";
+        const bankCountHtml = def.hasBankCount
+          ? `<label class="osDevElecSmallField">Bank Count <input type="number" min="1" max="8" id="elecBank_${def.key}" value="${boat.house_battery_bank_count || 1}"></label>`
+          : "";
+        row.innerHTML = `
+          <label class="osDevElecCheckbox"><input type="checkbox" id="elecHas_${def.key}" ${boat[def.hasCol] ? "checked" : ""}> ${def.label}</label>
+          <label class="osDevElecSmallField">Capacity (Wh) <input type="number" min="0" id="elecCap_${def.key}" value="${boat[def.capacityCol] || 0}"></label>
+          ${bankCountHtml}
+        `;
+        batteryWrap.appendChild(row);
+
+        row.querySelector(`#elecHas_${def.key}`).addEventListener("change", async (e) => {
+          boat[def.hasCol] = e.target.checked;
+          await sbClient.from("boats").update({ [def.hasCol]: e.target.checked }).eq("id", boat.id);
+          if (typeof window.OSGameUI !== "undefined" && window.OSGameUI.refreshBatteryPanel) window.OSGameUI.refreshBatteryPanel();
+        });
+        row.querySelector(`#elecCap_${def.key}`).addEventListener("change", async (e) => {
+          const val = parseFloat(e.target.value) || 0;
+          boat[def.capacityCol] = val;
+          await sbClient.from("boats").update({ [def.capacityCol]: val }).eq("id", boat.id);
+        });
+        if (def.hasBankCount) {
+          row.querySelector(`#elecBank_${def.key}`).addEventListener("change", async (e) => {
+            const count = Math.max(1, parseInt(e.target.value, 10) || 1);
+            if (typeof window.OS.setHouseBatteryBankCount === "function") {
+              await window.OS.setHouseBatteryBankCount(count);
+            }
+          });
+        }
+      });
+    }
+
+    const genWrap = document.getElementById("osDevElecGeneration");
+    if (genWrap) {
+      genWrap.innerHTML = "";
+      ELEC_GENERATION_DEFS.forEach(def => {
+        const row = document.createElement("div");
+        row.className = "osDevElecRow";
+        const extraHtml = def.extraCol
+          ? `<label class="osDevElecSmallField">${def.extraLabel} <input type="number" min="0" step="0.01" id="elecExtra_${def.key}" value="${boat[def.extraCol] || 0}"></label>`
+          : "";
+        row.innerHTML = `
+          <label class="osDevElecCheckbox"><input type="checkbox" id="elecHas_${def.key}" ${boat[def.hasCol] ? "checked" : ""}> ${def.label}</label>
+          <label class="osDevElecSmallField">Rated Watts <input type="number" min="0" id="elecWatts_${def.key}" value="${boat[def.wattsCol] || 0}"></label>
+          ${extraHtml}
+        `;
+        genWrap.appendChild(row);
+
+        row.querySelector(`#elecHas_${def.key}`).addEventListener("change", async (e) => {
+          boat[def.hasCol] = e.target.checked;
+          await sbClient.from("boats").update({ [def.hasCol]: e.target.checked }).eq("id", boat.id);
+        });
+        row.querySelector(`#elecWatts_${def.key}`).addEventListener("change", async (e) => {
+          const val = parseFloat(e.target.value) || 0;
+          boat[def.wattsCol] = val;
+          await sbClient.from("boats").update({ [def.wattsCol]: val }).eq("id", boat.id);
+        });
+        if (def.extraCol) {
+          row.querySelector(`#elecExtra_${def.key}`).addEventListener("change", async (e) => {
+            const val = parseFloat(e.target.value) || 0;
+            boat[def.extraCol] = val;
+            await sbClient.from("boats").update({ [def.extraCol]: val }).eq("id", boat.id);
+          });
+        }
+      });
+    }
+
+    const loadWrap = document.getElementById("osDevElecLoads");
+    if (loadWrap) {
+      loadWrap.innerHTML = "";
+      ELEC_LOAD_DEFS.forEach(def => {
+        const row = document.createElement("div");
+        row.className = "osDevElecRow";
+        const extraHtml = def.extraCol
+          ? `<label class="osDevElecSmallField">${def.extraLabel} <input type="number" min="0" step="0.01" id="elecExtra_${def.key}" value="${boat[def.extraCol] || 0}"></label>`
+          : "";
+        row.innerHTML = `
+          <label class="osDevElecCheckbox"><input type="checkbox" id="elecHas_${def.key}" ${boat[def.hasCol] ? "checked" : ""}> ${def.label}</label>
+          <label class="osDevElecSmallField">Watts ${def.key === "instruments" ? "(each)" : ""} <input type="number" min="0" id="elecWatts_${def.key}" value="${boat[def.wattsCol] || 0}"></label>
+          ${extraHtml}
+        `;
+        loadWrap.appendChild(row);
+
+        row.querySelector(`#elecHas_${def.key}`).addEventListener("change", async (e) => {
+          boat[def.hasCol] = e.target.checked;
+          await sbClient.from("boats").update({ [def.hasCol]: e.target.checked }).eq("id", boat.id);
+        });
+        row.querySelector(`#elecWatts_${def.key}`).addEventListener("change", async (e) => {
+          const val = parseFloat(e.target.value) || 0;
+          boat[def.wattsCol] = val;
+          await sbClient.from("boats").update({ [def.wattsCol]: val }).eq("id", boat.id);
+        });
+        if (def.extraCol) {
+          row.querySelector(`#elecExtra_${def.key}`).addEventListener("change", async (e) => {
+            const val = parseFloat(e.target.value) || 0;
+            boat[def.extraCol] = val;
+            await sbClient.from("boats").update({ [def.extraCol]: val }).eq("id", boat.id);
+          });
+        }
+      });
+    }
   }
 
   function renderDesignerTab() {
@@ -423,6 +577,18 @@
           <div class="osDevSectionHeader" style="margin-top:14px;"><span>Colors</span></div>
           <div class="osDevDesignerColors" id="osDevDesignerColors"></div>
         </div>
+
+        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Electrical — Batteries</span></div>
+        <p class="osDevHint">Which battery slots this boat has, and their capacity in watt-hours. House battery bank size multiplies its per-battery capacity.</p>
+        <div id="osDevElecBatteries"></div>
+
+        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Electrical — Generation</span></div>
+        <p class="osDevHint">Solar, wind generator, engine generator, and alternator all charge the house bank.</p>
+        <div id="osDevElecGeneration"></div>
+
+        <div class="osDevSectionHeader" style="margin-top:14px;"><span>Electrical — Loads</span></div>
+        <p class="osDevHint">Which equipment this boat has, and its rated power draw in watts. All draw from the house bank except Bow Thruster, which has its own dedicated battery.</p>
+        <div id="osDevElecLoads"></div>
 
         <div class="osDevFormActions" style="margin-top:14px;">
           <button class="osDevBtn" id="osDevApplyToMeBtn">Apply to My Boat</button>
@@ -526,6 +692,8 @@
     /* Render once immediately with the loaded DNA so the preview
        matches the sliders right away, not just after the first drag */
     window.OSHelm3D.rebuildBoat(designerDNA);
+
+    renderElectricalEquipment();
 
     document.getElementById("osDevApplyToMeBtn").addEventListener("click", async () => {
       if (!window.OS.boat) return;

@@ -433,6 +433,27 @@ OS.setBatteryCharge = async function (batteryKey, chargeWh) {
 /* Toggles whether a battery slot exists on the boat at all (a boat-
    design-time choice) -- separate from charge state, which is live
    gameplay state. Used by the dev console / boat creation flow. */
+/* Generic toggle for any of the new Phase 3 loads (radar, fridge,
+   ac, watermaker, inverter, electric_head, instruments, microwave,
+   cooktop, vhf, ais, bilge_pump, fans, cabin_lights, bow_thruster).
+   One shared function instead of duplicating 14 nearly-identical
+   handlers, since they all follow the exact same load_<key>_on
+   column pattern. */
+OS.setLoad = async function (loadKey, isOn) {
+  if (!OS.boat) return;
+  const column = "load_" + loadKey + "_on";
+  OS.boat[column] = isOn; /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ [column]: isOn, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setLoad failed", error);
+  return { data, error };
+};
+
 OS.setBatterySlotEnabled = async function (batteryKey, enabled) {
   if (!OS.boat) return;
   const column = "has_" + batteryKey + "_battery";

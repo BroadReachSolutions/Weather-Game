@@ -43,8 +43,7 @@
       { id: "water", label: "Water Gauge" },
       { id: "food", label: "Food Gauge" },
       { id: "hull", label: "Hull Gauge" },
-      { id: "track", label: "Track Controls" },
-      { id: "vhf", label: "VHF Radio" }
+      { id: "track", label: "Track Controls" }
     ],
     crew: [],   /* no widgets yet — real crew system is future work */
     systems: [

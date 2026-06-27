@@ -1168,6 +1168,7 @@
     wireLightPanel();
     wireBatteryPanel();
     wireGenerationToggle();
+    wireLoadToggles();
   }
 
   /* ---------------------------------------------------------------
@@ -1346,6 +1347,83 @@
         altRow.querySelector('[data-gen-output="alternator"]').textContent = Math.round(watts) + "W";
       }
     }
+
+    updateLoadRowsDisplay();
+  }
+
+  /* Generic display + state for the 14 new Phase 3 load toggles.
+     Data-driven from one list rather than 14 hand-written blocks --
+     each entry just needs its has_<key> / load_<key>_on / <key>_watts
+     column names, which all follow the same pattern. Instruments is
+     a special case since its watts depend on how many gauge widgets
+     are actually placed, same as the server-side calculation. */
+  const LOAD_UI_DEFS = [
+    { key: "radar", hasCol: "has_radar", wattsCol: "radar_watts" },
+    { key: "fridge", hasCol: "has_fridge", wattsCol: "fridge_watts" },
+    { key: "ac", hasCol: "has_ac", wattsCol: "ac_watts" },
+    { key: "cabin_lights", hasCol: "has_cabin_lights", wattsCol: "cabin_lights_watts" },
+    { key: "fans", hasCol: "has_fans", wattsCol: "fans_watts" },
+    { key: "watermaker", hasCol: "has_watermaker", wattsCol: "watermaker_watts" },
+    { key: "inverter", hasCol: "has_inverter", wattsCol: "inverter_watts" },
+    { key: "electric_head", hasCol: "has_electric_head", wattsCol: "electric_head_watts" },
+    { key: "instruments", hasCol: "has_instruments", wattsCol: null }, /* special-cased below */
+    { key: "bilge_pump", hasCol: "has_bilge_pump", wattsCol: "bilge_pump_watts" },
+    { key: "microwave", hasCol: "has_microwave", wattsCol: "microwave_watts" },
+    { key: "cooktop", hasCol: "has_cooktop", wattsCol: "cooktop_watts" },
+    { key: "vhf", hasCol: "has_vhf", wattsCol: "vhf_watts" },
+    { key: "ais", hasCol: "has_ais", wattsCol: "ais_watts" },
+    { key: "bow_thruster", hasCol: "has_bow_thruster", wattsCol: "bow_thruster_watts" }
+  ];
+
+  function updateLoadRowsDisplay() {
+    const panel = document.getElementById("osBatteryPanel");
+    if (!panel || !OS.boat) return;
+
+    LOAD_UI_DEFS.forEach(def => {
+      const row = panel.querySelector(`.osLoadRow[data-load-key="${def.key}"]`);
+      if (!row) return;
+      const has = !!OS.boat[def.hasCol];
+      row.style.display = has ? "flex" : "none";
+      if (!has) return;
+
+      const isOn = !!OS.boat["load_" + def.key + "_on"];
+      const toggle = row.querySelector(`[data-load-toggle="${def.key}"]`);
+      if (toggle) {
+        toggle.textContent = isOn ? "ON" : "OFF";
+        toggle.classList.toggle("on", isOn);
+      }
+
+      let watts = 0;
+      if (isOn) {
+        if (def.key === "instruments") {
+          watts = (OS.boat.instruments_watts_each || 8) * countActiveInstrumentWidgets();
+        } else {
+          watts = OS.boat[def.wattsCol] || 0;
+        }
+      }
+      const outputLabel = row.querySelector(`[data-load-output="${def.key}"]`);
+      if (outputLabel) outputLabel.textContent = Math.round(watts) + "W";
+    });
+  }
+
+  function wireLoadToggles(attemptsLeft) {
+    const anyToggle = document.querySelector('[data-load-toggle="vhf"]'); /* vhf defaults to enabled, a reliable presence check */
+    if (!anyToggle) {
+      if (attemptsLeft == null) attemptsLeft = 20;
+      if (attemptsLeft > 0) setTimeout(() => wireLoadToggles(attemptsLeft - 1), 300);
+      return;
+    }
+    LOAD_UI_DEFS.forEach(def => {
+      const toggle = document.querySelector(`[data-load-toggle="${def.key}"]`);
+      if (!toggle || toggle.dataset.wired === "1") return;
+      toggle.dataset.wired = "1";
+      toggle.addEventListener("click", async () => {
+        if (!OS.boat) return;
+        const newState = !OS.boat["load_" + def.key + "_on"];
+        await OS.setLoad(def.key, newState);
+        updateLoadRowsDisplay();
+      });
+    });
   }
 
   function wireGenerationToggle(attemptsLeft) {
