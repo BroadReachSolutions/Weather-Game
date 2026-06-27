@@ -1108,6 +1108,7 @@
     wireGaugeDependentControls();
     wireLightPanel();
     wireBatteryPanel();
+    wireGenerationToggle();
   }
 
   /* ---------------------------------------------------------------
@@ -1223,6 +1224,85 @@
         fill.classList.toggle("critical", pct < 8);
       }
       if (pctLabel) pctLabel.textContent = pct.toFixed(0) + "%";
+    });
+
+    updateGenerationDisplay();
+  }
+
+  /* Computes and displays each generation source's current real-time
+     output (Phase 2 -- display only for now; actually feeding this
+     into battery charge happens in Phase 3 once loads exist too, so
+     the charge/discharge balance is meaningful). Rows for sources the
+     boat doesn't have are hidden. */
+  function updateGenerationDisplay() {
+    const panel = document.getElementById("osBatteryPanel");
+    if (!panel || !OS.boat || typeof window.OSPhysics === "undefined") return;
+
+    const solarRow = panel.querySelector('.osGenRow[data-gen-key="solar"]');
+    if (solarRow) {
+      const has = !!OS.boat.has_solar;
+      solarRow.style.display = has ? "flex" : "none";
+      if (has) {
+        const hour = new Date().getHours() + new Date().getMinutes() / 60;
+        const watts = window.OSPhysics.calculateSolarOutput(OS.boat.solar_rated_watts || 0, hour);
+        solarRow.querySelector('[data-gen-output="solar"]').textContent = Math.round(watts) + "W";
+      }
+    }
+
+    const windRow = panel.querySelector('.osGenRow[data-gen-key="wind_generator"]');
+    if (windRow) {
+      const has = !!OS.boat.has_wind_generator;
+      windRow.style.display = has ? "flex" : "none";
+      if (has) {
+        const windKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
+        const watts = window.OSPhysics.calculateWindGeneratorOutput(OS.boat.wind_generator_rated_watts || 0, windKt);
+        windRow.querySelector('[data-gen-output="wind_generator"]').textContent = Math.round(watts) + "W";
+      }
+    }
+
+    const genRow = panel.querySelector('.osGenRow[data-gen-key="generator"]');
+    if (genRow) {
+      const has = !!OS.boat.has_generator;
+      genRow.style.display = has ? "flex" : "none";
+      if (has) {
+        const isRunning = !!OS.boat.generator_running;
+        const watts = window.OSPhysics.calculateGeneratorOutput(OS.boat.generator_rated_watts || 0, isRunning);
+        genRow.querySelector('[data-gen-output="generator"]').textContent = Math.round(watts) + "W";
+        const toggle = genRow.querySelector('[data-gen-toggle="generator"]');
+        if (toggle) {
+          toggle.textContent = isRunning ? "ON" : "OFF";
+          toggle.classList.toggle("on", isRunning);
+        }
+      }
+    }
+
+    const altRow = panel.querySelector('.osGenRow[data-gen-key="alternator"]');
+    if (altRow) {
+      const has = !!OS.boat.has_alternator;
+      altRow.style.display = has ? "flex" : "none";
+      if (has) {
+        const engineOn = !!OS.boat.engine_on;
+        const throttlePct = OS.boat.throttle_rpm || 0;
+        const watts = window.OSPhysics.calculateAlternatorOutput(OS.boat.alternator_rated_watts || 0, engineOn, throttlePct);
+        altRow.querySelector('[data-gen-output="alternator"]').textContent = Math.round(watts) + "W";
+      }
+    }
+  }
+
+  function wireGenerationToggle(attemptsLeft) {
+    const toggle = document.querySelector('[data-gen-toggle="generator"]');
+    if (!toggle) {
+      if (attemptsLeft == null) attemptsLeft = 20;
+      if (attemptsLeft > 0) setTimeout(() => wireGenerationToggle(attemptsLeft - 1), 300);
+      return;
+    }
+    if (toggle.dataset.wired === "1") return;
+    toggle.dataset.wired = "1";
+    toggle.addEventListener("click", async () => {
+      if (!OS.boat) return;
+      const newState = !OS.boat.generator_running;
+      await OS.setGeneratorRunning(newState);
+      updateGenerationDisplay();
     });
   }
 

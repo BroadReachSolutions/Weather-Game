@@ -318,6 +318,22 @@ OS.setLight = async function (key, isOn) {
    simulation (added in a later phase) -- for now it's also callable
    directly for testing/dev purposes.
    --------------------------------------------------------------- */
+/* Toggles the generator on/off (player-controlled, like the engine).
+   Fuel consumption and power output only apply while running. */
+OS.setGeneratorRunning = async function (isRunning) {
+  if (!OS.boat) return;
+  OS.boat.generator_running = isRunning;
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ generator_running: isRunning, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setGeneratorRunning failed", error);
+  return { data, error };
+};
+
 OS.setBatteryCharge = async function (batteryKey, chargeWh) {
   if (!OS.boat) return;
   const column = batteryKey + "_battery_charge_wh";

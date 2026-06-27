@@ -2856,6 +2856,47 @@ body.layout-edit .widgetResize {
   text-align: right;
 }
 
+.osGenRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+.osGenLabel {
+  font-size: 11px;
+  color: #d0ecff;
+  font-weight: 600;
+  flex: 1 1 auto;
+}
+
+.osGenOutput {
+  font-size: 10px;
+  font-family: monospace;
+  color: #b8ffd0;
+  flex: 0 0 44px;
+  text-align: right;
+}
+
+.osGenToggle {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  border-radius: 5px;
+  border: 1px solid rgba(159,194,217,0.35);
+  background: rgba(255,255,255,0.05);
+  color: rgba(159,194,217,0.7);
+  cursor: pointer;
+}
+
+.osGenToggle.on {
+  background: rgba(105,240,174,0.25);
+  border-color: rgba(105,240,174,0.7);
+  color: #b8ffd0;
+}
+
 .osNavControls {
   display: flex;
   gap: 8px;

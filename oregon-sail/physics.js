@@ -286,6 +286,73 @@
     };
   }
 
+  /* ---------------------------------------------------------------
+     ELECTRICAL SYSTEM — Phase 2: generation sources. All real-world
+     wattage math, feeding the house battery bank per the original
+     design spec (solar/wind/generator all charge the house bank;
+     dedicated batteries like start/generator-start/bow-thruster
+     aren't charged by these sources in this phase).
+     --------------------------------------------------------------- */
+
+  /* Solar output follows a smooth bell curve through the day: zero
+     before sunrise and after sunset, peaking at the panel's full
+     rated wattage at solar noon. Uses a half-wave sine shape (clean,
+     smooth ramp-up/down) rather than a literal Gaussian, which is a
+     close enough real-world approximation for gameplay purposes and
+     much simpler to reason about. */
+  function calculateSolarOutput(ratedWatts, hourOfDay) {
+    if (!ratedWatts || ratedWatts <= 0) return 0;
+    const sunriseHour = 6, sunsetHour = 18; /* simple fixed daylight window */
+    if (hourOfDay <= sunriseHour || hourOfDay >= sunsetHour) return 0;
+    const dayLength = sunsetHour - sunriseHour;
+    const t = (hourOfDay - sunriseHour) / dayLength; /* 0..1 across the daylight window */
+    const bellCurve = Math.sin(t * Math.PI); /* 0 at sunrise/sunset, 1 at solar noon */
+    return ratedWatts * bellCurve;
+  }
+
+  /* Wind generator output scales with real wind speed: negligible
+     below a cut-in speed (most small marine wind generators need
+     ~6-8kt before producing meaningful power), ramping up through
+     the useful range, then capped at the unit's rated max once wind
+     is strong enough — real wind generators don't keep producing
+     more and more power linearly forever, they're governed/capped. */
+  function calculateWindGeneratorOutput(ratedWatts, windSpeedKt) {
+    if (!ratedWatts || ratedWatts <= 0) return 0;
+    const cutInKt = 6;
+    const ratedAtKt = 25; /* wind speed at which the unit hits its full rated output */
+    if (windSpeedKt <= cutInKt) return 0;
+    const t = Math.min(1, (windSpeedKt - cutInKt) / (ratedAtKt - cutInKt));
+    /* Cubic ramp — wind generator output realistically scales closer
+       to the cube of wind speed in the real (uncapped) regime, which
+       gives a more authentic slow-start/fast-ramp feel than a
+       straight line, before being capped at 1.0 (rated max). */
+    return ratedWatts * Math.pow(t, 1.6);
+  }
+
+  /* Generator: flat rated output while running, zero otherwise.
+     Fuel consumption scales with the configured gal/hr rating
+     (itself proportional to the generator's rated wattage when the
+     boat was configured), only burning fuel while actually running. */
+  function calculateGeneratorOutput(ratedWatts, isRunning) {
+    if (!ratedWatts || ratedWatts <= 0 || !isRunning) return 0;
+    return ratedWatts;
+  }
+  function calculateGeneratorFuelBurnPerHour(fuelConsumptionGph, isRunning) {
+    if (!isRunning) return 0;
+    return fuelConsumptionGph || 0;
+  }
+
+  /* Alternator: charges while the engine is running, scaled by
+     throttle (an idling engine's alternator puts out much less than
+     one being run hard) — uses the same throttleRpm/engine-on state
+     the rest of the physics already tracks, not a separate input. */
+  function calculateAlternatorOutput(ratedWatts, engineOn, throttlePct) {
+    if (!ratedWatts || ratedWatts <= 0 || !engineOn) return 0;
+    const throttleFactor = Math.max(0.25, Math.min(1, (throttlePct || 0) / 100)); /* even idle produces SOME charge, ~25% of rated */
+    return ratedWatts * throttleFactor;
+  }
+
+
   window.OSPhysics = {
     calculatePointOfSail,
     trimQualityFactor,
@@ -296,6 +363,11 @@
     haversineNm,
     bearingDeg,
     updateHeading,
-    advance
+    advance,
+    calculateSolarOutput,
+    calculateWindGeneratorOutput,
+    calculateGeneratorOutput,
+    calculateGeneratorFuelBurnPerHour,
+    calculateAlternatorOutput
   };
 })();
