@@ -1107,6 +1107,7 @@
        rather than silently failing. */
     wireGaugeDependentControls();
     wireLightPanel();
+    wireBatteryPanel();
   }
 
   /* ---------------------------------------------------------------
@@ -1152,6 +1153,77 @@
   function updateLightSwitchUI(btn, isOn) {
     btn.textContent = isOn ? "ON" : "OFF";
     btn.classList.toggle("on", isOn);
+  }
+
+  /* ---------------------------------------------------------------
+     BATTERY PANEL (Electrical sub-tab, Systems tab)
+     Shows each battery slot that actually exists on this boat, with
+     a live charge-level bar/percentage. Slots the boat doesn't have
+     (has_<key>_battery is false) are hidden rather than shown empty.
+     This is Phase 1 of the Electrical system -- live charge/discharge
+     simulation against real loads comes in a later phase; for now
+     this widget just displays whatever charge state currently exists
+     in the boat record.
+     --------------------------------------------------------------- */
+  function wireBatteryPanel(attemptsLeft) {
+    const panel = document.getElementById("osBatteryPanel");
+    if (!panel) {
+      if (attemptsLeft == null) attemptsLeft = 20;
+      if (attemptsLeft > 0) setTimeout(() => wireBatteryPanel(attemptsLeft - 1), 300);
+      return;
+    }
+    if (!OS.boat) {
+      if (attemptsLeft == null) attemptsLeft = 20;
+      if (attemptsLeft > 0) setTimeout(() => wireBatteryPanel(attemptsLeft - 1), 300);
+      return;
+    }
+    updateBatteryPanelDisplay();
+  }
+
+  const BATTERY_KEYS = ["start", "house", "generator", "bow_thruster"];
+
+  function getBatteryCapacityWh(key) {
+    if (!OS.boat) return 0;
+    if (key === "house") {
+      return (OS.boat.house_battery_capacity_wh || 1200) * (OS.boat.house_battery_bank_count || 1);
+    }
+    return OS.boat[key + "_battery_capacity_wh"] || 0;
+  }
+
+  function getBatteryChargeWh(key) {
+    if (!OS.boat) return 0;
+    return OS.boat[key + "_battery_charge_wh"] || 0;
+  }
+
+  /* Re-reads the boat's current battery state and refreshes the
+     panel's bars/percentages -- called on load and after anything
+     that could change charge or slot availability (e.g. a future
+     real-time power tick). Rows for slots this boat doesn't have are
+     hidden entirely rather than shown at 0%. */
+  function updateBatteryPanelDisplay() {
+    const panel = document.getElementById("osBatteryPanel");
+    if (!panel || !OS.boat) return;
+
+    BATTERY_KEYS.forEach(key => {
+      const row = panel.querySelector(`.osBatteryRow[data-battery-key="${key}"]`);
+      if (!row) return;
+      const hasSlot = !!OS.boat["has_" + key + "_battery"];
+      row.style.display = hasSlot ? "flex" : "none";
+      if (!hasSlot) return;
+
+      const capacity = getBatteryCapacityWh(key);
+      const charge = getBatteryChargeWh(key);
+      const pct = capacity > 0 ? Math.max(0, Math.min(100, (charge / capacity) * 100)) : 0;
+
+      const fill = row.querySelector(`[data-battery-fill="${key}"]`);
+      const pctLabel = row.querySelector(`[data-battery-pct="${key}"]`);
+      if (fill) {
+        fill.style.width = pct.toFixed(0) + "%";
+        fill.classList.toggle("low", pct < 20);
+        fill.classList.toggle("critical", pct < 8);
+      }
+      if (pctLabel) pctLabel.textContent = pct.toFixed(0) + "%";
+    });
   }
 
   function wireGaugeDependentControls(attemptsLeft) {

@@ -309,6 +309,84 @@ OS.setLight = async function (key, isOn) {
   return { data, error };
 };
 
+/* ---------------------------------------------------------------
+   ELECTRICAL SYSTEM — Phase 1: batteries.
+   Each battery role (start, house, generator, bow-thruster) has an
+   enabled flag, a capacity in watt-hours, and a live charge in
+   watt-hours. setBatteryCharge is the one function that actually
+   updates charge state, called periodically by the real-time power
+   simulation (added in a later phase) -- for now it's also callable
+   directly for testing/dev purposes.
+   --------------------------------------------------------------- */
+OS.setBatteryCharge = async function (batteryKey, chargeWh) {
+  if (!OS.boat) return;
+  const column = batteryKey + "_battery_charge_wh";
+  const capacityColumn = batteryKey + "_battery_capacity_wh";
+  const capacity = batteryKey === "house"
+    ? (OS.boat.house_battery_capacity_wh || 1200) * (OS.boat.house_battery_bank_count || 1)
+    : (OS.boat[capacityColumn] || 0);
+  const clamped = Math.max(0, Math.min(capacity, chargeWh));
+  OS.boat[column] = clamped; /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ [column]: clamped, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setBatteryCharge failed", error);
+  return { data, error };
+};
+
+/* Toggles whether a battery slot exists on the boat at all (a boat-
+   design-time choice) -- separate from charge state, which is live
+   gameplay state. Used by the dev console / boat creation flow. */
+OS.setBatterySlotEnabled = async function (batteryKey, enabled) {
+  if (!OS.boat) return;
+  const column = "has_" + batteryKey + "_battery";
+  OS.boat[column] = enabled;
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ [column]: enabled, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setBatterySlotEnabled failed", error);
+  return { data, error };
+};
+
+/* House battery bank size (1+ batteries wired together as one bank,
+   per request) -- changing this also rescales current charge
+   proportionally so adding/removing a battery from the bank doesn't
+   instantly create energy from nothing or destroy it outright. */
+OS.setHouseBatteryBankCount = async function (count) {
+  if (!OS.boat) return;
+  const newCount = Math.max(1, Math.round(count));
+  const oldCount = OS.boat.house_battery_bank_count || 1;
+  const perBatteryCapacity = OS.boat.house_battery_capacity_wh || 1200;
+  const oldTotalCapacity = perBatteryCapacity * oldCount;
+  const newTotalCapacity = perBatteryCapacity * newCount;
+  const currentChargeRatio = oldTotalCapacity > 0 ? (OS.boat.house_battery_charge_wh || 0) / oldTotalCapacity : 1;
+  const newCharge = newTotalCapacity * currentChargeRatio;
+
+  OS.boat.house_battery_bank_count = newCount;
+  OS.boat.house_battery_charge_wh = newCharge;
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({
+      house_battery_bank_count: newCount,
+      house_battery_charge_wh: newCharge,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: setHouseBatteryBankCount failed", error);
+  return { data, error };
+};
+
 OS.setSailingActive = async function (active) {
   if (!OS.boat) return;
   OS.boat.sailing_active = active; /* in-memory first, see note in setEngine */

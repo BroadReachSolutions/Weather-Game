@@ -15,7 +15,7 @@
 
 (function () {
   const STORAGE_KEY = "osTabConfig";
-  const CONFIG_VERSION = 5; /* bumped: DC lighting panel added to Nav Station defaults */
+  const CONFIG_VERSION = 6; /* bumped: battery panel added to Systems > Electrical defaults */
 
   /* Which widget ids are offered for each main tab's "+ Add Widget"
      picker. Placeholders are listed here even though they're not
@@ -47,7 +47,9 @@
       { id: "vhf", label: "VHF Radio" }
     ],
     crew: [],   /* no widgets yet — real crew system is future work */
-    systems: [],
+    systems: [
+      { id: "batterypanel", label: "Battery Bank" }
+    ],
     storage: []
   };
 
@@ -67,7 +69,7 @@
           { id: "skills", label: "Skills", widgets: [] }
         ]},
         { id: "systems", label: "Systems", subtabs: [
-          { id: "electrical", label: "Electrical", widgets: [] },
+          { id: "electrical", label: "Electrical", widgets: ["batterypanel"] },
           { id: "pumping", label: "Pumping", widgets: [] },
           { id: "mechanical", label: "Mechanical", widgets: [] }
         ]},
@@ -388,7 +390,7 @@
   const REAL_WIDGET_IDS = [
     "sailtrim", "wheel", "engine", "speed", "windex",
     "chartplotter", "water", "food", "hull", "track", "station",
-    "compass", "forecast", "tidechart", "lightpanel"
+    "compass", "forecast", "tidechart", "lightpanel", "batterypanel"
   ];
 
   function getWidgetNode(widgetId) {
