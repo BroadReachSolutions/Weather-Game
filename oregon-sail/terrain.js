@@ -123,29 +123,77 @@
 
   /* Builds a real THREE.js mesh from the classification grid: water
      cells get zero height (the existing water shader handles their
-     visual appearance separately — this mesh only needs to carve out
-     where land actually rises above it), land cells get raised to a
-     flat-ish plateau height. Uses the same displaced-PlaneGeometry
-     technique already established by the water shader's swell
-     displacement, just applied to a static heightmap instead of an
-     animated wave function. */
-  function buildTerrainMesh(grid, worldSize, landHeight) {
+     visual appearance separately for cells far from shore — but near
+     the coastline this mesh's own water-side slope is what keeps the
+     seafloor from clipping through/overlapping the animated wave
+     surface), land cells rise gradually further from the shoreline,
+     capped at a real max elevation. Uses the same displaced-
+     PlaneGeometry technique already established by the water
+     shader's swell displacement, just applied to a static heightmap
+     instead of an animated wave function. */
+
+  /* Computes, for every cell, its distance (in grid cells) to the
+     nearest cell of the OPPOSITE type — i.e. for a land cell, how far
+     to the nearest water cell, and vice versa. This is a standard
+     distance-transform technique; brute-force here since our grid is
+     small (48x48), which is plenty fast for a one-time generation
+     step. Returns a same-shaped grid of distances. This is also
+     exactly the "how close is this point to the shoreline" value
+     Phase 3's breaking-wave effect will want to reuse later. */
+  function computeShoreDistanceGrid(grid) {
+    const gridSize = grid.length;
+    const distances = [];
+    for (let gy = 0; gy < gridSize; gy++) {
+      const row = [];
+      for (let gx = 0; gx < gridSize; gx++) {
+        const myType = grid[gy][gx];
+        let minDist = gridSize; /* effectively "far" if nothing opposite-type is found anywhere */
+        for (let oy = 0; oy < gridSize; oy++) {
+          for (let ox = 0; ox < gridSize; ox++) {
+            if (grid[oy][ox] === myType) continue;
+            const d = Math.sqrt((gx - ox) ** 2 + (gy - oy) ** 2);
+            if (d < minDist) minDist = d;
+          }
+        }
+        row.push(minDist);
+      }
+      distances.push(row);
+    }
+    return distances;
+  }
+
+  function buildTerrainMesh(grid, worldSize, maxLandHeight, maxWaterDepth) {
     const gridSize = grid.length;
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, gridSize - 1, gridSize - 1);
     const posAttr = geo.attributes.position;
+    const shoreDist = computeShoreDistanceGrid(grid);
 
-    /* PlaneGeometry's vertex grid runs row-by-row matching our
-       classification grid exactly, since we built it with
-       (gridSize-1) segments -> gridSize vertices per row. */
+    /* Distance (in grid cells) at which land/water height reaches its
+       full max — anything closer to shore than this smoothly tapers
+       toward the actual waterline (y=0), which is what creates a real
+       slope through the shoreline instead of a hard step. Roughly a
+       fifth of the grid so the slope reads clearly without being the
+       entire map. */
+    const taperCells = Math.max(2, gridSize * 0.2);
+
     for (let gy = 0; gy < gridSize; gy++) {
       for (let gx = 0; gx < gridSize; gx++) {
         const vertIndex = gy * gridSize + gx;
         const isLand = grid[gy][gx] === "land";
-        /* A small amount of per-vertex noise on land keeps flat
-           plateaus from looking perfectly artificial, without
-           needing real elevation data we don't have */
-        const noise = isLand ? (Math.random() - 0.5) * (landHeight * 0.15) : 0;
-        const height = isLand ? landHeight + noise : 0;
+        const dist = shoreDist[gy][gx];
+        const t = Math.min(1, dist / taperCells); /* 0 right at the shoreline, 1 once fully tapered */
+        /* Smoothstep-style easing (t*t*(3-2t)) instead of a linear
+           ramp, for a more natural-looking slope rather than a flat
+           ramp with a sharp kink where it starts. */
+        const eased = t * t * (3 - 2 * t);
+
+        let height;
+        if (isLand) {
+          const noise = (Math.random() - 0.5) * (maxLandHeight * 0.1);
+          height = maxLandHeight * eased + noise;
+        } else {
+          height = -maxWaterDepth * eased;
+        }
         posAttr.setZ(vertIndex, height); /* PlaneGeometry is built in the XY plane; Z becomes height after the same rotateX(-90deg) the water plane uses */
       }
     }
@@ -159,6 +207,7 @@
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.userData.classificationGrid = grid; /* kept for later phases (collision detection) */
+    mesh.userData.shoreDistanceGrid = shoreDist; /* kept for later phases (shoreline breaking waves) */
     mesh.userData.worldSize = worldSize;
     return mesh;
   }
@@ -200,8 +249,17 @@
     const tileSpanFeet = tileSpanMeters * 3.28084;
     const worldSize = tileSpanFeet * (unitsPerFoot || 0.24);
 
-    const landHeight = Math.max(2, worldSize * 0.015); /* a modest, visually reasonable plateau height relative to the generated area's size */
-    const mesh = buildTerrainMesh(grid, worldSize, landHeight);
+    /* Land rises well above the waterline; the seafloor drops
+       genuinely deep away from shore -- both scaled relative to the
+       generated area's size, but with water depth deliberately
+       larger than land height (a real coastline typically drops off
+       into deeper water faster than it rises into tall terrain, and
+       this also guarantees the seafloor sits well clear of the
+       lowest possible wave trough from the water shader, fixing the
+       reported overlap/clipping). */
+    const maxLandHeight = Math.max(3, worldSize * 0.02);
+    const maxWaterDepth = Math.max(15, worldSize * 0.05);
+    const mesh = buildTerrainMesh(grid, worldSize, maxLandHeight, maxWaterDepth);
 
     const group = new THREE.Group();
     group.add(mesh);
