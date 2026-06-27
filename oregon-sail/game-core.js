@@ -334,6 +334,82 @@ OS.setGeneratorRunning = async function (isRunning) {
   return { data, error };
 };
 
+/* ---------------------------------------------------------------
+   ELECTRICAL SYSTEM — Phase 3: real-time tick.
+   Call this periodically (every few seconds while playing) with the
+   real elapsed time since the last call. Applies the net house
+   battery power balance (generation - load, from physics.js) over
+   that time, applies bow thruster draw to its own dedicated battery,
+   and — per the original request — force-disables every house-
+   battery load if the house bank actually dies, since a dead
+   component should stop working rather than silently keep
+   "running" with no power behind it.
+
+   instrumentCount must be supplied by the caller (game-ui.js, which
+   knows how many gauge widgets are currently placed in the tab
+   system) since draw scales with how many are actually present.
+   --------------------------------------------------------------- */
+OS.tickElectricalSystem = async function (elapsedSeconds, hourOfDay, windSpeedKt, instrumentCount) {
+  if (!OS.boat || typeof window.OSPhysics === "undefined") return;
+  if (!OS.boat.has_house_battery) return;
+
+  const netWatts = window.OSPhysics.calculateHouseBatteryNetWatts(OS.boat, hourOfDay, windSpeedKt, instrumentCount);
+  const netWh = netWatts * (elapsedSeconds / 3600);
+
+  const capacity = (OS.boat.house_battery_capacity_wh || 1200) * (OS.boat.house_battery_bank_count || 1);
+  const currentCharge = OS.boat.house_battery_charge_wh || 0;
+  const newCharge = Math.max(0, Math.min(capacity, currentCharge + netWh));
+
+  const updates = { house_battery_charge_wh: newCharge };
+
+  /* House bank just died — force off every house-battery load so
+     the game state honestly reflects "nothing is actually running,"
+     rather than leaving switches showing ON with a dead battery
+     behind them. Only fires once, the instant it crosses zero. */
+  const justDied = currentCharge > 0 && newCharge <= 0;
+  if (justDied) {
+    const HOUSE_LOAD_ON_KEYS = [
+      "light_nav", "light_steaming", "light_deck", "light_anchor", "light_cockpit",
+      "autopilot_on", "load_radar_on", "load_fridge_on", "load_ac_on",
+      "load_watermaker_on", "load_inverter_on", "load_electric_head_on",
+      "load_instruments_on", "load_microwave_on", "load_cooktop_on", "load_vhf_on",
+      "load_ais_on", "load_bilge_pump_on", "load_fans_on", "load_cabin_lights_on"
+    ];
+    HOUSE_LOAD_ON_KEYS.forEach(key => { updates[key] = false; });
+  }
+
+  Object.assign(OS.boat, updates); /* in-memory first, see note in setEngine */
+
+  const { data, error } = await sbClient
+    .from("boats")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", OS.boat.id)
+    .select()
+    .single();
+  if (error) console.error("Oregon Sail: tickElectricalSystem failed", error);
+
+  /* Bow thruster: own dedicated battery, simple drain-only (no
+     generation feeds it per the original design spec). Also force-
+     disabled if ITS battery dies, independent of the house bank. */
+  if (OS.boat.has_bow_thruster_battery) {
+    const thrusterDraw = window.OSPhysics.calculateBowThrusterDraw(OS.boat);
+    if (thrusterDraw > 0) {
+      const thrusterWh = thrusterDraw * (elapsedSeconds / 3600);
+      const thrusterCapacity = OS.boat.bow_thruster_battery_capacity_wh || 900;
+      const thrusterCurrentCharge = OS.boat.bow_thruster_battery_charge_wh || 0;
+      const thrusterNewCharge = Math.max(0, thrusterCurrentCharge - thrusterWh);
+      const thrusterUpdates = { bow_thruster_battery_charge_wh: thrusterNewCharge };
+      if (thrusterCurrentCharge > 0 && thrusterNewCharge <= 0) {
+        thrusterUpdates.load_bow_thruster_on = false;
+      }
+      Object.assign(OS.boat, thrusterUpdates);
+      await sbClient.from("boats").update({ ...thrusterUpdates, updated_at: new Date().toISOString() }).eq("id", OS.boat.id);
+    }
+  }
+
+  return { data, error, justDied };
+};
+
 OS.setBatteryCharge = async function (batteryKey, chargeWh) {
   if (!OS.boat) return;
   const column = batteryKey + "_battery_charge_wh";

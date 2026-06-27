@@ -314,9 +314,68 @@
   let simIntervalId = null;
   let lastSimTime = null;
 
+  const ELECTRICAL_TICK_MS = 5000; /* the electrical system doesn't need fine-grained timing the way heading/position does -- every 5s is plenty responsive while keeping the write load low */
+  let electricalIntervalId = null;
+  let lastElectricalTime = null;
+
   function startSimulationLoop() {
     lastSimTime = Date.now();
     simIntervalId = setInterval(simulationStep, SIM_TICK_MS);
+
+    lastElectricalTime = Date.now();
+    electricalIntervalId = setInterval(electricalTickStep, ELECTRICAL_TICK_MS);
+  }
+
+  /* Counts how many of the per-gauge instrument widgets (speed,
+     windex, sailtrim, etc) are actually placed in the player's tab
+     layout right now -- house load for "instruments" scales with
+     this count per the original request ("each one has its own
+     power draw according to how big the network is"). Re-reads the
+     live tab config each tick rather than caching, since the player
+     can add/remove widgets at any time. */
+  function countActiveInstrumentWidgets() {
+    try {
+      const raw = localStorage.getItem("osTabConfig");
+      if (!raw) return 0;
+      const config = JSON.parse(raw);
+      const instrumentIds = ["speed", "windex", "sailtrim", "wheel", "engine", "water", "food", "hull"];
+      let count = 0;
+      (config.mains || []).forEach(main => {
+        (main.subtabs || []).forEach(sub => {
+          (sub.widgets || []).forEach(w => { if (instrumentIds.includes(w)) count++; });
+        });
+      });
+      return count;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  async function electricalTickStep() {
+    if (!OS.boat || typeof window.OSPhysics === "undefined") return;
+    const now = Date.now();
+    const elapsedSeconds = (now - lastElectricalTime) / 1000;
+    lastElectricalTime = now;
+    if (elapsedSeconds <= 0 || elapsedSeconds > 60) return; /* skip absurd gaps (tab was backgrounded) */
+
+    const hourOfDay = new Date().getHours() + new Date().getMinutes() / 60;
+    const windKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
+    const instrumentCount = countActiveInstrumentWidgets();
+
+    const result = await OS.tickElectricalSystem(elapsedSeconds, hourOfDay, windKt, instrumentCount);
+    if (result && result.justDied) {
+      logHouseBatteryDiedToast();
+    }
+    if (typeof updateBatteryPanelDisplay === "function") updateBatteryPanelDisplay();
+  }
+
+  /* Simple console notice when the house bank actually dies, since
+     this is a real, noticeable gameplay event (every house-battery
+     load just got force-disabled) the player should be told about.
+     A real on-screen toast/alert is a good follow-up but is its own
+     separate UI piece, not part of this electrical phase. */
+  function logHouseBatteryDiedToast() {
+    console.warn("Oregon Sail: house battery bank died, all house loads shut off.");
   }
 
   function simulationStep() {

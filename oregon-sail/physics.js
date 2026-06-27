@@ -352,6 +352,92 @@
     return ratedWatts * throttleFactor;
   }
 
+  /* ---------------------------------------------------------------
+     ELECTRICAL SYSTEM — Phase 3: house battery power balance.
+     Sums every ACTIVE generation source feeding the house bank
+     (solar, wind generator, alternator, generator-if-running) minus
+     every ACTIVE house-battery load, returning the net wattage
+     (positive = bank is charging, negative = bank is draining).
+     This is the real engine behind the whole electrical system —
+     everything else (the UI panel, the boat-design toggles) is just
+     exposing or configuring what this function calculates.
+
+     LOAD_DEFS maps each load to its boat-record column names, so
+     adding a 22nd load later is a one-line addition here rather than
+     a structural change. House-battery loads only — bow thruster
+     draws from its own dedicated battery and is handled separately
+     by calculateBowThrusterDraw below, per the original design spec
+     (house bank runs everything except engine/generator-start/bow-
+     thruster). */
+  const HOUSE_LOAD_DEFS = [
+    { hasKey: "has_solar", onKey: null }, /* generation, handled separately below */
+    { onKey: "light_nav", wattsKey: null, fixedWatts: 8 },
+    { onKey: "light_steaming", wattsKey: null, fixedWatts: 10 },
+    { onKey: "light_deck", wattsKey: null, fixedWatts: 18 },
+    { onKey: "light_anchor", wattsKey: null, fixedWatts: 10 },
+    { onKey: "light_cockpit", wattsKey: null, fixedWatts: 15 },
+    { onKey: "autopilot_on", wattsKey: null, fixedWatts: 30 },
+    { hasKey: "has_radar", onKey: "load_radar_on", wattsKey: "radar_watts" },
+    { hasKey: "has_fridge", onKey: "load_fridge_on", wattsKey: "fridge_watts" },
+    { hasKey: "has_ac", onKey: "load_ac_on", wattsKey: "ac_watts" },
+    { hasKey: "has_watermaker", onKey: "load_watermaker_on", wattsKey: "watermaker_watts" },
+    { hasKey: "has_inverter", onKey: "load_inverter_on", wattsKey: "inverter_watts" },
+    { hasKey: "has_electric_head", onKey: "load_electric_head_on", wattsKey: "electric_head_watts" },
+    { hasKey: "has_microwave", onKey: "load_microwave_on", wattsKey: "microwave_watts" },
+    { hasKey: "has_cooktop", onKey: "load_cooktop_on", wattsKey: "cooktop_watts" },
+    { hasKey: "has_vhf", onKey: "load_vhf_on", wattsKey: "vhf_watts" },
+    { hasKey: "has_ais", onKey: "load_ais_on", wattsKey: "ais_watts" },
+    { hasKey: "has_bilge_pump", onKey: "load_bilge_pump_on", wattsKey: "bilge_pump_watts" },
+    { hasKey: "has_fans", onKey: "load_fans_on", wattsKey: "fans_watts" },
+    { hasKey: "has_cabin_lights", onKey: "load_cabin_lights_on", wattsKey: "cabin_lights_watts" }
+  ];
+
+  /* Instruments are a special case: total draw scales with how many
+     instrument widgets the boat actually has placed (per request:
+     "each one has its own power draw according to how big the
+     network is"), rather than one flat rating — instrumentCount is
+     passed in by the caller, which knows how many gauge widgets are
+     currently placed on the player's tab layout. */
+  function calculateHouseLoadWatts(boat, instrumentCount) {
+    let total = 0;
+    HOUSE_LOAD_DEFS.forEach(def => {
+      if (def.hasKey && !boat[def.hasKey]) return; /* boat doesn't have this slot at all */
+      if (!boat[def.onKey]) return; /* present but switched off */
+      total += def.fixedWatts != null ? def.fixedWatts : (boat[def.wattsKey] || 0);
+    });
+    if (boat.has_instruments && boat.load_instruments_on) {
+      total += (boat.instruments_watts_each || 8) * Math.max(0, instrumentCount || 0);
+    }
+    return total;
+  }
+
+  function calculateHouseGenerationWatts(boat, hourOfDay, windSpeedKt) {
+    let total = 0;
+    if (boat.has_solar) total += calculateSolarOutput(boat.solar_rated_watts || 0, hourOfDay);
+    if (boat.has_wind_generator) total += calculateWindGeneratorOutput(boat.wind_generator_rated_watts || 0, windSpeedKt || 0);
+    if (boat.has_alternator) total += calculateAlternatorOutput(boat.alternator_rated_watts || 0, !!boat.engine_on, boat.throttle_rpm || 0);
+    if (boat.has_generator && boat.generator_running) total += calculateGeneratorOutput(boat.generator_rated_watts || 0, true);
+    return total;
+  }
+
+  /* Net house battery power balance — positive charges, negative
+     drains. Caller is responsible for converting this to watt-hours
+     over the actual elapsed time and applying it to charge state
+     (see OS.tickElectricalSystem in game-core.js). */
+  function calculateHouseBatteryNetWatts(boat, hourOfDay, windSpeedKt, instrumentCount) {
+    const generation = calculateHouseGenerationWatts(boat, hourOfDay, windSpeedKt);
+    const load = calculateHouseLoadWatts(boat, instrumentCount);
+    return generation - load;
+  }
+
+  /* Bow thruster draws from its OWN dedicated battery, not the house
+     bank, per the original design spec -- momentary, very high draw
+     while actually in use. */
+  function calculateBowThrusterDraw(boat) {
+    if (!boat.has_bow_thruster || !boat.load_bow_thruster_on) return 0;
+    return boat.bow_thruster_watts || 0;
+  }
+
 
   window.OSPhysics = {
     calculatePointOfSail,
@@ -368,6 +454,11 @@
     calculateWindGeneratorOutput,
     calculateGeneratorOutput,
     calculateGeneratorFuelBurnPerHour,
-    calculateAlternatorOutput
+    calculateAlternatorOutput,
+    calculateHouseLoadWatts,
+    calculateHouseGenerationWatts,
+    calculateHouseBatteryNetWatts,
+    calculateBowThrusterDraw,
+    HOUSE_LOAD_DEFS
   };
 })();
