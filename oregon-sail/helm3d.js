@@ -2229,6 +2229,29 @@
         window.OSOnBoatCollision(); /* hook for game-ui.js to react (sound, damage, etc) in a follow-up -- detection only for this pass */
       }
     }
+    if (typeof window.OSMarina !== "undefined" && window.OSMarina.isActive() && window.OSHelm3DState) {
+      const s = window.OSHelm3DState;
+      const playerRadius = currentBoatDNA ? Math.max(
+        (currentBoatDNA.hullLength || 6.8) / 2 * (currentBoatDNA.scale || 2.4),
+        (currentBoatDNA.hullWidth || 2.1) / 2 * (currentBoatDNA.scale || 2.4)
+      ) : 3;
+      /* Player position within the marina -- boatGroup itself never
+         translates (per the established scene convention), but
+         while inside the marina the player's effective position is
+         tracked via the marina's own boatX/boatZ state on
+         OSHelm3DState (set by game-ui.js while marina mode is
+         active), separate from the open-water lat/lon used elsewhere. */
+      const marinaResult = window.OSMarina.update(
+        s.marinaBoatX || 0,
+        s.marinaBoatZ || 0,
+        currentHeadingDeg || 0,
+        s.speedKt || 0,
+        playerRadius
+      );
+      if (marinaResult && typeof window.OSOnMarinaUpdate === "function") {
+        window.OSOnMarinaUpdate(marinaResult); /* hook for game-ui.js to update the on-screen collision/docking HUD */
+      }
+    }
     updateWindLines(window.OSHelm3DState ? window.OSHelm3DState.windSpeedKt || 0 : 0);
 
     if (window.OSHelm3DState) {

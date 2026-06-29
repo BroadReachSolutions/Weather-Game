@@ -2369,6 +2369,31 @@ body.layout-edit .widgetResize {
   border-radius: 1px;
 }
 
+.osMarinaHud {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 60;
+  background: rgba(10, 25, 36, 0.7);
+  border: 1px solid rgba(255,167,38,0.35);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #eef7ff;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.osMarinaHudRow {
+  white-space: nowrap;
+}
+
+#osMarinaDockStatus.docked {
+  color: #b8ffd0;
+  font-weight: 700;
+}
+
 .osHelmCompassSwatchBoat { background: #4fc3f7; }
 .osHelmCompassSwatchCam { background: #ffca4f; }
 

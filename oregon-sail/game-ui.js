@@ -314,6 +314,16 @@
   let simIntervalId = null;
   let lastSimTime = null;
 
+  /* Marina dead-reckoning position. The boat never visually
+     translates in this scene (everything else moves around it
+     instead, per the established convention), so "where is the
+     player within the marina" needs to be tracked separately from
+     the open-water lat/lon system -- integrated from real speed and
+     heading each sim tick while marina mode is active. Resets to the
+     channel entrance whenever the marina is entered. */
+  let marinaBoatX = 0;
+  let marinaBoatZ = 0;
+
   const ELECTRICAL_TICK_MS = 5000; /* the electrical system doesn't need fine-grained timing the way heading/position does -- every 5s is plenty responsive while keeping the write load low */
   let electricalIntervalId = null;
   let lastElectricalTime = null;
@@ -384,6 +394,28 @@
     const elapsedHours = (now - lastSimTime) / 3600000;
     lastSimTime = now;
     if (elapsedHours <= 0 || elapsedHours > 0.1) return; /* skip absurd gaps (tab was backgrounded) */
+
+    /* Marina dead-reckoning: while the marina is active, advance the
+       player's tracked position there from real speed/heading each
+       tick, independent of whether the boat is "sailing_active" in
+       the open-water sense -- docking maneuvers happen under engine
+       power at very low speed, which the open-water isMoving check
+       below would otherwise skip entirely. */
+    if (typeof window.OSMarina !== "undefined" && window.OSMarina.isActive()) {
+      const speedKt = OS.boat.speed_over_ground_kt || 0;
+      const headingDeg = OS.boat.course_bearing || 0;
+      if (speedKt > 0.01) {
+        const headingRad = (headingDeg * Math.PI) / 180;
+        const unitsPerFoot = (typeof window.OSHelm3D !== "undefined" && window.OSHelm3D.getUnitsPerFoot) ? window.OSHelm3D.getUnitsPerFoot() : 0.24;
+        const feetThisTick = speedKt * 6076.12 * elapsedHours; /* speed (kt, i.e. nm/hr) converted through feet-per-nm, times elapsed hours */
+        const unitsThisTick = feetThisTick * unitsPerFoot;
+        /* Matches the confirmed bow-direction convention verified
+           earlier this project: travel direction at heading h is
+           (-sin(h), -cos(h)) */
+        marinaBoatX -= Math.sin(headingRad) * unitsThisTick;
+        marinaBoatZ -= Math.cos(headingRad) * unitsThisTick;
+      }
+    }
 
     const boat = OS.boat;
     const isMoving = boat.sailing_active || boat.engine_on;
@@ -695,6 +727,8 @@
       isDownwind: pos.name === "Broad Reach" || pos.name === "Running",
       speedKt: boatSpeedKt,
       boatLat: OS.boat ? OS.boat.lat : null,
+      marinaBoatX,
+      marinaBoatZ,
       boatLon: OS.boat ? OS.boat.lon : null,
       /* Simple estimate matching the same formula the tick function
          uses server-side, since we don't have a live wave-height
@@ -1704,6 +1738,39 @@
   window.OSGameUI = {
     onChartPlotterShown: () => {
       if (map) setTimeout(() => map.invalidateSize(), 50);
+    },
+    /* Resets the marina dead-reckoning position to a sensible
+       starting point just outside the channel entrance, facing in.
+       Called when the player enters the marina so they don't start
+       wherever their last open-water position happened to leave
+       marinaBoatX/Z. */
+    resetMarinaPosition: (startX, startZ) => {
+      marinaBoatX = startX || 0;
+      marinaBoatZ = startZ || 0;
+    }
+  };
+
+  /* Called every tick from helm3d.js while the marina is active, with
+     the latest collision count + docking state. Drives the on-screen
+     HUD (collision counter + docking status) shown over the Helm
+     view. */
+  window.OSOnMarinaUpdate = function (result) {
+    const hud = document.getElementById("osMarinaHud");
+    if (!hud) return;
+    hud.style.display = "block";
+
+    const countEl = document.getElementById("osMarinaCollisionCount");
+    if (countEl) countEl.textContent = result.collisionCount;
+
+    const statusEl = document.getElementById("osMarinaDockStatus");
+    if (statusEl) {
+      if (result.docked) {
+        statusEl.textContent = result.isFuelDock ? "⛽ Docked at fuel dock" : `⚓ Docked at Slip ${result.slipIndex + 1}`;
+        statusEl.classList.add("docked");
+      } else {
+        statusEl.textContent = result.touching ? "Touching dock/boat!" : "Searching for a slip…";
+        statusEl.classList.remove("docked");
+      }
     }
   };
 })();

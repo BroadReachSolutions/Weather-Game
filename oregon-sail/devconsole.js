@@ -981,6 +981,12 @@
       window.OSMarina.enter(scene, unitsPerFoot);
       const slips = window.OSMarina.getSlips();
       const occupiedCount = slips.filter(s => s.occupied).length;
+      /* Start just outside the channel entrance (negative Z, matching
+         the entrance/fuel-dock position in marina.js), facing into
+         the channel */
+      if (typeof window.OSGameUI !== "undefined" && window.OSGameUI.resetMarinaPosition) {
+        window.OSGameUI.resetMarinaPosition(0, -80);
+      }
       logEvent("info", `Entered marina — ${occupiedCount}/${slips.length} slips occupied.`);
     });
 

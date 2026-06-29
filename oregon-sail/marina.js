@@ -29,6 +29,15 @@
   let marinaGroup = null;
   let marinaSlips = []; /* { x, z, headingDeg, occupied, occupantGroup } */
   let marinaActive = false;
+  let dockColliders = []; /* { x, z, halfWidth, halfLength } boxes, from Phase 1's dock structures */
+  let collisionCount = 0;
+  let lastCollisionTime = 0;
+  const COLLISION_COOLDOWN_MS = 800; /* a sustained scrape against one piling shouldn't count as dozens of separate collisions */
+
+  let dockedState = { isDocked: false, slipIndex: null, isFuelDock: false, alignedSinceMs: null };
+  const DOCK_SPEED_THRESHOLD_KT = 0.5;
+  const DOCK_HEADING_TOLERANCE_DEG = 30;
+  const DOCK_SUSTAIN_MS = 2000; /* must hold position/speed/heading for this long before counting as actually docked */
 
   function ft(unitsPerFoot, feet) {
     return feet * unitsPerFoot;
@@ -46,6 +55,7 @@
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, height / 2, z);
     mesh.userData.isDock = true; /* flagged for the later collision-detection phase */
+    dockColliders.push({ x, z, halfWidth: width / 2, halfLength: length / 2 });
     return mesh;
   }
 
@@ -60,6 +70,7 @@
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, height / 2, 0);
     mesh.userData.isDock = true;
+    dockColliders.push({ x, z: 0, halfWidth: width / 2, halfLength: length / 2 });
     return mesh;
   }
 
@@ -75,6 +86,7 @@
     mesh.position.set(x, height / 2, z);
     mesh.userData.isDock = true;
     mesh.userData.isFuelDock = true;
+    dockColliders.push({ x, z, halfWidth: width / 2, halfLength: length / 2, isFuelDock: true });
     return mesh;
   }
 
@@ -85,6 +97,9 @@
   function buildMarina(unitsPerFoot, fillFraction) {
     const group = new THREE.Group();
     marinaSlips = [];
+    dockColliders = [];
+    collisionCount = 0;
+    dockedState = { isDocked: false, slipIndex: null, isFuelDock: false, alignedSinceMs: null };
 
     const channelHalfWidth = ft(unitsPerFoot, CHANNEL_WIDTH_FT) / 2;
     const slipDepth = ft(unitsPerFoot, SLIP_DEPTH_FT);
@@ -161,6 +176,129 @@
   /* ---------------------------------------------------------------
      PUBLIC API
      --------------------------------------------------------------- */
+  /* Circle-vs-box collision check between the player and one dock
+     collider. Player approximated as a circle (same technique as the
+     existing open-water AI boat collision check) since a precise
+     hull-shaped check isn't necessary for "did you hit the dock." */
+  function circleIntersectsBox(circleX, circleZ, circleRadius, box) {
+    const closestX = Math.max(box.x - box.halfWidth, Math.min(circleX, box.x + box.halfWidth));
+    const closestZ = Math.max(box.z - box.halfLength, Math.min(circleZ, box.z + box.halfLength));
+    const dx = circleX - closestX;
+    const dz = circleZ - closestZ;
+    return (dx * dx + dz * dz) < (circleRadius * circleRadius);
+  }
+
+  /* Checks the player against every dock structure AND every
+     occupied slip's stationary boat. On a NEW collision (not already
+     touching as of last check), increments the counter once and
+     starts a cooldown so a sustained scrape doesn't count dozens of
+     times. Returns true if currently touching anything this frame
+     (regardless of whether it was already counted), so callers can
+     show a live "touching" indicator separately from the counter. */
+  let wasTouchingLastFrame = false;
+  function checkMarinaCollisions(playerX, playerZ, playerRadius) {
+    let touching = false;
+
+    for (const box of dockColliders) {
+      if (circleIntersectsBox(playerX, playerZ, playerRadius, box)) {
+        touching = true;
+        break;
+      }
+    }
+    if (!touching) {
+      for (const slip of marinaSlips) {
+        if (!slip.occupied) continue;
+        const dx = playerX - slip.x;
+        const dz = playerZ - slip.z;
+        const occupantRadius = 4; /* approximate, matches the same rough-radius approach the open-water AI boat check uses */
+        const combinedRadius = playerRadius + occupantRadius;
+        if (dx * dx + dz * dz < combinedRadius * combinedRadius) {
+          touching = true;
+          break;
+        }
+      }
+    }
+
+    const now = Date.now();
+    if (touching && !wasTouchingLastFrame && (now - lastCollisionTime) > COLLISION_COOLDOWN_MS) {
+      collisionCount++;
+      lastCollisionTime = now;
+    }
+    wasTouchingLastFrame = touching;
+    return touching;
+  }
+
+  /* Docking detection: player must be within an empty slip's (or the
+     fuel dock's) footprint, moving slowly, and roughly aligned with
+     the slip's intended heading -- all sustained for DOCK_SUSTAIN_MS
+     before actually counting as docked, so brief pass-throughs or
+     momentary slow drifting don't flicker the docked state. */
+  function checkDocking(playerX, playerZ, playerHeadingDeg, playerSpeedKt) {
+    const now = Date.now();
+
+    if (playerSpeedKt > DOCK_SPEED_THRESHOLD_KT) {
+      dockedState = { isDocked: false, slipIndex: null, isFuelDock: false, alignedSinceMs: null };
+      return dockedState;
+    }
+
+    /* Check empty slips first */
+    for (let i = 0; i < marinaSlips.length; i++) {
+      const slip = marinaSlips[i];
+      if (slip.occupied) continue;
+      const dx = Math.abs(playerX - slip.x);
+      const dz = Math.abs(playerZ - slip.z);
+      const withinFootprint = dx < 6 && dz < 8; /* generous margin within the slip's real footprint */
+      if (!withinFootprint) continue;
+
+      const headingDiff = Math.abs(((playerHeadingDeg - slip.headingDeg + 540) % 360) - 180);
+      const aligned = headingDiff < DOCK_HEADING_TOLERANCE_DEG;
+      if (!aligned) continue;
+
+      if (dockedState.slipIndex !== i || dockedState.alignedSinceMs == null) {
+        dockedState = { isDocked: false, slipIndex: i, isFuelDock: false, alignedSinceMs: now };
+      } else if (now - dockedState.alignedSinceMs >= DOCK_SUSTAIN_MS) {
+        dockedState.isDocked = true;
+      }
+      return dockedState;
+    }
+
+    /* Fuel dock check — alongside docking, so just needs to be near
+       the dock's length, not a tight footprint match */
+    const fuelDock = dockColliders.find(d => d.isFuelDock);
+    if (fuelDock) {
+      const dx = Math.abs(playerX - fuelDock.x);
+      const dz = Math.abs(playerZ - fuelDock.z);
+      if (dx < 10 && dz < fuelDock.halfLength) {
+        if (!dockedState.isFuelDock || dockedState.alignedSinceMs == null) {
+          dockedState = { isDocked: false, slipIndex: null, isFuelDock: true, alignedSinceMs: now };
+        } else if (now - dockedState.alignedSinceMs >= DOCK_SUSTAIN_MS) {
+          dockedState.isDocked = true;
+        }
+        return dockedState;
+      }
+    }
+
+    dockedState = { isDocked: false, slipIndex: null, isFuelDock: false, alignedSinceMs: null };
+    return dockedState;
+  }
+
+  /* Per-frame update, called from the main game tick while the
+     marina is active. Runs both collision and docking checks
+     together since they share the same player position/heading
+     inputs. */
+  function update(playerX, playerZ, playerHeadingDeg, playerSpeedKt, playerRadius) {
+    if (!marinaActive) return null;
+    const touching = checkMarinaCollisions(playerX, playerZ, playerRadius || 3);
+    const docking = checkDocking(playerX, playerZ, playerHeadingDeg, playerSpeedKt);
+    return {
+      touching,
+      collisionCount,
+      docked: docking.isDocked,
+      slipIndex: docking.slipIndex,
+      isFuelDock: docking.isFuelDock
+    };
+  }
+
   window.OSMarina = {
     /* Generates and shows the marina, hiding it from view until
        called. scene/unitsPerFoot are passed in by helm3d.js, which
@@ -190,6 +328,9 @@
       marinaActive = false;
     },
     isActive: function () { return marinaActive; },
-    getSlips: function () { return marinaSlips; }
+    getSlips: function () { return marinaSlips; },
+    update: update,
+    getCollisionCount: function () { return collisionCount; },
+    getDockedState: function () { return dockedState; }
   };
 })();
