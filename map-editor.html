@@ -206,6 +206,29 @@
       <div class="structure-list" id="structureList"></div>
     </div>
 
+    <div class="field-group">
+      <label>🛠️ Dev Tools — Weather</label>
+      <label class="brush-size-label"><input type="checkbox" id="devWeatherActive"> Override active</label>
+      <label style="margin-top:6px;">Wind Speed (mph): <span id="devWindSpeedVal">15</span></label>
+      <input type="range" id="devWindSpeed" min="0" max="40" value="15">
+      <label style="margin-top:6px;">Wind Direction (°): <span id="devWindDirVal">270</span></label>
+      <input type="range" id="devWindDir" min="0" max="359" value="270">
+    </div>
+
+    <div class="field-group">
+      <label>🌊 Dev Tools — Swell</label>
+      <label class="brush-size-label"><input type="checkbox" id="devSwellActive"> Override active</label>
+      <label style="margin-top:6px;">Swell Height (ft): <span id="devSwellVal">3</span></label>
+      <input type="range" id="devSwellHeight" min="0" max="15" step="0.5" value="3">
+    </div>
+
+    <div class="field-group">
+      <label>🕐 Dev Tools — Clock</label>
+      <label class="brush-size-label"><input type="checkbox" id="devClockActive"> Override active</label>
+      <label style="margin-top:6px;">Time of Day: <span id="devClockVal">12:00</span></label>
+      <input type="range" id="devClockHour" min="0" max="23.9" step="0.1" value="12">
+    </div>
+
     <div id="statusMsg"></div>
   </div>
 </main>
@@ -386,6 +409,64 @@
      and clicking directly on the 3D terrain raycasts to find which
      grid cell you hit and paints it the same way the 2D canvas does.
      --------------------------------------------------------------- */
+  /* ---------------------------------------------------------------
+     DEV TOOLS — weather/swell/clock overrides, ported exactly from
+     the live game's devconsole.js + helm3d.js formulas (verified
+     against the actual source before porting, not approximated), so
+     this editor's water/sky genuinely match what the same settings
+     would produce in-game.
+     --------------------------------------------------------------- */
+  window.OSDevWeatherOverride = { active: false, speedMph: 15, dirDeg: 270 };
+  window.OSDevSwellOverride = { active: false, heightFt: 3 };
+  window.OSDevClockOverride = null; /* null = follow real clock, matching the live game's default */
+
+  const SKY_DAY = new THREE.Color(0x2a6fd6);
+  const SKY_DAY_HORIZON = new THREE.Color(0x9fe0f0);
+  const SKY_SUNSET = new THREE.Color(0xf2935a);
+  const SKY_SUNSET_HORIZON = new THREE.Color(0xffd9a0);
+  const SKY_NIGHT = new THREE.Color(0x040a1f);
+  const SKY_NIGHT_HORIZON = new THREE.Color(0x0a1430);
+
+  function getTimeOfDayFraction() {
+    if (window.OSDevClockOverride != null) return (window.OSDevClockOverride % 24) / 24;
+    const now = new Date();
+    return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400;
+  }
+
+  /* Updates the skydome's gradient texture for the current time of
+     day -- exact same sun-angle/dayFactor/sunsetFactor math as
+     animateDayNight in helm3d.js. */
+  function updateEditorDayNight() {
+    if (!skyDomeCtx) return;
+    const t = getTimeOfDayFraction();
+    const sunAngle = (t - 0.25) * Math.PI * 2;
+    const sunHeight = Math.sin(sunAngle);
+    if (sunLight) sunLight.position.set(Math.cos(sunAngle) * 120, Math.max(-20, sunHeight * 90 + 20), -40);
+    const dayFactor = Math.max(0, Math.min(1, (sunHeight + 0.15) / 0.3));
+    const sunsetFactor = Math.max(0, 1 - Math.abs(sunHeight) / 0.35) * (1 - Math.abs(dayFactor - 0.5) * 0.3);
+    const skyColor = SKY_NIGHT.clone().lerp(SKY_DAY, dayFactor).lerp(SKY_SUNSET, sunsetFactor * 0.5);
+    const skyHorizonColor = SKY_NIGHT_HORIZON.clone().lerp(SKY_DAY_HORIZON, dayFactor).lerp(SKY_SUNSET_HORIZON, sunsetFactor * 0.5);
+    const grad = skyDomeCtx.createLinearGradient(0, 0, 0, skyDomeCanvas.height);
+    grad.addColorStop(0, `#${skyColor.getHexString()}`);
+    grad.addColorStop(1, `#${skyHorizonColor.getHexString()}`);
+    skyDomeCtx.fillStyle = grad;
+    skyDomeCtx.fillRect(0, 0, skyDomeCanvas.width, skyDomeCanvas.height);
+    skyDomeTexture.needsUpdate = true;
+    if (ambientLight) ambientLight.intensity = 0.25 + dayFactor * 0.4;
+    if (sunLight) sunLight.intensity = 0.15 + dayFactor * 0.9;
+  }
+
+  /* Updates water amplitude from the swell/weather overrides -- exact
+     same formulas as game-ui.js's feed3DState (wind-derived wave
+     height) and helm3d.js's animateWater (height-to-amplitude). */
+  function updateEditorWaterFromOverrides() {
+    const windSpeedKt = window.OSDevWeatherOverride.active ? window.OSDevWeatherOverride.speedMph * 0.868976 : 12;
+    const waveHeightFt = window.OSDevSwellOverride.active
+      ? window.OSDevSwellOverride.heightFt
+      : Math.max(0.5, (windSpeedKt / 10) * 1.8);
+    waterUniforms.uAmplitude.value = Math.min(10, waveHeightFt * 0.583);
+  }
+
   let scene, camera, renderer, controls, previewMesh, waterMesh, skyDomeMesh, skyDomeCanvas, skyDomeCtx, skyDomeTexture, sunLight, ambientLight;
   let waveClock = 0;
   const waterUniforms = {
@@ -601,6 +682,8 @@
     requestAnimationFrame(animatePreview);
     waveClock += 0.016;
     waterUniforms.uTime.value = waveClock;
+    updateEditorDayNight();
+    updateEditorWaterFromOverrides();
     if (controls) controls.update();
     renderer.render(scene, camera);
   }
@@ -748,7 +831,61 @@
      halt the rest of this script entirely, including every toolbar
      button's event listener below it. This was the actual cause of
      the reported "nothing responds, not even the buttons" bug. */
+  function wireDevTools() {
+    const weatherActive = document.getElementById("devWeatherActive");
+    const windSpeed = document.getElementById("devWindSpeed");
+    const windDir = document.getElementById("devWindDir");
+    const swellActive = document.getElementById("devSwellActive");
+    const swellHeight = document.getElementById("devSwellHeight");
+    const clockActive = document.getElementById("devClockActive");
+    const clockHour = document.getElementById("devClockHour");
+
+    function syncWeather() {
+      window.OSDevWeatherOverride = {
+        active: weatherActive.checked,
+        speedMph: parseFloat(windSpeed.value),
+        dirDeg: parseFloat(windDir.value)
+      };
+    }
+    weatherActive.addEventListener("change", syncWeather);
+    windSpeed.addEventListener("input", () => {
+      document.getElementById("devWindSpeedVal").textContent = windSpeed.value;
+      syncWeather();
+    });
+    windDir.addEventListener("input", () => {
+      document.getElementById("devWindDirVal").textContent = windDir.value;
+      syncWeather();
+    });
+
+    function syncSwell() {
+      window.OSDevSwellOverride = {
+        active: swellActive.checked,
+        heightFt: parseFloat(swellHeight.value)
+      };
+    }
+    swellActive.addEventListener("change", syncSwell);
+    swellHeight.addEventListener("input", () => {
+      document.getElementById("devSwellVal").textContent = swellHeight.value;
+      syncSwell();
+    });
+
+    function formatClockHour(hourFloat) {
+      const h = Math.floor(hourFloat) % 24;
+      const m = Math.round((hourFloat - Math.floor(hourFloat)) * 60);
+      return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    }
+    function syncClock() {
+      window.OSDevClockOverride = clockActive.checked ? parseFloat(clockHour.value) : null;
+    }
+    clockActive.addEventListener("change", syncClock);
+    clockHour.addEventListener("input", () => {
+      document.getElementById("devClockVal").textContent = formatClockHour(parseFloat(clockHour.value));
+      syncClock();
+    });
+  }
+
   window.addEventListener("load", () => {
+    wireDevTools(); /* independent of the 3D preview init below, so a 3D failure can't take these controls down with it */
     try {
       initPreview();
       updatePreviewMesh();
