@@ -226,6 +226,7 @@
      --------------------------------------------------------------- */
   const GRID_SIZE = 64;
   let grid = [];
+  let previewUpdateTimer = null; /* moved up here from further down the file -- it was being referenced (via schedulePreviewUpdate, called from redrawPaintCanvas) before its declaration line ever ran, which throws in JS for let/const and was the actual cause of the reported "nothing responds" bug */
   function resetGrid(fillType) {
     grid = [];
     for (let y = 0; y < GRID_SIZE; y++) {
@@ -457,7 +458,6 @@
     return new THREE.Mesh(geo, mat);
   }
 
-  let previewUpdateTimer = null;
   function schedulePreviewUpdate() {
     /* Debounced -- painting fires many times per second while
        dragging, but rebuilding a 64x64 mesh on every single one would
