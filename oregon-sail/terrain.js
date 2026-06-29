@@ -168,6 +168,8 @@
     const posAttr = geo.attributes.position;
     const shoreDist = computeShoreDistanceGrid(grid);
     const taperCells = Math.max(2, gridSize * 0.2);
+    /* Use passed maxWaterDepth or fall back to real 100ft depth */
+    const seaFloorDepth = maxWaterDepth || (100 * 0.24);
 
     for (let gy = 0; gy < gridSize; gy++) {
       for (let gx = 0; gx < gridSize; gx++) {
@@ -179,22 +181,23 @@
 
         let height;
         if (cellType === "land") {
-          /* Flat-topped land: rises straight up to the full configured
-             height with no slope — the cliff face at the edge is
-             implicit in the cell boundary step. */
           const noise = (Math.random() - 0.5) * (maxLandHeight * 0.05);
           height = maxLandHeight + noise;
         } else if (cellType === "beach") {
-          /* Beach: gentle slope that peaks at y=0 at the waterline,
-             rising slightly inland. The terrain never goes below y=0
-             on beach cells near shore, so the water shader can only
-             crest over the beach surface, never clip through its
-             bottom. */
           const beachMax = Math.max(1, maxLandHeight * 0.08);
           height = beachMax * eased;
         } else {
-          /* Water: deepens away from shore */
-          height = -maxWaterDepth * eased;
+          /* Flat deep seafloor by default; shallow slope only near beach */
+          let neighborIsBeach = false;
+          for (let dy = -1; dy <= 1 && !neighborIsBeach; dy++) {
+            for (let dx = -1; dx <= 1 && !neighborIsBeach; dx++) {
+              const ny = gy + dy, nx = gx + dx;
+              if (ny >= 0 && ny < gridSize && nx >= 0 && nx < gridSize && grid[ny][nx] === "beach") {
+                neighborIsBeach = true;
+              }
+            }
+          }
+          height = neighborIsBeach ? -seaFloorDepth * eased : -seaFloorDepth;
         }
         posAttr.setZ(vertIndex, height);
       }

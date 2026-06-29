@@ -359,6 +359,7 @@
     structures.push({ type, x: gx, z: gy, headingDeg, lengthFt });
     renderStructureList();
     redrawPaintCanvas();
+    schedulePreviewUpdate(); /* also rebuild the 3D scene so the new structure appears there too */
   }
 
   function renderStructureList() {
@@ -375,6 +376,7 @@
         structures.splice(parseInt(btn.dataset.remove, 10), 1);
         renderStructureList();
         redrawPaintCanvas();
+        schedulePreviewUpdate();
       });
     });
   }
@@ -735,16 +737,22 @@
     const size = g.length;
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, size - 1, size - 1);
     const posAttr = geo.attributes.position;
-    const maxWaterDepth = Math.max(15, worldSize * 0.05);
+
+    /* Sea floor at 100ft deep by default (per request), converted to
+       world units. Not scaled to worldSize anymore -- this is a real
+       depth, not a proportion, so small areas still get real depth. */
+    const seaFloorDepth = 100 * 0.24; /* 100ft * UNITS_PER_FOOT */
+
+    /* Land height in world units from the slider */
+    const landHeight = (landHeightFt || 20) * 0.24;
+
+    /* Shore distance still needed for the beach slope and water
+       depth gradient, but NOT for land anymore (land is flat top AND
+       flat bottom -- no taper anywhere on land cells). */
+    const shoreDist = computeShoreDistanceGrid(g);
     const taperCells = Math.max(2, size * 0.2);
 
-    /* Land height in world units, from the slider value in feet */
-    const landHeight = (landHeightFt || 20) * 0.24; /* same UNITS_PER_FOOT as the live game */
-
-    /* For water depth and beach slope, we still need shore distance */
-    const shoreDist = computeShoreDistanceGrid(g);
-
-    /* Per-vertex colors for the three cell types */
+    /* Per-vertex colors */
     const colors = [];
     const colorLand = new THREE.Color(0x6b8e4e);
     const colorBeach = new THREE.Color(0xd4bc8a);
@@ -763,35 +771,57 @@
         let c;
 
         if (cellType === "land") {
-          /* Flat-topped land: rises straight up to the full configured
-             height with no slope taper -- the vertical "cliff face" at
-             the edge is implicit (the geometry just jumps from water
-             level to full land height at the cell boundary). Per
-             request: "straight up out of the water, not a gradual
-             slope." */
+          /* Flat-topped land at full height. The geometry ALSO needs
+             to go straight down underneath -- this is handled by
+             making adjacent WATER cells start at full depth immediately
+             (see below), not by giving land cells a negative height.
+             The terrain mesh itself just sits at landHeight everywhere
+             land is painted -- the cliff face is the visual gap between
+             that and the deep water floor right next to it. */
           height = landHeight;
           c = colorLand;
 
         } else if (cellType === "beach") {
-          /* Beach: gentle slope that PEAKS at exactly y=0 (sea level)
-             right at the waterline, then rises very slightly further
-             inland. This is the key water-masking trick: the terrain
-             mesh is never below y=0 on beach cells near the shore, so
-             the water shader (sitting at y=0) can only ever crest OVER
-             the beach surface, never clip through its bottom. The small
-             inland rise (up to ~beach height) represents the actual
-             dry sand above the tide line. */
-          const beachMaxHeight = Math.max(1, landHeight * 0.08); /* beach is much flatter than land, around 8% of the configured land height */
-          height = beachMaxHeight * eased; /* 0 right at the waterline, gently rises inland */
+          /* Beach: gentle slope from 0 at the waterline to a small
+             height inland. The mesh never goes below y=0 on beach
+             cells so water can only crest over the top, never clip
+             through the bottom. */
+          const beachMaxHeight = Math.max(1, landHeight * 0.08);
+          height = beachMaxHeight * eased;
           c = colorBeach;
 
         } else {
-          /* Water: deepens away from shore. The -maxWaterDepth floor
-             ensures the seafloor never gets close to the water shader
-             surface regardless of swell amplitude. */
-          height = -maxWaterDepth * eased;
-          const depthT = Math.min(1, dist / (taperCells * 1.5));
-          c = colorWater.clone().lerp(colorDeepWater, depthT);
+          /* Water: flat deep floor except for a gentle slope up near
+             beach cells. Critically, water cells next to LAND go
+             straight to full depth immediately (no taper up to y=0
+             at the land edge) -- this is what makes the land cliff
+             go straight down into the water rather than curving up
+             from the seafloor to meet the waterline.
+             
+             Check if any neighbor is beach rather than land, to only
+             apply the shallow taper near beach transitions. */
+          const neighborIsBreach = (function() {
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                const ny = gy + dy, nx = gx + dx;
+                if (ny < 0 || ny >= size || nx < 0 || nx >= size) continue;
+                if (g[ny][nx] === "beach") return true;
+              }
+            }
+            return false;
+          })();
+
+          if (neighborIsBreach) {
+            /* Near beach: shallow slope so waves can wash up onto it */
+            height = -seaFloorDepth * eased;
+          } else {
+            /* Near land or open water: flat seafloor at full depth.
+               This eliminates the curved ramp up to y=0 at the land
+               edge, making the cliff genuinely vertical. */
+            height = -seaFloorDepth;
+          }
+          const depthT = eased;
+          c = colorWater.clone().lerp(colorDeepWater, depthT * 0.7 + 0.3);
         }
 
         posAttr.setZ(vertIndex, height);
@@ -804,12 +834,8 @@
     geo.computeVertexNormals();
     geo.rotateX(-Math.PI / 2);
 
-    const mat = new THREE.MeshPhongMaterial({
-      vertexColors: true,
-      flatShading: true
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    return mesh;
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true });
+    return new THREE.Mesh(geo, mat);
   }
 
   function schedulePreviewUpdate() {
@@ -820,6 +846,50 @@
     if (previewUpdateTimer) clearTimeout(previewUpdateTimer);
     previewUpdateTimer = setTimeout(updatePreviewMesh, 150);
   }
+  /* Structure builders -- duplicated from marina.js since that file
+     isn't loaded in this standalone editor. Kept functionally
+     identical so structures look the same here as in the live game. */
+  const UNITS_PER_FOOT = 0.24;
+  const PIER_THICKNESS_FT = 3;
+
+  function buildEditorPier(lengthFt, x, z, headingDeg) {
+    const length = lengthFt * UNITS_PER_FOOT;
+    const width = PIER_THICKNESS_FT * UNITS_PER_FOOT;
+    const height = 2.5 * UNITS_PER_FOOT;
+    const geo = new THREE.BoxGeometry(width, height, length);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x8a7355, flatShading: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, height / 2, z);
+    if (headingDeg) mesh.rotation.y = (headingDeg * Math.PI) / 180;
+    return mesh;
+  }
+
+  function buildEditorDockSpine(lengthFt, x, z, headingDeg) {
+    const length = lengthFt * UNITS_PER_FOOT;
+    const width = PIER_THICKNESS_FT * 1.3 * UNITS_PER_FOOT;
+    const height = 2.5 * UNITS_PER_FOOT;
+    const geo = new THREE.BoxGeometry(width, height, length);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x7a6248, flatShading: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, height / 2, z);
+    if (headingDeg) mesh.rotation.y = (headingDeg * Math.PI) / 180;
+    return mesh;
+  }
+
+  function buildEditorFuelDock(lengthFt, x, z, headingDeg) {
+    const length = lengthFt * UNITS_PER_FOOT;
+    const width = 10 * UNITS_PER_FOOT;
+    const height = 2.5 * UNITS_PER_FOOT;
+    const geo = new THREE.BoxGeometry(width, height, length);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x9a8362, flatShading: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, height / 2, z);
+    if (headingDeg) mesh.rotation.y = (headingDeg * Math.PI) / 180;
+    return mesh;
+  }
+
+  let structureGroup = null;
+
   function updatePreviewMesh() {
     if (!scene) return;
     if (previewMesh) {
@@ -827,10 +897,41 @@
       previewMesh.geometry.dispose();
       previewMesh.material.dispose();
     }
+    /* Remove old structure meshes */
+    if (structureGroup) {
+      scene.remove(structureGroup);
+      structureGroup.traverse(obj => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+    }
+
     const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
     const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
-    previewMesh = buildPreviewMesh(grid, worldSizeFt * 0.24, landHeightFt);
+    const worldSize = worldSizeFt * UNITS_PER_FOOT;
+
+    previewMesh = buildPreviewMesh(grid, worldSize, landHeightFt);
     scene.add(previewMesh);
+
+    /* Build and add all placed structures -- convert grid-relative
+       x/z coordinates to world space using the same grid-cell-size
+       formula the terrain mesh uses (worldSize / GRID_SIZE per cell,
+       centered on origin). */
+    structureGroup = new THREE.Group();
+    const cellSize = worldSize / GRID_SIZE;
+    const halfGrid = GRID_SIZE / 2;
+
+    structures.forEach(s => {
+      const worldX = (s.x - halfGrid) * cellSize;
+      const worldZ = (s.z - halfGrid) * cellSize;
+      let mesh;
+      if (s.type === "pier") mesh = buildEditorPier(s.lengthFt, worldX, worldZ, s.headingDeg);
+      else if (s.type === "dock_spine") mesh = buildEditorDockSpine(s.lengthFt, worldX, worldZ, s.headingDeg);
+      else if (s.type === "fuel_dock") mesh = buildEditorFuelDock(s.lengthFt, worldX, worldZ, s.headingDeg);
+      if (mesh) structureGroup.add(mesh);
+    });
+
+    scene.add(structureGroup);
   }
 
   /* ---------------------------------------------------------------
