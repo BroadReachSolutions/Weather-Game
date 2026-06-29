@@ -6,6 +6,7 @@
 <title>Oregon Sail — Map Editor</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -373,24 +374,222 @@
      Reuses the exact same mesh-generation technique as the live
      game's terrain.js (a displaced PlaneGeometry, land raised/water
      lowered with a smoothstep taper at the shoreline) so what you see
-     here is genuinely representative of how it will look in-game,
-     not a separate simplified preview.
+     here is genuinely representative of how it will look in-game.
+
+     This pane now uses the SAME water shader, gradient sky, and
+     day/night system as the live game's actual Helm view (duplicated
+     here since this editor is its own standalone page/script context,
+     not literally running helm3d.js, which assumes a player boat
+     exists at the scene origin -- this editor has no boat, just a
+     free camera over the terrain). A free OrbitControls camera lets
+     you fly around and look at any part of the imported/painted area,
+     and clicking directly on the 3D terrain raycasts to find which
+     grid cell you hit and paints it the same way the 2D canvas does.
      --------------------------------------------------------------- */
-  let scene, camera, renderer, previewMesh;
+  let scene, camera, renderer, controls, previewMesh, waterMesh, skyDomeMesh, skyDomeCanvas, skyDomeCtx, skyDomeTexture, sunLight, ambientLight;
+  let waveClock = 0;
+  const waterUniforms = {
+    uTime: { value: 0 },
+    uAmplitude: { value: 1.2 },
+    uOffsetX: { value: 0 },
+    uOffsetZ: { value: 0 },
+    uDeepColor: { value: new THREE.Color(0x1565c0) },
+    uLightColor: { value: new THREE.Color(0x4fa8e8) },
+    uVeinColor: { value: new THREE.Color(0xeaf6ff) },
+    uCellScale: { value: 0.05 }
+  };
+
+  function rot(p, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return new THREE.Vector2(p.x * c - p.y * s, p.x * s + p.y * c);
+  }
+
+  /* Real water shader — exact same 8-layer swell + cracked-cell vein
+     pattern as the live game's water (see helm3d.js buildWater),
+     duplicated here for this standalone script context. Static (no
+     boat-relative scrolling offset) since there's no boat here. */
+  function buildEditorWater(size) {
+    const geo = new THREE.PlaneGeometry(size, size, 90, 90);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: waterUniforms,
+      transparent: true,
+      side: THREE.DoubleSide,
+      vertexShader: `
+        uniform float uTime;
+        uniform float uAmplitude;
+        varying float vHeight;
+        varying vec2 vWorldXZ;
+        vec2 rotV(vec2 p, float a) {
+          float c = cos(a), s = sin(a);
+          return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+        }
+        void main() {
+          float slowClock = uTime * 0.35;
+          vec2 p = position.xy;
+          vec2 primary = rotV(p, 0.0);
+          vec2 secondary = rotV(p, 1.1);
+          vec2 tertiary = rotV(p, 2.16);
+          vec2 layer4 = rotV(p, 0.95);
+          vec2 layer5 = rotV(p, 4.09);
+          vec2 layer6 = rotV(p, 3.37);
+          vec2 layer7 = rotV(p, 0.36);
+          vec2 perp = rotV(p, 1.5708);
+          float swell = sin(primary.x * 0.045 + slowClock * 0.9) * uAmplitude
+                      + sin(secondary.x * 0.11 + slowClock * 1.3) * uAmplitude * 0.22
+                      + sin(tertiary.x * 0.071 + slowClock * 0.61 + 1.7) * uAmplitude * 0.16
+                      + sin(layer4.x * 0.093 + slowClock * 1.07 + 0.6) * uAmplitude * 0.12
+                      + sin(layer5.x * 0.058 + slowClock * 0.78 + 3.2) * uAmplitude * 0.10
+                      + sin(layer6.x * 0.082 + slowClock * 1.21 + 4.8) * uAmplitude * 0.09
+                      + sin(layer7.x * 0.066 + slowClock * 0.52 + 2.1) * uAmplitude * 0.08
+                      + sin(perp.x * 0.052 + slowClock * 0.75 + 5.5) * uAmplitude * 0.35;
+          vHeight = swell / max(uAmplitude * 2.12, 0.0001);
+          vWorldXZ = p;
+          vec3 displaced = vec3(position.x, position.y, swell);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uDeepColor;
+        uniform vec3 uLightColor;
+        uniform vec3 uVeinColor;
+        uniform float uCellScale;
+        varying float vHeight;
+        varying vec2 vWorldXZ;
+        vec2 hash2(vec2 p) {
+          p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+          return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+        }
+        void main() {
+          vec2 uv = vWorldXZ * uCellScale;
+          vec2 cell = floor(uv);
+          vec2 frac = fract(uv);
+          float minDist = 8.0, secondMinDist = 8.0;
+          for (int y = -2; y <= 2; y++) {
+            for (int x = -2; x <= 2; x++) {
+              vec2 neighbor = vec2(float(x), float(y));
+              vec2 point = hash2(cell + neighbor) * 0.5 + 0.5;
+              vec2 diff = neighbor + point - frac;
+              float dist = length(diff);
+              if (dist < minDist) { secondMinDist = minDist; minDist = dist; }
+              else if (dist < secondMinDist) { secondMinDist = dist; }
+            }
+          }
+          float t = clamp((vHeight + 1.0) / 2.0, 0.0, 1.0);
+          vec3 cellColor = mix(uDeepColor, uLightColor, t);
+          float edgeDist = secondMinDist - minDist;
+          float vein = smoothstep(0.0, 0.22, edgeDist);
+          vec3 dimVein = mix(uVeinColor, cellColor, 0.45);
+          vec3 color = mix(dimVein, cellColor, vein);
+          gl_FragColor = vec4(color, 0.92);
+        }
+      `
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0; /* matches the terrain mesh's own y=0 sea-level reference (see buildPreviewMesh), so they align correctly regardless of worldSize */
+    return mesh;
+  }
+
+  /* Real gradient sky + day/night cycle, same technique as the live
+     game (canvas-texture skydome retinted by time of day). Simplified
+     to a fixed "nice daytime" look here rather than tracking the
+     real clock, since this is an editing tool, not gameplay — the
+     LIVE dev-tools panel (added in a later piece) will let this be
+     overridden on demand. */
+  function buildEditorSky() {
+    skyDomeCanvas = document.createElement("canvas");
+    skyDomeCanvas.width = 2;
+    skyDomeCanvas.height = 256;
+    skyDomeCtx = skyDomeCanvas.getContext("2d");
+    const grad = skyDomeCtx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, "#2a6fd6");
+    grad.addColorStop(1, "#9fe0f0");
+    skyDomeCtx.fillStyle = grad;
+    skyDomeCtx.fillRect(0, 0, 2, 256);
+    skyDomeTexture = new THREE.CanvasTexture(skyDomeCanvas);
+    const domeGeo = new THREE.SphereGeometry(2000, 24, 16);
+    const domeMat = new THREE.MeshBasicMaterial({ map: skyDomeTexture, side: THREE.BackSide, depthWrite: false });
+    skyDomeMesh = new THREE.Mesh(domeGeo, domeMat);
+    scene.add(skyDomeMesh);
+  }
+
   function initPreview() {
     const canvas3d = document.getElementById("previewCanvas3d");
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a2a3a);
     const wrap = canvas3d.parentElement;
     camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
-    camera.position.set(0, 600, 600);
-    camera.lookAt(0, 0, 0);
+    camera.position.set(0, 500, 700);
     renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
     renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-    sun.position.set(200, 400, 200);
-    scene.add(sun);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0, 0);
+    controls.minDistance = 30;
+    controls.maxDistance = 3000; /* generous range -- free-fly over the whole imported/painted area, not just close-in like the boat-following camera */
+    controls.dampingFactor = 0.08;
+    controls.enableDamping = true;
+
+    ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+    scene.add(ambientLight);
+    sunLight = new THREE.DirectionalLight(0xffffff, 0.95);
+    sunLight.position.set(300, 500, 200);
+    scene.add(sunLight);
+
+    buildEditorSky();
+    waterMesh = buildEditorWater(4000);
+    scene.add(waterMesh);
+
+    /* Raycasting for paint-directly-on-3D-terrain: clicking the 3D
+       view (not the 2D canvas) finds which grid cell of the terrain
+       mesh was hit and paints it the same way, via the shared
+       paintAt() function the 2D tool already uses. */
+    const raycaster = new THREE.Raycaster();
+    const mouseVec = new THREE.Vector2();
+    let isPaintingIn3D = false;
+
+    function paintFrom3DEvent(e) {
+      if (!previewMesh) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      mouseVec.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouseVec.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouseVec, camera);
+      const hits = raycaster.intersectObject(previewMesh);
+      if (hits.length === 0) return;
+      const hit = hits[0].point;
+      const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
+      const worldSize = worldSizeFt * 0.24;
+      /* Convert the hit's world X/Z back into grid cell coordinates,
+         inverse of how buildPreviewMesh positions the grid in world
+         space (centered on origin, spanning worldSize). */
+      const gx = Math.floor(((hit.x / worldSize) + 0.5) * GRID_SIZE);
+      const gy = Math.floor(((hit.z / worldSize) + 0.5) * GRID_SIZE);
+      if (gx < 0 || gx >= GRID_SIZE || gy < 0 || gy >= GRID_SIZE) return;
+      if (currentTool === "structure") {
+        placeStructure(gx, gy);
+        return;
+      }
+      const type = currentTool === "erase" ? "water" : currentTool;
+      paintAt(gx, gy, type);
+      redrawPaintCanvas();
+    }
+
+    renderer.domElement.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return; /* left-click only -- right/middle stay free for camera controls */
+      if (currentTool === "structure") { paintFrom3DEvent(e); return; }
+      isPaintingIn3D = true;
+      controls.enabled = false; /* disable orbit while actively painting, so dragging paints instead of rotating the camera */
+      paintFrom3DEvent(e);
+    });
+    renderer.domElement.addEventListener("mousemove", (e) => {
+      if (isPaintingIn3D) paintFrom3DEvent(e);
+    });
+    window.addEventListener("mouseup", () => {
+      isPaintingIn3D = false;
+      controls.enabled = true;
+    });
+
     animatePreview();
     window.addEventListener("resize", () => {
       renderer.setSize(wrap.clientWidth, wrap.clientHeight);
@@ -400,7 +599,9 @@
   }
   function animatePreview() {
     requestAnimationFrame(animatePreview);
-    if (previewMesh) previewMesh.rotation.y += 0.002; /* slow auto-rotate so the shape is easy to inspect from all sides */
+    waveClock += 0.016;
+    waterUniforms.uTime.value = waveClock;
+    if (controls) controls.update();
     renderer.render(scene, camera);
   }
 
