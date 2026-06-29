@@ -411,8 +411,22 @@
     return total;
   }
 
-  function calculateHouseGenerationWatts(boat, hourOfDay, windSpeedKt) {
+  /* Shore power: when docked at a marina with shore power connected,
+     a real battery charger typically delivers somewhere in the
+     30-60A range at 12V (roughly 400-700W) charging the house bank --
+     far more than any onboard generation source, and available as
+     long as the boat is actually docked and plugged in. This is a
+     flat rate (chargers regulate to a steady output, unlike the
+     variable curves solar/wind have), separate from and not capped
+     by the boat's own generation equipment. */
+  const SHORE_POWER_CHARGE_WATTS = 500;
+
+  function calculateHouseGenerationWatts(boat, hourOfDay, windSpeedKt, isOnShorePower) {
     let total = 0;
+    if (isOnShorePower) {
+      total += SHORE_POWER_CHARGE_WATTS;
+      return total; /* shore power bypasses onboard generation entirely while connected, matching the real-world behavior of running off the dock's power instead of batteries/alternator/etc */
+    }
     if (boat.has_solar) total += calculateSolarOutput(boat.solar_rated_watts || 0, hourOfDay);
     if (boat.has_wind_generator) total += calculateWindGeneratorOutput(boat.wind_generator_rated_watts || 0, windSpeedKt || 0);
     if (boat.has_alternator) total += calculateAlternatorOutput(boat.alternator_rated_watts || 0, !!boat.engine_on, boat.throttle_rpm || 0);
@@ -424,9 +438,16 @@
      drains. Caller is responsible for converting this to watt-hours
      over the actual elapsed time and applying it to charge state
      (see OS.tickElectricalSystem in game-core.js). */
-  function calculateHouseBatteryNetWatts(boat, hourOfDay, windSpeedKt, instrumentCount) {
-    const generation = calculateHouseGenerationWatts(boat, hourOfDay, windSpeedKt);
+  function calculateHouseBatteryNetWatts(boat, hourOfDay, windSpeedKt, instrumentCount, isOnShorePower) {
+    const generation = calculateHouseGenerationWatts(boat, hourOfDay, windSpeedKt, isOnShorePower);
     const load = calculateHouseLoadWatts(boat, instrumentCount);
+    /* While on shore power, house loads run "free of the batteries"
+       per the original request -- the dock's power covers them
+       directly rather than the loads drawing the bank down even as
+       it charges, so the net result while plugged in is always the
+       full shore power charge rate, undiminished by whatever's
+       currently switched on. */
+    if (isOnShorePower) return generation;
     return generation - load;
   }
 

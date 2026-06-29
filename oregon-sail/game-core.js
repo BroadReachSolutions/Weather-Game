@@ -349,11 +349,11 @@ OS.setGeneratorRunning = async function (isRunning) {
    knows how many gauge widgets are currently placed in the tab
    system) since draw scales with how many are actually present.
    --------------------------------------------------------------- */
-OS.tickElectricalSystem = async function (elapsedSeconds, hourOfDay, windSpeedKt, instrumentCount) {
+OS.tickElectricalSystem = async function (elapsedSeconds, hourOfDay, windSpeedKt, instrumentCount, isOnShorePower) {
   if (!OS.boat || typeof window.OSPhysics === "undefined") return;
   if (!OS.boat.has_house_battery) return;
 
-  const netWatts = window.OSPhysics.calculateHouseBatteryNetWatts(OS.boat, hourOfDay, windSpeedKt, instrumentCount);
+  const netWatts = window.OSPhysics.calculateHouseBatteryNetWatts(OS.boat, hourOfDay, windSpeedKt, instrumentCount, isOnShorePower);
   const netWh = netWatts * (elapsedSeconds / 3600);
 
   const capacity = (OS.boat.house_battery_capacity_wh || 1200) * (OS.boat.house_battery_bank_count || 1);
@@ -365,8 +365,10 @@ OS.tickElectricalSystem = async function (elapsedSeconds, hourOfDay, windSpeedKt
   /* House bank just died — force off every house-battery load so
      the game state honestly reflects "nothing is actually running,"
      rather than leaving switches showing ON with a dead battery
-     behind them. Only fires once, the instant it crosses zero. */
-  const justDied = currentCharge > 0 && newCharge <= 0;
+     behind them. Only fires once, the instant it crosses zero.
+     Doesn't apply while on shore power, since the bank can't
+     actually die there (always net-positive while plugged in). */
+  const justDied = !isOnShorePower && currentCharge > 0 && newCharge <= 0;
   if (justDied) {
     const HOUSE_LOAD_ON_KEYS = [
       "light_nav", "light_steaming", "light_deck", "light_anchor", "light_cockpit",
@@ -376,6 +378,28 @@ OS.tickElectricalSystem = async function (elapsedSeconds, hourOfDay, windSpeedKt
       "load_ais_on", "load_bilge_pump_on", "load_fans_on", "load_cabin_lights_on"
     ];
     HOUSE_LOAD_ON_KEYS.forEach(key => { updates[key] = false; });
+  }
+
+  /* Shore power charges the OTHER battery banks too, directly --
+     real marina shore power runs through the boat's charger/
+     converter, which feeds the whole DC system, not just the house
+     bank. Simple flat trickle rate for these smaller, less heavily-
+     used banks rather than the house bank's full charger rate. */
+  if (isOnShorePower) {
+    const SHORE_POWER_AUX_CHARGE_WATTS = 150;
+    const auxWh = SHORE_POWER_AUX_CHARGE_WATTS * (elapsedSeconds / 3600);
+    if (OS.boat.has_start_battery) {
+      const cap = OS.boat.start_battery_capacity_wh || 800;
+      updates.start_battery_charge_wh = Math.max(0, Math.min(cap, (OS.boat.start_battery_charge_wh || 0) + auxWh));
+    }
+    if (OS.boat.has_generator_battery) {
+      const cap = OS.boat.generator_battery_capacity_wh || 500;
+      updates.generator_battery_charge_wh = Math.max(0, Math.min(cap, (OS.boat.generator_battery_charge_wh || 0) + auxWh));
+    }
+    if (OS.boat.has_bow_thruster_battery) {
+      const cap = OS.boat.bow_thruster_battery_capacity_wh || 900;
+      updates.bow_thruster_battery_charge_wh = Math.max(0, Math.min(cap, (OS.boat.bow_thruster_battery_charge_wh || 0) + auxWh));
+    }
   }
 
   Object.assign(OS.boat, updates); /* in-memory first, see note in setEngine */
@@ -389,9 +413,13 @@ OS.tickElectricalSystem = async function (elapsedSeconds, hourOfDay, windSpeedKt
   if (error) console.error("Oregon Sail: tickElectricalSystem failed", error);
 
   /* Bow thruster: own dedicated battery, simple drain-only (no
-     generation feeds it per the original design spec). Also force-
-     disabled if ITS battery dies, independent of the house bank. */
-  if (OS.boat.has_bow_thruster_battery) {
+     generation feeds it per the original design spec, EXCEPT shore
+     power above, which charges it directly like every other bank).
+     Also force-disabled if ITS battery dies, independent of the
+     house bank. Skipped entirely while on shore power, since the
+     thruster wouldn't realistically be in use while tied up anyway,
+     and shore power already topped this battery off above. */
+  if (OS.boat.has_bow_thruster_battery && !isOnShorePower) {
     const thrusterDraw = window.OSPhysics.calculateBowThrusterDraw(OS.boat);
     if (thrusterDraw > 0) {
       const thrusterWh = thrusterDraw * (elapsedSeconds / 3600);

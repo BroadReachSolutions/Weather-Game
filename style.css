@@ -2922,6 +2922,18 @@ body.layout-edit .widgetResize {
   text-align: right;
 }
 
+.osShorePowerRow {
+  margin: 4px 0;
+  padding: 6px 8px;
+  background: rgba(105,240,174,0.12);
+  border: 1px solid rgba(105,240,174,0.4);
+  border-radius: 6px;
+  font-size: 10px;
+  color: #b8ffd0;
+  font-weight: 600;
+  text-align: center;
+}
+
 .osGenRow {
   display: flex;
   align-items: center;

@@ -372,7 +372,16 @@
     const windKt = typeof window.getLastWindMph === "function" ? window.getLastWindMph() * 0.868976 : 0;
     const instrumentCount = countActiveInstrumentWidgets();
 
-    const result = await OS.tickElectricalSystem(elapsedSeconds, hourOfDay, windKt, instrumentCount);
+    /* Shore power is active whenever the player is actually docked in
+       the marina (per the original request: "at the dock or slip you
+       can be on shore power... run all the power system free of the
+       batteries"). Reuses the marina's own docking detection from
+       Phase 2 rather than a separate check. */
+    const isOnShorePower = (typeof window.OSMarina !== "undefined" && window.OSMarina.isActive())
+      ? !!(window.OSMarina.getDockedState() && window.OSMarina.getDockedState().isDocked)
+      : false;
+
+    const result = await OS.tickElectricalSystem(elapsedSeconds, hourOfDay, windKt, instrumentCount, isOnShorePower);
     if (result && result.justDied) {
       logHouseBatteryDiedToast();
     }
@@ -1322,6 +1331,14 @@
       if (pctLabel) pctLabel.textContent = pct.toFixed(0) + "%";
     });
 
+    const shorePowerRow = document.getElementById("osShorePowerRow");
+    if (shorePowerRow) {
+      const isOnShorePower = (typeof window.OSMarina !== "undefined" && window.OSMarina.isActive())
+        ? !!(window.OSMarina.getDockedState() && window.OSMarina.getDockedState().isDocked)
+        : false;
+      shorePowerRow.style.display = isOnShorePower ? "block" : "none";
+    }
+
     updateGenerationDisplay();
   }
 
@@ -1765,7 +1782,8 @@
     const statusEl = document.getElementById("osMarinaDockStatus");
     if (statusEl) {
       if (result.docked) {
-        statusEl.textContent = result.isFuelDock ? "⛽ Docked at fuel dock" : `⚓ Docked at Slip ${result.slipIndex + 1}`;
+        const dockLabel = result.isFuelDock ? "⛽ Docked at fuel dock" : `⚓ Docked at Slip ${result.slipIndex + 1}`;
+        statusEl.textContent = dockLabel + " — 🔌 Shore Power Connected";
         statusEl.classList.add("docked");
       } else {
         statusEl.textContent = result.touching ? "Touching dock/boat!" : "Searching for a slip…";
