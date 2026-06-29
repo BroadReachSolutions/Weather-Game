@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oregon Sail — Map Editor</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #0c1117;
+    color: #eef7ff;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #131a22;
+    border-bottom: 1px solid rgba(125,186,220,0.2);
+    flex-shrink: 0;
+  }
+  header h1 {
+    font-size: 15px;
+    margin: 0;
+    flex: 1;
+  }
+  .toolbar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  button, select, input[type="text"], input[type="number"] {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(125,186,220,0.3);
+    color: #eef7ff;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button.active {
+    background: rgba(79,195,247,0.3);
+    border-color: #4fc3f7;
+  }
+  button:hover { background: rgba(255,255,255,0.12); }
+  main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  .panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-right: 1px solid rgba(125,186,220,0.15);
+  }
+  .panel:last-child { border-right: none; }
+  .panel-header {
+    padding: 6px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(159,194,217,0.7);
+    background: rgba(255,255,255,0.03);
+    flex-shrink: 0;
+  }
+  .canvas-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #070e14;
+    position: relative;
+    overflow: hidden;
+  }
+  #paintCanvas {
+    cursor: crosshair;
+    image-rendering: pixelated;
+    border: 1px solid rgba(125,186,220,0.3);
+  }
+  #previewCanvas3d {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    padding: 12px;
+    background: #0e151c;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .field-group label {
+    display: block;
+    font-size: 11px;
+    color: rgba(159,194,217,0.8);
+    margin-bottom: 4px;
+  }
+  .field-group input, .field-group select { width: 100%; }
+  .brush-size-label { font-size: 11px; color: rgba(159,194,217,0.8); }
+  .structure-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+  .structure-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    padding: 4px 6px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 4px;
+  }
+  .structure-item button { padding: 2px 6px; font-size: 10px; }
+  .hint { font-size: 10px; color: rgba(159,194,217,0.55); line-height: 1.5; }
+  #statusMsg { font-size: 11px; color: #69f0ae; min-height: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🗺️ Oregon Sail — Map Editor</h1>
+  <div class="toolbar">
+    <button id="toolLand" class="active">🟩 Land</button>
+    <button id="toolWater">🟦 Water</button>
+    <button id="toolStructure">⚓ Structure</button>
+    <button id="toolErase">🧹 Erase</button>
+  </div>
+  <div class="toolbar">
+    <button id="newRegionBtn">New</button>
+    <button id="loadRegionBtn">Load</button>
+    <button id="saveRegionBtn">Save</button>
+  </div>
+</header>
+
+<main>
+  <div class="panel" style="flex: 1.2;">
+    <div class="panel-header">Paint — Top-Down Grid</div>
+    <div class="canvas-wrap">
+      <canvas id="paintCanvas" width="512" height="512"></canvas>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Live 3D Preview</div>
+    <div class="canvas-wrap">
+      <canvas id="previewCanvas3d"></canvas>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="field-group">
+      <label>Region Name</label>
+      <input type="text" id="regionName" value="Untitled Region">
+    </div>
+
+    <div class="field-group">
+      <label>Real-World Size (feet across)</label>
+      <input type="number" id="worldSizeFt" value="2000" min="200" step="100">
+    </div>
+
+    <div class="field-group">
+      <label>Anchor — Real Location (optional)</label>
+      <input type="number" id="anchorLat" placeholder="Latitude (blank = standalone)" step="0.0001">
+      <input type="number" id="anchorLon" placeholder="Longitude" step="0.0001" style="margin-top:4px;">
+      <p class="hint">Leave blank for a standalone practice area (like the marina). Set both to anchor this region at a real GPS location.</p>
+    </div>
+
+    <div class="field-group">
+      <label class="brush-size-label">Brush Size: <span id="brushSizeVal">3</span> cells</label>
+      <input type="range" id="brushSize" min="1" max="10" value="3">
+    </div>
+
+    <div class="field-group" id="structureTypeGroup" style="display:none;">
+      <label>Structure Type</label>
+      <select id="structureType">
+        <option value="pier">Finger Pier</option>
+        <option value="dock_spine">Dock Spine</option>
+        <option value="fuel_dock">Fuel Dock</option>
+      </select>
+      <label style="margin-top:8px;">Length (ft)</label>
+      <input type="number" id="structureLength" value="35" min="5">
+      <label style="margin-top:8px;">Heading (degrees)</label>
+      <input type="number" id="structureHeading" value="0" min="0" max="359">
+      <p class="hint">Click on the paint grid to place a structure of this type.</p>
+    </div>
+
+    <div class="field-group">
+      <label>Placed Structures</label>
+      <div class="structure-list" id="structureList"></div>
+    </div>
+
+    <div id="statusMsg"></div>
+  </div>
+</main>
+
+<script>
+  const SUPABASE_URL = "https://ailcwfpjlelofhqmqzdy.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_3QZVUGb46lWu2ubdurS2Qg_vWNMZ44e";
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  /* ---------------------------------------------------------------
+     GRID STATE
+     Same format the live game's terrain.js already produces from
+     satellite imagery: a 2D array of "land"/"water" strings. Painting
+     here is just a different AUTHORING method feeding the exact same
+     downstream mesh-generation pipeline (buildTerrainMesh), so the
+     live game needs no new rendering code to display hand-drawn
+     regions, only a small change to check for one before falling
+     back to satellite generation.
+     --------------------------------------------------------------- */
+  const GRID_SIZE = 64;
+  let grid = [];
+  function resetGrid(fillType) {
+    grid = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+      const row = [];
+      for (let x = 0; x < GRID_SIZE; x++) row.push(fillType);
+      grid.push(row);
+    }
+  }
+  resetGrid("water"); /* sensible default: open water, paint land into it */
+
+  let structures = []; /* { type, x, z, headingDeg, lengthFt } -- x/z in grid cell coordinates */
+
+  let currentTool = "land";
+  let brushSize = 3;
+  let isPainting = false;
+
+  const paintCanvas = document.getElementById("paintCanvas");
+  const paintCtx = paintCanvas.getContext("2d");
+  const cellPx = paintCanvas.width / GRID_SIZE;
+
+  function redrawPaintCanvas() {
+    paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        paintCtx.fillStyle = grid[y][x] === "land" ? "#6b8e4e" : "#2a73ad";
+        paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+      }
+    }
+    /* Structures drawn as simple markers on top */
+    structures.forEach(s => {
+      paintCtx.save();
+      paintCtx.translate((s.x + 0.5) * cellPx, (s.z + 0.5) * cellPx);
+      paintCtx.rotate((s.headingDeg * Math.PI) / 180);
+      paintCtx.fillStyle = "#e8c84f";
+      paintCtx.fillRect(-cellPx * 0.4, -cellPx * 1.2, cellPx * 0.8, cellPx * 2.4);
+      paintCtx.restore();
+    });
+    schedulePreviewUpdate();
+  }
+  redrawPaintCanvas();
+
+  function paintAt(gx, gy, type) {
+    const r = brushSize;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue; /* circular brush */
+        const x = gx + dx, y = gy + dy;
+        if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
+        grid[y][x] = type;
+      }
+    }
+  }
+
+  function canvasEventToGrid(e) {
+    const rect = paintCanvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const px = (clientX - rect.left) * (paintCanvas.width / rect.width);
+    const py = (clientY - rect.top) * (paintCanvas.height / rect.height);
+    return { gx: Math.floor(px / cellPx), gy: Math.floor(py / cellPx) };
+  }
+
+  function handlePaintStart(e) {
+    e.preventDefault();
+    const { gx, gy } = canvasEventToGrid(e);
+    if (currentTool === "structure") {
+      placeStructure(gx, gy);
+      return;
+    }
+    isPainting = true;
+    const type = currentTool === "erase" ? "water" : currentTool;
+    paintAt(gx, gy, type);
+    redrawPaintCanvas();
+  }
+  function handlePaintMove(e) {
+    if (!isPainting) return;
+    e.preventDefault();
+    const { gx, gy } = canvasEventToGrid(e);
+    const type = currentTool === "erase" ? "water" : currentTool;
+    paintAt(gx, gy, type);
+    redrawPaintCanvas();
+  }
+  function handlePaintEnd() { isPainting = false; }
+
+  paintCanvas.addEventListener("mousedown", handlePaintStart);
+  paintCanvas.addEventListener("mousemove", handlePaintMove);
+  window.addEventListener("mouseup", handlePaintEnd);
+  paintCanvas.addEventListener("touchstart", handlePaintStart, { passive: false });
+  paintCanvas.addEventListener("touchmove", handlePaintMove, { passive: false });
+  paintCanvas.addEventListener("touchend", handlePaintEnd);
+
+  function placeStructure(gx, gy) {
+    const type = document.getElementById("structureType").value;
+    const lengthFt = parseFloat(document.getElementById("structureLength").value) || 35;
+    const headingDeg = parseFloat(document.getElementById("structureHeading").value) || 0;
+    structures.push({ type, x: gx, z: gy, headingDeg, lengthFt });
+    renderStructureList();
+    redrawPaintCanvas();
+  }
+
+  function renderStructureList() {
+    const list = document.getElementById("structureList");
+    list.innerHTML = "";
+    structures.forEach((s, i) => {
+      const item = document.createElement("div");
+      item.className = "structure-item";
+      item.innerHTML = `<span>${s.type} @ (${s.x},${s.z})</span><button data-remove="${i}">✕</button>`;
+      list.appendChild(item);
+    });
+    list.querySelectorAll("[data-remove]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        structures.splice(parseInt(btn.dataset.remove, 10), 1);
+        renderStructureList();
+        redrawPaintCanvas();
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------------
+     TOOLBAR
+     --------------------------------------------------------------- */
+  const toolButtons = {
+    land: document.getElementById("toolLand"),
+    water: document.getElementById("toolWater"),
+    structure: document.getElementById("toolStructure"),
+    erase: document.getElementById("toolErase")
+  };
+  Object.keys(toolButtons).forEach(key => {
+    toolButtons[key].addEventListener("click", () => {
+      currentTool = key;
+      Object.values(toolButtons).forEach(b => b.classList.remove("active"));
+      toolButtons[key].classList.add("active");
+      document.getElementById("structureTypeGroup").style.display = key === "structure" ? "block" : "none";
+    });
+  });
+
+  document.getElementById("brushSize").addEventListener("input", (e) => {
+    brushSize = parseInt(e.target.value, 10);
+    document.getElementById("brushSizeVal").textContent = brushSize;
+  });
+
+  /* ---------------------------------------------------------------
+     LIVE 3D PREVIEW
+     Reuses the exact same mesh-generation technique as the live
+     game's terrain.js (a displaced PlaneGeometry, land raised/water
+     lowered with a smoothstep taper at the shoreline) so what you see
+     here is genuinely representative of how it will look in-game,
+     not a separate simplified preview.
+     --------------------------------------------------------------- */
+  let scene, camera, renderer, previewMesh;
+  function initPreview() {
+    const canvas3d = document.getElementById("previewCanvas3d");
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a2a3a);
+    const wrap = canvas3d.parentElement;
+    camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
+    camera.position.set(0, 600, 600);
+    camera.lookAt(0, 0, 0);
+    renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+    sun.position.set(200, 400, 200);
+    scene.add(sun);
+    animatePreview();
+    window.addEventListener("resize", () => {
+      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+      camera.aspect = wrap.clientWidth / wrap.clientHeight;
+      camera.updateProjectionMatrix();
+    });
+  }
+  function animatePreview() {
+    requestAnimationFrame(animatePreview);
+    if (previewMesh) previewMesh.rotation.y += 0.002; /* slow auto-rotate so the shape is easy to inspect from all sides */
+    renderer.render(scene, camera);
+  }
+
+  /* Same distance-transform height technique as terrain.js's
+     buildTerrainMesh -- duplicated here intentionally rather than
+     shared via a module import, since this is a standalone page with
+     its own script context, not part of the main game bundle. Kept
+     numerically identical so the preview is trustworthy. */
+  function computeShoreDistanceGrid(g) {
+    const size = g.length;
+    const distances = [];
+    for (let gy = 0; gy < size; gy++) {
+      const row = [];
+      for (let gx = 0; gx < size; gx++) {
+        const myType = g[gy][gx];
+        let minDist = size;
+        for (let oy = 0; oy < size; oy++) {
+          for (let ox = 0; ox < size; ox++) {
+            if (g[oy][ox] === myType) continue;
+            const d = Math.sqrt((gx - ox) ** 2 + (gy - oy) ** 2);
+            if (d < minDist) minDist = d;
+          }
+        }
+        row.push(minDist);
+      }
+      distances.push(row);
+    }
+    return distances;
+  }
+
+  function buildPreviewMesh(g, worldSize) {
+    const size = g.length;
+    const geo = new THREE.PlaneGeometry(worldSize, worldSize, size - 1, size - 1);
+    const posAttr = geo.attributes.position;
+    const shoreDist = computeShoreDistanceGrid(g);
+    const maxLandHeight = Math.max(3, worldSize * 0.02);
+    const maxWaterDepth = Math.max(15, worldSize * 0.05);
+    const taperCells = Math.max(2, size * 0.2);
+
+    for (let gy = 0; gy < size; gy++) {
+      for (let gx = 0; gx < size; gx++) {
+        const vertIndex = gy * size + gx;
+        const isLand = g[gy][gx] === "land";
+        const dist = shoreDist[gy][gx];
+        const t = Math.min(1, dist / taperCells);
+        const eased = t * t * (3 - 2 * t);
+        const height = isLand ? maxLandHeight * eased : -maxWaterDepth * eased;
+        posAttr.setZ(vertIndex, height);
+      }
+    }
+    posAttr.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x6b8e4e, flatShading: true, vertexColors: false });
+    return new THREE.Mesh(geo, mat);
+  }
+
+  let previewUpdateTimer = null;
+  function schedulePreviewUpdate() {
+    /* Debounced -- painting fires many times per second while
+       dragging, but rebuilding a 64x64 mesh on every single one would
+       be wasteful; a short delay batches rapid strokes into one
+       rebuild. */
+    if (previewUpdateTimer) clearTimeout(previewUpdateTimer);
+    previewUpdateTimer = setTimeout(updatePreviewMesh, 150);
+  }
+  function updatePreviewMesh() {
+    if (!scene) return;
+    if (previewMesh) {
+      scene.remove(previewMesh);
+      previewMesh.geometry.dispose();
+      previewMesh.material.dispose();
+    }
+    const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
+    previewMesh = buildPreviewMesh(grid, worldSizeFt * 0.24); /* same UNITS_PER_FOOT conversion as the live game */
+    scene.add(previewMesh);
+  }
+
+  /* ---------------------------------------------------------------
+     SAVE / LOAD
+     --------------------------------------------------------------- */
+  function setStatus(msg, isError) {
+    const el = document.getElementById("statusMsg");
+    el.textContent = msg;
+    el.style.color = isError ? "#ff8a65" : "#69f0ae";
+  }
+
+  document.getElementById("newRegionBtn").addEventListener("click", () => {
+    if (!confirm("Start a new region? Unsaved changes will be lost.")) return;
+    resetGrid("water");
+    structures = [];
+    document.getElementById("regionName").value = "Untitled Region";
+    document.getElementById("anchorLat").value = "";
+    document.getElementById("anchorLon").value = "";
+    renderStructureList();
+    redrawPaintCanvas();
+    setStatus("Started a new region.");
+  });
+
+  document.getElementById("saveRegionBtn").addEventListener("click", async () => {
+    const name = document.getElementById("regionName").value.trim() || "Untitled Region";
+    const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
+    const latVal = document.getElementById("anchorLat").value;
+    const lonVal = document.getElementById("anchorLon").value;
+    const payload = {
+      name,
+      anchor_lat: latVal !== "" ? parseFloat(latVal) : null,
+      anchor_lon: lonVal !== "" ? parseFloat(lonVal) : null,
+      classification_grid: grid,
+      grid_size: GRID_SIZE,
+      world_size_ft: worldSizeFt,
+      structures,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await sb.from("custom_map_regions").insert(payload);
+    if (error) { setStatus("Save failed: " + error.message, true); return; }
+    setStatus("Saved \"" + name + "\".");
+  });
+
+  document.getElementById("loadRegionBtn").addEventListener("click", async () => {
+    const { data, error } = await sb.from("custom_map_regions").select("*").order("updated_at", { ascending: false }).limit(20);
+    if (error) { setStatus("Load failed: " + error.message, true); return; }
+    if (!data || data.length === 0) { setStatus("No saved regions found.", true); return; }
+    const choice = prompt("Saved regions:\n" + data.map((r, i) => `${i + 1}. ${r.name}`).join("\n") + "\n\nEnter a number to load:");
+    const idx = parseInt(choice, 10) - 1;
+    if (isNaN(idx) || !data[idx]) return;
+    const region = data[idx];
+    grid = region.classification_grid;
+    structures = region.structures || [];
+    document.getElementById("regionName").value = region.name;
+    document.getElementById("worldSizeFt").value = region.world_size_ft;
+    document.getElementById("anchorLat").value = region.anchor_lat != null ? region.anchor_lat : "";
+    document.getElementById("anchorLon").value = region.anchor_lon != null ? region.anchor_lon : "";
+    renderStructureList();
+    redrawPaintCanvas();
+    setStatus("Loaded \"" + region.name + "\".");
+  });
+
+  document.getElementById("worldSizeFt").addEventListener("change", schedulePreviewUpdate);
+
+  initPreview();
+  updatePreviewMesh();
+</script>
+
+</body>
+</html>

@@ -216,13 +216,78 @@
      PUBLIC API
      --------------------------------------------------------------- */
 
+  /* Checks for a hand-drawn custom region (from the Map Editor)
+     anchored near the given real lat/lon, within a generous
+     tolerance (roughly the same area a satellite tile would cover).
+     Returns a ready-to-add THREE.Group built from the SAME
+     buildTerrainMesh used for satellite-derived terrain (just fed a
+     hand-painted grid instead of a photo-classified one), or null if
+     none exists nearby — callers should fall back to satellite
+     generation in that case. Requires sbClient (the shared
+     Supabase client already loaded by the main game) to query the
+     custom_map_regions table. */
+  async function checkForCustomRegion(lat, lon, unitsPerFoot) {
+    if (typeof sbClient === "undefined") return null;
+    try {
+      const tolerance = 0.01; /* roughly ~0.7nm at most latitudes, generous enough to catch a region anchored nearby */
+      const { data, error } = await sbClient
+        .from("custom_map_regions")
+        .select("*")
+        .eq("is_active", true)
+        .gte("anchor_lat", lat - tolerance)
+        .lte("anchor_lat", lat + tolerance)
+        .gte("anchor_lon", lon - tolerance)
+        .lte("anchor_lon", lon + tolerance)
+        .limit(1);
+      if (error || !data || data.length === 0) return null;
+
+      const region = data[0];
+      const worldSize = (region.world_size_ft || 2000) * (unitsPerFoot || 0.24);
+      const landHeight = Math.max(3, worldSize * 0.02);
+      const waterDepth = Math.max(15, worldSize * 0.05);
+      const mesh = buildTerrainMesh(region.classification_grid, worldSize, landHeight, waterDepth);
+
+      const group = new THREE.Group();
+      group.add(mesh);
+      group.userData.isCustomRegion = true;
+      group.userData.regionId = region.id;
+      group.userData.centerLat = lat;
+      group.userData.centerLon = lon;
+      /* Structures (piers, dock spines, fuel docks) placed in the
+         editor -- reuses the exact same primitives the marina
+         already builds, so v1 custom-region structures look and
+         collide identically to marina docks. Positions are stored
+         grid-relative in the editor; convert to world units here
+         using the same per-cell spacing the terrain mesh itself uses. */
+      if (Array.isArray(region.structures) && window.OSMarinaStructures) {
+        const cellSize = worldSize / (region.grid_size || 64);
+        const halfGrid = (region.grid_size || 64) / 2;
+        region.structures.forEach(s => {
+          const worldX = (s.x - halfGrid) * cellSize;
+          const worldZ = (s.z - halfGrid) * cellSize;
+          const structureMesh = window.OSMarinaStructures.build(s.type, unitsPerFoot, s.lengthFt, worldX, worldZ, s.headingDeg);
+          if (structureMesh) group.add(structureMesh);
+        });
+      }
+      return group;
+    } catch (e) {
+      console.error("Oregon Sail terrain: custom region check failed", e);
+      return null;
+    }
+  }
+
   /* Generates terrain for the area around a given real lat/lon and
      returns a ready-to-add THREE.Group. worldRadiusUnits should match
      whatever view radius the caller wants covered (e.g. the existing
      5nm/0.5mi scene radius) — this function converts that into how
      large the generated mesh needs to be using the scene's own
-     UNITS_PER_FOOT, so it lines up at the correct real-world scale. */
+     UNITS_PER_FOOT, so it lines up at the correct real-world scale.
+     Checks for a hand-drawn custom region first (Map Editor output);
+     falls back to satellite-based generation if none exists nearby. */
   async function generateTerrainForLocation(lat, lon, worldRadiusUnits, unitsPerFoot) {
+    const customRegion = await checkForCustomRegion(lat, lon, unitsPerFoot);
+    if (customRegion) return customRegion;
+
     /* Zoom 15 gives a tile covering roughly 0.3-0.4nm per tile at
        most latitudes — close enough to our typical view radius that
        one tile is a reasonable Phase 1 starting point. Later phases

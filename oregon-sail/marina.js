@@ -299,6 +299,30 @@
     };
   }
 
+  /* Shared structure-building functions, exposed so terrain.js's
+     custom-region rendering (Map Editor output) can place the same
+     dock/pier/fuel-dock primitives the marina itself uses, rather
+     than duplicating this geometry code. One small dispatch function
+     keyed by type string, matching the structure type names the Map
+     Editor's UI offers. */
+  window.OSMarinaStructures = {
+    build: function (type, unitsPerFoot, lengthFt, x, z, headingDeg) {
+      let mesh;
+      if (type === "pier") {
+        mesh = buildPier(unitsPerFoot, lengthFt, x, z);
+      } else if (type === "dock_spine") {
+        mesh = buildDockSpine(unitsPerFoot, lengthFt, x);
+        mesh.position.z = z; /* buildDockSpine assumes z=0 by default; override for arbitrary placement */
+      } else if (type === "fuel_dock") {
+        mesh = buildFuelDock(unitsPerFoot, x, z);
+      } else {
+        return null;
+      }
+      if (headingDeg) mesh.rotation.y = (headingDeg * Math.PI) / 180;
+      return mesh;
+    }
+  };
+
   window.OSMarina = {
     /* Generates and shows the marina, hiding it from view until
        called. scene/unitsPerFoot are passed in by helm3d.js, which
