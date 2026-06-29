@@ -1160,6 +1160,17 @@
     return group;
   }
 
+  /* Builds one random boat using the exact same generator as the
+     open-water AI ambiance boats, but without any velocity/spawn-at-
+     edge logic — used to fill marina slips with stationary, parked
+     boats. Not added to the aiBoats movement-tracking array, so it
+     never moves or despawns on its own; the marina module owns its
+     lifecycle entirely. */
+  function buildStationaryAIBoat() {
+    const dna = randomBoatDNA();
+    return buildAIBoatMesh(dna);
+  }
+
   function spawnAIBoat() {
     if (aiBoats.length >= AI_BOAT_MAX_COUNT) return;
     const dna = randomBoatDNA();
@@ -2486,6 +2497,9 @@
       window.OSHelm3DState = state;
     },
     setLightState: setLightState,
+    buildStationaryAIBoat: buildStationaryAIBoat,
+    getScene: function () { return scene; },
+    getUnitsPerFoot: function () { return UNITS_PER_FOOT; },
     /* Tears down and regenerates the boat with a new set of design
        parameters — used by the dev console's boat designer for a
        live preview as sliders change, and to apply a saved design

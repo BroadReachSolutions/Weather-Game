@@ -924,6 +924,13 @@
         </div>
         <div class="osDevSectionHeader" style="margin-top:16px;"><span>Quick Spots</span></div>
         <div class="osDevQuickSpots" id="osDevQuickSpots"></div>
+
+        <div class="osDevSectionHeader" style="margin-top:16px;"><span>Marina (Docking Practice)</span></div>
+        <p class="osDevHint">A standalone marina, independent of your real sailing position — for practicing docking. Phase 1: layout + randomly-filled slips only, no docking detection or collision counter yet.</p>
+        <div class="osDevFormActions">
+          <button class="osDevBtn" id="osDevEnterMarinaBtn">Enter Marina</button>
+          <button class="osDevBtnSecondary" id="osDevExitMarinaBtn">Exit Marina</button>
+        </div>
       </div>
     `;
 
@@ -961,6 +968,28 @@
       logEvent("info", `Teleported to ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
       if (typeof window.OSHelm3D !== "undefined") window.OSHelm3D.updateGroundTexture(lat, lon);
       renderTeleportTab();
+    });
+
+    document.getElementById("osDevEnterMarinaBtn").addEventListener("click", () => {
+      if (typeof window.OSMarina === "undefined" || typeof window.OSHelm3D === "undefined") {
+        alert("Marina module not loaded yet.");
+        return;
+      }
+      const scene = window.OSHelm3D.getScene();
+      const unitsPerFoot = window.OSHelm3D.getUnitsPerFoot();
+      if (!scene) { alert("3D scene isn't ready yet."); return; }
+      window.OSMarina.enter(scene, unitsPerFoot);
+      const slips = window.OSMarina.getSlips();
+      const occupiedCount = slips.filter(s => s.occupied).length;
+      logEvent("info", `Entered marina — ${occupiedCount}/${slips.length} slips occupied.`);
+    });
+
+    document.getElementById("osDevExitMarinaBtn").addEventListener("click", () => {
+      if (typeof window.OSMarina === "undefined" || typeof window.OSHelm3D === "undefined") return;
+      const scene = window.OSHelm3D.getScene();
+      if (!scene) return;
+      window.OSMarina.exit(scene);
+      logEvent("info", "Exited marina.");
     });
   }
 
