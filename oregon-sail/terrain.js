@@ -186,8 +186,14 @@
         } else if (cellType === "beach") {
           const beachMax = Math.max(1, maxLandHeight * 0.08);
           height = beachMax * eased;
+        } else if (cellType === "calm") {
+          /* Calm water: always flat at sea level. The live game's water
+             shader checks userData.calmGrid on the terrain mesh and
+             suppresses swell displacement for cells marked calm, so
+             these areas remain genuinely flat regardless of swell
+             settings -- intended for sheltered harbors, marinas, etc. */
+          height = 0;
         } else {
-          /* Flat deep seafloor by default; shallow slope only near beach */
           let neighborIsBeach = false;
           for (let dy = -1; dy <= 1 && !neighborIsBeach; dy++) {
             for (let dx = -1; dx <= 1 && !neighborIsBeach; dx++) {
@@ -214,6 +220,16 @@
     mesh.userData.classificationGrid = grid;
     mesh.userData.shoreDistanceGrid = shoreDist;
     mesh.userData.worldSize = worldSize;
+    /* Calm cell lookup: a flat Set of "gx,gy" keys for O(1) checking
+       in the water shader's per-vertex displacement loop -- avoids
+       scanning the full grid each frame. */
+    const calmSet = new Set();
+    for (let gy = 0; gy < gridSize; gy++) {
+      for (let gx = 0; gx < gridSize; gx++) {
+        if (grid[gy][gx] === "calm") calmSet.add(`${gx},${gy}`);
+      }
+    }
+    mesh.userData.calmGrid = calmSet;
     return mesh;
   }
 

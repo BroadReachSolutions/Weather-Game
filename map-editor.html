@@ -140,6 +140,7 @@
     <button id="toolLand" class="active">🟩 Land</button>
     <button id="toolBeach">🏖️ Beach</button>
     <button id="toolWater">🟦 Water</button>
+    <button id="toolCalm">🩵 Calm</button>
     <button id="toolStructure">⚓ Structure</button>
     <button id="toolErase">🧹 Erase</button>
   </div>
@@ -283,8 +284,9 @@
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
         const cellType = grid[y][x];
-        paintCtx.fillStyle = cellType === "land" ? "#6b8e4e"
+        paintCtx.fillStyle = cellType === "land"  ? "#6b8e4e"
                            : cellType === "beach" ? "#d4bc8a"
+                           : cellType === "calm"  ? "#a8d8ea"
                            : "#2a73ad";
         paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
       }
@@ -388,6 +390,7 @@
     land: document.getElementById("toolLand"),
     beach: document.getElementById("toolBeach"),
     water: document.getElementById("toolWater"),
+    calm: document.getElementById("toolCalm"),
     structure: document.getElementById("toolStructure"),
     erase: document.getElementById("toolErase")
   };
@@ -771,40 +774,31 @@
         let c;
 
         if (cellType === "land") {
-          /* Flat-topped land at full height. The geometry ALSO needs
-             to go straight down underneath -- this is handled by
-             making adjacent WATER cells start at full depth immediately
-             (see below), not by giving land cells a negative height.
-             The terrain mesh itself just sits at landHeight everywhere
-             land is painted -- the cliff face is the visual gap between
-             that and the deep water floor right next to it. */
           height = landHeight;
           c = colorLand;
 
         } else if (cellType === "beach") {
-          /* Beach: gentle slope from 0 at the waterline to a small
-             height inland. The mesh never goes below y=0 on beach
-             cells so water can only crest over the top, never clip
-             through the bottom. */
           const beachMaxHeight = Math.max(1, landHeight * 0.08);
           height = beachMaxHeight * eased;
           c = colorBeach;
 
+        } else if (cellType === "calm") {
+          /* Calm water: always exactly at sea level, flat. The water
+             shader is suppressed for calm cells in the live game (see
+             terrain.js userData.calmCells used by helm3d.js). Here in
+             the editor the mesh is just flat at y=0, distinguishable
+             from regular water by its light-blue color. */
+          height = 0;
+          c = new THREE.Color(0xa8d8ea);
+
         } else {
-          /* Water: flat deep floor except for a gentle slope up near
-             beach cells. Critically, water cells next to LAND go
-             straight to full depth immediately (no taper up to y=0
-             at the land edge) -- this is what makes the land cliff
-             go straight down into the water rather than curving up
-             from the seafloor to meet the waterline.
-             
-             Check if any neighbor is beach rather than land, to only
-             apply the shallow taper near beach transitions. */
+          /* Regular water: flat deep seafloor, shallow slope only near beach */
           const neighborIsBreach = (function() {
             for (let dy = -1; dy <= 1; dy++) {
               for (let dx = -1; dx <= 1; dx++) {
                 const ny = gy + dy, nx = gx + dx;
                 if (ny < 0 || ny >= size || nx < 0 || nx >= size) continue;
+                /* only beach triggers the shallow taper, not calm */
                 if (g[ny][nx] === "beach") return true;
               }
             }
@@ -812,12 +806,8 @@
           })();
 
           if (neighborIsBreach) {
-            /* Near beach: shallow slope so waves can wash up onto it */
             height = -seaFloorDepth * eased;
           } else {
-            /* Near land or open water: flat seafloor at full depth.
-               This eliminates the curved ramp up to y=0 at the land
-               edge, making the cliff genuinely vertical. */
             height = -seaFloorDepth;
           }
           const depthT = eased;
