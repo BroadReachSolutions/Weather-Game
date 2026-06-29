@@ -286,7 +286,7 @@
         const cellType = grid[y][x];
         paintCtx.fillStyle = cellType === "land"  ? "#6b8e4e"
                            : cellType === "beach" ? "#d4bc8a"
-                           : cellType === "calm"  ? "#a8d8ea"
+                           : cellType === "calm"  ? "#3d8fc7"
                            : "#2a73ad";
         paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
       }
@@ -785,11 +785,13 @@
         } else if (cellType === "calm") {
           /* Calm water: always exactly at sea level, flat. The water
              shader is suppressed for calm cells in the live game (see
-             terrain.js userData.calmCells used by helm3d.js). Here in
-             the editor the mesh is just flat at y=0, distinguishable
-             from regular water by its light-blue color. */
+             terrain.js userData.calmGrid used by helm3d.js). Here in
+             the editor the mesh is flat at y=0, colored as genuine
+             shallow water (same blue family as colorWater, just a
+             touch lighter -- not a separate pale/white tone) so it
+             reads as "calm water" rather than a different material. */
           height = 0;
-          c = new THREE.Color(0xa8d8ea);
+          c = colorWater.clone().lerp(new THREE.Color(0xffffff), 0.15);
 
         } else {
           /* Regular water: flat deep seafloor, shallow slope only near beach */
