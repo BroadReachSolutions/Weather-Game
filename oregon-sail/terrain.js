@@ -167,34 +167,36 @@
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, gridSize - 1, gridSize - 1);
     const posAttr = geo.attributes.position;
     const shoreDist = computeShoreDistanceGrid(grid);
-
-    /* Distance (in grid cells) at which land/water height reaches its
-       full max — anything closer to shore than this smoothly tapers
-       toward the actual waterline (y=0), which is what creates a real
-       slope through the shoreline instead of a hard step. Roughly a
-       fifth of the grid so the slope reads clearly without being the
-       entire map. */
     const taperCells = Math.max(2, gridSize * 0.2);
 
     for (let gy = 0; gy < gridSize; gy++) {
       for (let gx = 0; gx < gridSize; gx++) {
         const vertIndex = gy * gridSize + gx;
-        const isLand = grid[gy][gx] === "land";
+        const cellType = grid[gy][gx];
         const dist = shoreDist[gy][gx];
-        const t = Math.min(1, dist / taperCells); /* 0 right at the shoreline, 1 once fully tapered */
-        /* Smoothstep-style easing (t*t*(3-2t)) instead of a linear
-           ramp, for a more natural-looking slope rather than a flat
-           ramp with a sharp kink where it starts. */
+        const t = Math.min(1, dist / taperCells);
         const eased = t * t * (3 - 2 * t);
 
         let height;
-        if (isLand) {
-          const noise = (Math.random() - 0.5) * (maxLandHeight * 0.1);
-          height = maxLandHeight * eased + noise;
+        if (cellType === "land") {
+          /* Flat-topped land: rises straight up to the full configured
+             height with no slope — the cliff face at the edge is
+             implicit in the cell boundary step. */
+          const noise = (Math.random() - 0.5) * (maxLandHeight * 0.05);
+          height = maxLandHeight + noise;
+        } else if (cellType === "beach") {
+          /* Beach: gentle slope that peaks at y=0 at the waterline,
+             rising slightly inland. The terrain never goes below y=0
+             on beach cells near shore, so the water shader can only
+             crest over the beach surface, never clip through its
+             bottom. */
+          const beachMax = Math.max(1, maxLandHeight * 0.08);
+          height = beachMax * eased;
         } else {
+          /* Water: deepens away from shore */
           height = -maxWaterDepth * eased;
         }
-        posAttr.setZ(vertIndex, height); /* PlaneGeometry is built in the XY plane; Z becomes height after the same rotateX(-90deg) the water plane uses */
+        posAttr.setZ(vertIndex, height);
       }
     }
     posAttr.needsUpdate = true;
@@ -202,12 +204,12 @@
     geo.rotateX(-Math.PI / 2);
 
     const mat = new THREE.MeshPhongMaterial({
-      color: 0x6b8e4e, /* a generic land-green; later phases could texture this from the actual tile image */
+      color: 0x6b8e4e,
       flatShading: true
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.userData.classificationGrid = grid; /* kept for later phases (collision detection) */
-    mesh.userData.shoreDistanceGrid = shoreDist; /* kept for later phases (shoreline breaking waves) */
+    mesh.userData.classificationGrid = grid;
+    mesh.userData.shoreDistanceGrid = shoreDist;
     mesh.userData.worldSize = worldSize;
     return mesh;
   }

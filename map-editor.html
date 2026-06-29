@@ -138,6 +138,7 @@
   <h1>🗺️ Oregon Sail — Map Editor</h1>
   <div class="toolbar">
     <button id="toolLand" class="active">🟩 Land</button>
+    <button id="toolBeach">🏖️ Beach</button>
     <button id="toolWater">🟦 Water</button>
     <button id="toolStructure">⚓ Structure</button>
     <button id="toolErase">🧹 Erase</button>
@@ -185,6 +186,12 @@
     <div class="field-group">
       <label class="brush-size-label">Brush Size: <span id="brushSizeVal">3</span> cells</label>
       <input type="range" id="brushSize" min="1" max="10" value="3">
+    </div>
+
+    <div class="field-group">
+      <label class="brush-size-label">Land Height: <span id="landHeightVal">20</span> ft</label>
+      <input type="range" id="landHeight" min="2" max="100" value="20">
+      <p class="hint">How far land rises straight up above the waterline. Beach uses a fixed gentle slope instead of this height.</p>
     </div>
 
     <div class="field-group" id="structureTypeGroup" style="display:none;">
@@ -275,7 +282,10 @@
     paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
-        paintCtx.fillStyle = grid[y][x] === "land" ? "#6b8e4e" : "#2a73ad";
+        const cellType = grid[y][x];
+        paintCtx.fillStyle = cellType === "land" ? "#6b8e4e"
+                           : cellType === "beach" ? "#d4bc8a"
+                           : "#2a73ad";
         paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
       }
     }
@@ -374,6 +384,7 @@
      --------------------------------------------------------------- */
   const toolButtons = {
     land: document.getElementById("toolLand"),
+    beach: document.getElementById("toolBeach"),
     water: document.getElementById("toolWater"),
     structure: document.getElementById("toolStructure"),
     erase: document.getElementById("toolErase")
@@ -390,6 +401,11 @@
   document.getElementById("brushSize").addEventListener("input", (e) => {
     brushSize = parseInt(e.target.value, 10);
     document.getElementById("brushSizeVal").textContent = brushSize;
+  });
+
+  document.getElementById("landHeight").addEventListener("input", (e) => {
+    document.getElementById("landHeightVal").textContent = e.target.value;
+    schedulePreviewUpdate();
   });
 
   /* ---------------------------------------------------------------
@@ -715,31 +731,85 @@
     return distances;
   }
 
-  function buildPreviewMesh(g, worldSize) {
+  function buildPreviewMesh(g, worldSize, landHeightFt) {
     const size = g.length;
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, size - 1, size - 1);
     const posAttr = geo.attributes.position;
-    const shoreDist = computeShoreDistanceGrid(g);
-    const maxLandHeight = Math.max(3, worldSize * 0.02);
     const maxWaterDepth = Math.max(15, worldSize * 0.05);
     const taperCells = Math.max(2, size * 0.2);
+
+    /* Land height in world units, from the slider value in feet */
+    const landHeight = (landHeightFt || 20) * 0.24; /* same UNITS_PER_FOOT as the live game */
+
+    /* For water depth and beach slope, we still need shore distance */
+    const shoreDist = computeShoreDistanceGrid(g);
+
+    /* Per-vertex colors for the three cell types */
+    const colors = [];
+    const colorLand = new THREE.Color(0x6b8e4e);
+    const colorBeach = new THREE.Color(0xd4bc8a);
+    const colorWater = new THREE.Color(0x1a5a8a);
+    const colorDeepWater = new THREE.Color(0x0d2d47);
 
     for (let gy = 0; gy < size; gy++) {
       for (let gx = 0; gx < size; gx++) {
         const vertIndex = gy * size + gx;
-        const isLand = g[gy][gx] === "land";
+        const cellType = g[gy][gx];
         const dist = shoreDist[gy][gx];
         const t = Math.min(1, dist / taperCells);
         const eased = t * t * (3 - 2 * t);
-        const height = isLand ? maxLandHeight * eased : -maxWaterDepth * eased;
+
+        let height;
+        let c;
+
+        if (cellType === "land") {
+          /* Flat-topped land: rises straight up to the full configured
+             height with no slope taper -- the vertical "cliff face" at
+             the edge is implicit (the geometry just jumps from water
+             level to full land height at the cell boundary). Per
+             request: "straight up out of the water, not a gradual
+             slope." */
+          height = landHeight;
+          c = colorLand;
+
+        } else if (cellType === "beach") {
+          /* Beach: gentle slope that PEAKS at exactly y=0 (sea level)
+             right at the waterline, then rises very slightly further
+             inland. This is the key water-masking trick: the terrain
+             mesh is never below y=0 on beach cells near the shore, so
+             the water shader (sitting at y=0) can only ever crest OVER
+             the beach surface, never clip through its bottom. The small
+             inland rise (up to ~beach height) represents the actual
+             dry sand above the tide line. */
+          const beachMaxHeight = Math.max(1, landHeight * 0.08); /* beach is much flatter than land, around 8% of the configured land height */
+          height = beachMaxHeight * eased; /* 0 right at the waterline, gently rises inland */
+          c = colorBeach;
+
+        } else {
+          /* Water: deepens away from shore. The -maxWaterDepth floor
+             ensures the seafloor never gets close to the water shader
+             surface regardless of swell amplitude. */
+          height = -maxWaterDepth * eased;
+          const depthT = Math.min(1, dist / (taperCells * 1.5));
+          c = colorWater.clone().lerp(colorDeepWater, depthT);
+        }
+
         posAttr.setZ(vertIndex, height);
+        colors.push(c.r, c.g, c.b);
       }
     }
+
     posAttr.needsUpdate = true;
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals();
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshPhongMaterial({ color: 0x6b8e4e, flatShading: true, vertexColors: false });
-    return new THREE.Mesh(geo, mat);
+
+    const mat = new THREE.MeshPhongMaterial({
+      vertexColors: true,
+      flatShading: true
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    return mesh;
   }
 
   function schedulePreviewUpdate() {
@@ -758,7 +828,8 @@
       previewMesh.material.dispose();
     }
     const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
-    previewMesh = buildPreviewMesh(grid, worldSizeFt * 0.24); /* same UNITS_PER_FOOT conversion as the live game */
+    const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
+    previewMesh = buildPreviewMesh(grid, worldSizeFt * 0.24, landHeightFt);
     scene.add(previewMesh);
   }
 
