@@ -32,3 +32,12 @@ create table if not exists custom_map_regions (
 );
 
 create index if not exists idx_custom_map_regions_anchor on custom_map_regions (anchor_lat, anchor_lon);
+
+-- Same RLS approach as boat_presets/app_config: enabled, but fully
+-- open via anon key, since this is a single-developer game's setup
+-- with no real player auth system yet. Revisit once real player
+-- accounts exist.
+alter table custom_map_regions enable row level security;
+drop policy if exists "custom_map_regions_anon_all" on custom_map_regions;
+create policy "custom_map_regions_anon_all" on custom_map_regions
+  for all using (true) with check (true);

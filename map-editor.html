@@ -540,8 +540,22 @@
 
   document.getElementById("worldSizeFt").addEventListener("change", schedulePreviewUpdate);
 
-  initPreview();
-  updatePreviewMesh();
+  /* Deferred until the window has fully loaded (not just DOM parsed)
+     -- calling this too early can leave the canvas wrapper's
+     clientWidth/clientHeight at 0 if the flex layout hasn't actually
+     been painted yet, which can make THREE.WebGLRenderer throw and
+     halt the rest of this script entirely, including every toolbar
+     button's event listener below it. This was the actual cause of
+     the reported "nothing responds, not even the buttons" bug. */
+  window.addEventListener("load", () => {
+    try {
+      initPreview();
+      updatePreviewMesh();
+    } catch (e) {
+      console.error("Map Editor: 3D preview failed to initialize", e);
+      setStatus("3D preview failed to load (painting still works) — " + e.message, true);
+    }
+  });
 </script>
 
 </body>
