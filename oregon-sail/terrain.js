@@ -67,6 +67,62 @@
     });
   }
 
+  /* Classifies a single RGB pixel as land or water using color
+     heuristics. Water reads as blue/cyan/dark-teal tones across a
+     wide brightness range (deep ocean is dark blue, shallows/sand
+     bars under water can be lighter cyan); land reads as green
+     (vegetation), tan/brown (sand, dirt, roads), or gray (rock,
+     pavement, structures). This is a real heuristic, not perfect
+     ground truth — it will do well on clear open water against solid
+     coastline, less well on docks, turbid river mouths, or deep
+     shadow (tannic/marsh water especially). Kept as the FALLBACK
+     classifier now that classifyTile() tries the more reliable USGS
+     hydro data first -- this only runs if that fetch fails. */
+  function classifyPixel(r, g, b) {
+    const isBlueish = b > r + 8 && b > g - 10;
+    const brightness = (r + g + b) / 3;
+    if (isBlueish && brightness > 15 && brightness < 230) return "water";
+    return "land";
+  }
+
+  /* Downsamples a tile canvas into a coarse grid (default 48x48,
+     plenty for generating a recognizable coastline shape without
+     needing per-pixel resolution) and classifies each cell by
+     averaging the pixels within it using classifyPixel. Returns a 2D
+     array of "land"/"water" strings. Fallback path only -- see
+     buildHydroClassificationGrid for the primary, more reliable
+     classifier. */
+  function buildClassificationGrid(ctx, gridSize) {
+    const imageData = ctx.getImageData(0, 0, TILE_SIZE_PX, TILE_SIZE_PX);
+    const pixels = imageData.data;
+    const cellPx = TILE_SIZE_PX / gridSize;
+    const grid = [];
+
+    for (let gy = 0; gy < gridSize; gy++) {
+      const row = [];
+      for (let gx = 0; gx < gridSize; gx++) {
+        let rSum = 0, gSum = 0, bSum = 0, count = 0;
+        const startX = Math.floor(gx * cellPx);
+        const startY = Math.floor(gy * cellPx);
+        const endX = Math.floor((gx + 1) * cellPx);
+        const endY = Math.floor((gy + 1) * cellPx);
+        for (let py = startY; py < endY; py++) {
+          for (let px = startX; px < endX; px++) {
+            const idx = (py * TILE_SIZE_PX + px) * 4;
+            rSum += pixels[idx];
+            gSum += pixels[idx + 1];
+            bSum += pixels[idx + 2];
+            count++;
+          }
+        }
+        const avgR = rSum / count, avgG = gSum / count, avgB = bSum / count;
+        row.push(classifyPixel(avgR, avgG, avgB));
+      }
+      grid.push(row);
+    }
+    return grid;
+  }
+
   /* Fetches the USGS National Hydrography Dataset overlay tile for
      the same z/y/x coordinates (same Web Mercator tiling scheme as
      the satellite source) -- real, purpose-built water-feature data
