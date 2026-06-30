@@ -356,6 +356,9 @@
     generateTerrainForLocation,
     latLonToTile,
     tileToLatLon,
-    classifyPixel /* exposed for testing/tuning the classification heuristic */
+    classifyPixel, /* exposed for testing/tuning the classification heuristic */
+    fetchTileToCanvas, /* exposed for bulk import, which needs to fetch many tiles directly rather than going through the single-tile generateTerrainForLocation pipeline */
+    buildClassificationGrid,
+    TILE_SIZE_PX
   };
 })();

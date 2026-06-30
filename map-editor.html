@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="oregon-sail/terrain.js"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -212,6 +213,28 @@
     <div class="field-group">
       <label>Placed Structures</label>
       <div class="structure-list" id="structureList"></div>
+    </div>
+
+    <div class="field-group">
+      <label>🛰️ Bulk Import from Satellite</label>
+      <p class="hint">Imports real satellite tiles around a center point, classifies each as land/water, and saves each as its own anchored region -- generates a chunked grid covering the requested radius rather than one giant area, the same windowing principle the live game already uses.</p>
+      <label style="margin-top:6px;">Center Latitude</label>
+      <input type="number" id="importLat" step="0.0001" value="29.8908">
+      <label style="margin-top:6px;">Center Longitude</label>
+      <input type="number" id="importLon" step="0.0001" value="-81.3124">
+      <label style="margin-top:6px;">Radius (miles)</label>
+      <input type="number" id="importRadius" step="0.5" min="0.5" max="10" value="3">
+      <label style="margin-top:6px;">Name Prefix</label>
+      <input type="text" id="importNamePrefix" value="St Augustine">
+      <div class="osDevFormActions" style="margin-top:8px;">
+        <button class="osDevBtn" id="importAreaBtn">Import Area</button>
+      </div>
+      <div id="importProgressWrap" style="display:none; margin-top:8px;">
+        <div style="height:8px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden;">
+          <div id="importProgressBar" style="height:100%; width:0%; background:#4fc3f7; transition:width 0.2s;"></div>
+        </div>
+        <p class="hint" id="importProgressText">0 / 0 tiles</p>
+      </div>
     </div>
 
     <div class="field-group">
@@ -1101,6 +1124,95 @@
      halt the rest of this script entirely, including every toolbar
      button's event listener below it. This was the actual cause of
      the reported "nothing responds, not even the buttons" bug. */
+  /* ---------------------------------------------------------------
+     BULK IMPORT — fetches real satellite tiles covering a center
+     point + radius, classifies each one, and saves each as its own
+     anchored custom_map_regions row. This is NOT one giant area; it's
+     a chunked grid of normal-sized regions (same windowing principle
+     the live game's on-demand terrain generation already uses), each
+     independently loadable/editable afterward via the existing Load
+     button. Reuses terrain.js's real tile-fetch and classification
+     pipeline (the exact same code that runs when a player sails
+     somewhere new) rather than a separate implementation.
+     --------------------------------------------------------------- */
+  async function runBulkImport() {
+    if (typeof window.OSTerrain === "undefined") {
+      setStatus("Terrain module not loaded.", true);
+      return;
+    }
+    const centerLat = parseFloat(document.getElementById("importLat").value);
+    const centerLon = parseFloat(document.getElementById("importLon").value);
+    const radiusMi = parseFloat(document.getElementById("importRadius").value) || 3;
+    const namePrefix = document.getElementById("importNamePrefix").value.trim() || "Imported Region";
+    if (isNaN(centerLat) || isNaN(centerLon)) { setStatus("Enter a valid center lat/lon.", true); return; }
+
+    const zoom = 15; /* same zoom level the live game uses for on-demand single-tile generation */
+    const milesPerPixel = (156543.03392 * Math.cos((centerLat * Math.PI) / 180) / Math.pow(2, zoom)) * 0.000621371;
+    const tileSpanMi = milesPerPixel * window.OSTerrain.TILE_SIZE_PX;
+    const tilesRadius = Math.ceil(radiusMi / tileSpanMi);
+    const centerTile = window.OSTerrain.latLonToTile(centerLat, centerLon, zoom);
+
+    const tileList = [];
+    for (let dy = -tilesRadius; dy <= tilesRadius; dy++) {
+      for (let dx = -tilesRadius; dx <= tilesRadius; dx++) {
+        /* Only include tiles actually within the requested radius
+           (a circle), not the full bounding square -- avoids
+           importing noticeably more area than asked for at the
+           corners. */
+        const distTiles = Math.sqrt(dx * dx + dy * dy);
+        if (distTiles > tilesRadius) continue;
+        tileList.push({ x: centerTile.x + dx, y: centerTile.y + dy });
+      }
+    }
+
+    const progressWrap = document.getElementById("importProgressWrap");
+    const progressBar = document.getElementById("importProgressBar");
+    const progressText = document.getElementById("importProgressText");
+    progressWrap.style.display = "block";
+    progressText.textContent = `0 / ${tileList.length} tiles`;
+    progressBar.style.width = "0%";
+
+    let completed = 0;
+    let failed = 0;
+
+    for (const tile of tileList) {
+      try {
+        const tileLatLon = window.OSTerrain.tileToLatLon(tile.x, tile.y, zoom);
+        const canvasResult = await window.OSTerrain.fetchTileToCanvas(tile.x, tile.y, zoom);
+        const tileGridSize = 48; /* matches terrain.js's own single-tile generation grid resolution */
+        const tileGrid = window.OSTerrain.buildClassificationGrid(canvasResult.ctx, tileGridSize);
+        const emptyCalmGrid = tileGrid.map(row => row.map(() => false));
+
+        const milesPerPixelHere = (156543.03392 * Math.cos((tileLatLon.lat * Math.PI) / 180) / Math.pow(2, zoom)) * 0.000621371;
+        const tileSpanFt = milesPerPixelHere * window.OSTerrain.TILE_SIZE_PX * 5280;
+
+        const payload = {
+          name: `${namePrefix} (${tile.x},${tile.y})`,
+          anchor_lat: tileLatLon.lat,
+          anchor_lon: tileLatLon.lon,
+          classification_grid: tileGrid,
+          calm_grid: emptyCalmGrid,
+          grid_size: tileGridSize,
+          world_size_ft: tileSpanFt,
+          structures: [],
+          updated_at: new Date().toISOString()
+        };
+        const { error } = await sb.from("custom_map_regions").insert(payload);
+        if (error) { failed++; console.error("Bulk import: failed to save tile", tile, error); }
+        else completed++;
+      } catch (e) {
+        failed++;
+        console.error("Bulk import: failed to fetch/classify tile", tile, e);
+      }
+
+      const done = completed + failed;
+      progressBar.style.width = Math.round((done / tileList.length) * 100) + "%";
+      progressText.textContent = `${done} / ${tileList.length} tiles` + (failed ? ` (${failed} failed)` : "");
+    }
+
+    setStatus(`Bulk import complete: ${completed} tiles saved` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
+  }
+
   function wireDevTools() {
     const weatherActive = document.getElementById("devWeatherActive");
     const windSpeed = document.getElementById("devWindSpeed");
@@ -1156,6 +1268,9 @@
 
   window.addEventListener("load", () => {
     wireDevTools(); /* independent of the 3D preview init below, so a 3D failure can't take these controls down with it */
+    document.getElementById("importAreaBtn").addEventListener("click", () => {
+      runBulkImport();
+    });
     try {
       initPreview();
       updatePreviewMesh();
