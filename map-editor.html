@@ -217,8 +217,8 @@
     </div>
 
     <div class="field-group">
-      <label>🛰️ Bulk Import from Satellite</label>
-      <p class="hint">Imports real satellite tiles around a center point, classifies each as land/water, and saves each as its own anchored region -- generates a chunked grid covering the requested radius rather than one giant area, the same windowing principle the live game already uses.</p>
+      <label>🛰️ Area: Lat/Lon + Radius</label>
+      <p class="hint">Used by both buttons below: Import Area generates new tiles here (real satellite, classified land/water, chunked grid). Load Area (in the toolbar above) pulls in whatever's already saved at this point/radius instead.</p>
       <label style="margin-top:6px;">Center Latitude</label>
       <input type="number" id="importLat" step="0.0001" value="29.8908">
       <label style="margin-top:6px;">Center Longitude</label>
@@ -1077,17 +1077,77 @@
      existing single-region Load button. */
   async function loadArea() {
     if (!scene) { setStatus("3D scene isn't ready yet.", true); return; }
-    const prefix = prompt("Enter the name prefix to load (e.g. \"St Augustine\" to match all tiles from that import):");
-    if (!prefix) return;
 
-    setStatus("Loading area...");
-    const { data, error } = await sb.from("custom_map_regions")
-      .select("*")
-      .ilike("name", `${prefix}%`)
-      .not("anchor_lat", "is", null)
-      .limit(200);
+    const latVal = document.getElementById("importLat").value;
+    const lonVal = document.getElementById("importLon").value;
+    const radiusMi = parseFloat(document.getElementById("importRadius").value) || 3;
+
+    let data, error;
+
+    if (latVal !== "" && lonVal !== "") {
+      /* Load by center point + radius -- the requested workflow:
+         reuses the same lat/lon/radius fields as the bulk importer,
+         so setting a point once and either Importing (generate new
+         tiles there) or Loading (pull whatever's already saved there)
+         both work from the same inputs. Converts the radius into a
+         real lat/lon bounding box, accounting for longitude degrees
+         shrinking at higher latitudes -- same approach already used
+         in terrain.js's checkForCustomRegion and the bulk importer's
+         own tile-span math. */
+      const lat = parseFloat(latVal);
+      const lon = parseFloat(lonVal);
+      if (isNaN(lat) || isNaN(lon)) { setStatus("Enter a valid center latitude and longitude.", true); return; }
+
+      const latDeltaDeg = radiusMi / 69.0; /* ~69 miles per degree of latitude, everywhere */
+      const lonDeltaDeg = radiusMi / (69.0 * Math.cos((lat * Math.PI) / 180)); /* longitude degrees shrink toward the poles */
+
+      setStatus(`Loading all tiles within ${radiusMi}mi of ${lat.toFixed(4)}, ${lon.toFixed(4)}...`);
+      const result = await sb.from("custom_map_regions")
+        .select("*")
+        .gte("anchor_lat", lat - latDeltaDeg)
+        .lte("anchor_lat", lat + latDeltaDeg)
+        .gte("anchor_lon", lon - lonDeltaDeg)
+        .lte("anchor_lon", lon + lonDeltaDeg)
+        .not("anchor_lat", "is", null)
+        .limit(500);
+      data = result.data;
+      error = result.error;
+      if (!error && data) {
+        /* The bounding box above is a rectangle, not a true circle --
+           filter again with real distance so tiles outside the
+           requested radius (the box's corners) aren't included,
+           matching the same circular-not-square approach the bulk
+           importer already uses for consistency. */
+        data = data.filter(r => {
+          const dLat = (r.anchor_lat - lat) * 69.0;
+          const dLon = (r.anchor_lon - lon) * 69.0 * Math.cos((lat * Math.PI) / 180);
+          return Math.sqrt(dLat * dLat + dLon * dLon) <= radiusMi;
+        });
+      }
+      if (!error && (!data || data.length === 0)) {
+        setStatus(`No regions found within ${radiusMi}mi of ${lat.toFixed(4)}, ${lon.toFixed(4)}.`, true);
+        return;
+      }
+    } else {
+      /* Fallback: load by name prefix, for finding a specific named
+         import when you don't have/need exact coordinates. */
+      const prefix = prompt("No lat/lon entered above. Enter a name prefix to load instead (e.g. \"St Augustine\"):");
+      if (!prefix) return;
+      setStatus("Loading area...");
+      const result = await sb.from("custom_map_regions")
+        .select("*")
+        .ilike("name", `${prefix}%`)
+        .not("anchor_lat", "is", null)
+        .limit(200);
+      data = result.data;
+      error = result.error;
+      if (!error && (!data || data.length === 0)) {
+        setStatus("No regions found matching \"" + prefix + "\".", true);
+        return;
+      }
+    }
+
     if (error) { setStatus("Load area failed: " + error.message, true); return; }
-    if (!data || data.length === 0) { setStatus("No regions found matching \"" + prefix + "\".", true); return; }
 
     /* Clear any previous area */
     if (areaGroup) {
@@ -1097,7 +1157,7 @@
     areaTiles = [];
     selectedAreaTileId = null;
     document.getElementById("selectedTileGroup").style.display = "block";
-    document.getElementById("selectedTileName").textContent = "Area loaded — click any tile in the 3D view to edit it.";
+    document.getElementById("selectedTileName").textContent = `Area loaded (${data.length} tiles) — click any tile in the 3D view to edit it.`;
 
     /* Center the whole area on the average lat/lon of all loaded
        tiles, so the group sits roughly centered in the 3D view
