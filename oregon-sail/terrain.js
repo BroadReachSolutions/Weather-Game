@@ -192,24 +192,25 @@
     return grid;
   }
 
-  /* Requests a Google Maps Tile API session token for terrain tiles.
-     Must be called once before fetching tiles for an import session.
-     apiKey is the user's Google Maps API key (restricted to Map Tiles
-     API only -- never stored, only used during the active import). */
+  /* Requests a Google Maps terrain session token via the Supabase
+     Edge Function proxy (google-terrain-session). The createSession
+     POST to Google is CORS-blocked from browsers, so the edge
+     function makes it server-side and returns just the token.
+     The API key is sent in the request body, not stored anywhere. */
   async function fetchGoogleTerrainSession(apiKey) {
-    const resp = await fetch(`https://tile.googleapis.com/v1/createSession?key=${apiKey}`, {
+    /* Supabase project URL -- same one used for all other DB calls */
+    const SUPABASE_URL = "https://ailcwfpjlelofhqmqzdy.supabase.co";
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/google-terrain-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mapType: "terrain",
-        language: "en-US",
-        region: "US",
-        layerTypes: ["layerRoadmap"]
-      })
+      body: JSON.stringify({ apiKey })
     });
-    if (!resp.ok) throw new Error(`Google session token request failed: ${resp.status} ${resp.statusText}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(`Session proxy failed: ${resp.status} ${err.error || ""}`);
+    }
     const data = await resp.json();
-    if (!data.session) throw new Error("Google session response missing session token");
+    if (!data.session) throw new Error("Session proxy returned no session token");
     return data.session;
   }
 
