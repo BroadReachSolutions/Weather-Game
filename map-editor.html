@@ -258,13 +258,23 @@
      --------------------------------------------------------------- */
   const GRID_SIZE = 64;
   let grid = [];
+  /* Calm is a FLAG layered on top of regular water cells, not its own
+     cell type -- per request, it should "apply to the normal water"
+     rather than be a separate paintable thing. Same color, same
+     depth, same everything as regular water; the only difference is
+     wave displacement is suppressed where this is true. Only has any
+     effect where the underlying grid cell is "water". */
+  let calmGrid = [];
   let previewUpdateTimer = null; /* moved up here from further down the file -- it was being referenced (via schedulePreviewUpdate, called from redrawPaintCanvas) before its declaration line ever ran, which throws in JS for let/const and was the actual cause of the reported "nothing responds" bug */
   function resetGrid(fillType) {
     grid = [];
+    calmGrid = [];
     for (let y = 0; y < GRID_SIZE; y++) {
       const row = [];
-      for (let x = 0; x < GRID_SIZE; x++) row.push(fillType);
+      const calmRow = [];
+      for (let x = 0; x < GRID_SIZE; x++) { row.push(fillType); calmRow.push(false); }
       grid.push(row);
+      calmGrid.push(calmRow);
     }
   }
   resetGrid("water"); /* sensible default: open water, paint land into it */
@@ -286,9 +296,15 @@
         const cellType = grid[y][x];
         paintCtx.fillStyle = cellType === "land"  ? "#6b8e4e"
                            : cellType === "beach" ? "#d4bc8a"
-                           : cellType === "calm"  ? "#3d8fc7"
                            : "#2a73ad";
         paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+        /* Calm flag drawn as a lighter overlay ON TOP of normal water
+           color, not a separate fill -- it's a property of the water
+           cell, not a different material. */
+        if (cellType === "water" && calmGrid[y][x]) {
+          paintCtx.fillStyle = "rgba(160, 220, 255, 0.45)";
+          paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+        }
       }
     }
     /* Structures drawn as simple markers on top */
@@ -311,7 +327,20 @@
         if (dx * dx + dy * dy > r * r) continue; /* circular brush */
         const x = gx + dx, y = gy + dy;
         if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
-        grid[y][x] = type;
+        if (type === "calm") {
+          /* Flag, not a cell-type overwrite -- only has any effect on
+             cells that are already water, per request ("select an
+             area of normal water and make it not have waves"). */
+          if (grid[y][x] === "water") calmGrid[y][x] = true;
+        } else if (type === "uncalm") {
+          /* Erase tool over a calm area clears the flag too, restoring
+             normal wave behavior, without needing a separate button. */
+          calmGrid[y][x] = false;
+          grid[y][x] = "water";
+        } else {
+          grid[y][x] = type;
+          calmGrid[y][x] = false; /* painting a different cell type here clears any stale calm flag underneath it */
+        }
       }
     }
   }
@@ -333,7 +362,7 @@
       return;
     }
     isPainting = true;
-    const type = currentTool === "erase" ? "water" : currentTool;
+    const type = currentTool === "erase" ? "uncalm" : currentTool;
     paintAt(gx, gy, type);
     redrawPaintCanvas();
   }
@@ -341,7 +370,7 @@
     if (!isPainting) return;
     e.preventDefault();
     const { gx, gy } = canvasEventToGrid(e);
-    const type = currentTool === "erase" ? "water" : currentTool;
+    const type = currentTool === "erase" ? "uncalm" : currentTool;
     paintAt(gx, gy, type);
     redrawPaintCanvas();
   }
@@ -672,7 +701,7 @@
         placeStructure(gx, gy);
         return;
       }
-      const type = currentTool === "erase" ? "water" : currentTool;
+      const type = currentTool === "erase" ? "uncalm" : currentTool;
       paintAt(gx, gy, type);
       redrawPaintCanvas();
     }
@@ -736,7 +765,7 @@
     return distances;
   }
 
-  function buildPreviewMesh(g, worldSize, landHeightFt) {
+  function buildPreviewMesh(g, worldSize, landHeightFt, calmGridParam) {
     const size = g.length;
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, size - 1, size - 1);
     const posAttr = geo.attributes.position;
@@ -782,35 +811,30 @@
           height = beachMaxHeight * eased;
           c = colorBeach;
 
-        } else if (cellType === "calm") {
-          /* Calm water: always exactly at sea level, flat. The water
-             shader is suppressed for calm cells in the live game (see
-             terrain.js userData.calmGrid used by helm3d.js). Here in
-             the editor the mesh is flat at y=0, colored as genuine
-             shallow water (same blue family as colorWater, just a
-             touch lighter -- not a separate pale/white tone) so it
-             reads as "calm water" rather than a different material. */
-          height = 0;
-          c = colorWater.clone().lerp(new THREE.Color(0xffffff), 0.15);
-
         } else {
-          /* Regular water: flat deep seafloor, shallow slope only near beach */
-          const neighborIsBreach = (function() {
-            for (let dy = -1; dy <= 1; dy++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                const ny = gy + dy, nx = gx + dx;
-                if (ny < 0 || ny >= size || nx < 0 || nx >= size) continue;
-                /* only beach triggers the shallow taper, not calm */
-                if (g[ny][nx] === "beach") return true;
-              }
-            }
-            return false;
-          })();
+          /* Regular water (calm or not) -- same color logic either
+             way, since calm is a flag on water, not a different
+             material. Only the HEIGHT differs: calm cells are pinned
+             flat at sea level (y=0) instead of following the normal
+             seafloor-depth slope, which is what keeps them visually
+             flat/sheltered while still looking and coloring exactly
+             like the surrounding water. */
+          const isCalm = !!(calmGridParam && calmGridParam[gy] && calmGridParam[gy][gx]);
 
-          if (neighborIsBreach) {
-            height = -seaFloorDepth * eased;
+          if (isCalm) {
+            height = 0;
           } else {
-            height = -seaFloorDepth;
+            const neighborIsBreach = (function() {
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  const ny = gy + dy, nx = gx + dx;
+                  if (ny < 0 || ny >= size || nx < 0 || nx >= size) continue;
+                  if (g[ny][nx] === "beach") return true;
+                }
+              }
+              return false;
+            })();
+            height = neighborIsBreach ? -seaFloorDepth * eased : -seaFloorDepth;
           }
           const depthT = eased;
           c = colorWater.clone().lerp(colorDeepWater, depthT * 0.7 + 0.3);
@@ -902,7 +926,7 @@
     const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
     const worldSize = worldSizeFt * UNITS_PER_FOOT;
 
-    previewMesh = buildPreviewMesh(grid, worldSize, landHeightFt);
+    previewMesh = buildPreviewMesh(grid, worldSize, landHeightFt, calmGrid);
     scene.add(previewMesh);
 
     /* Build and add all placed structures -- convert grid-relative
@@ -957,6 +981,7 @@
       anchor_lat: latVal !== "" ? parseFloat(latVal) : null,
       anchor_lon: lonVal !== "" ? parseFloat(lonVal) : null,
       classification_grid: grid,
+      calm_grid: calmGrid,
       grid_size: GRID_SIZE,
       world_size_ft: worldSizeFt,
       structures,
@@ -976,6 +1001,10 @@
     if (isNaN(idx) || !data[idx]) return;
     const region = data[idx];
     grid = region.classification_grid;
+    /* calm_grid may not exist on older saved regions (added after this
+       feature) -- fall back to an all-false grid the same shape, so
+       nothing breaks loading regions saved before this change. */
+    calmGrid = region.calm_grid || grid.map(row => row.map(() => false));
     structures = region.structures || [];
     document.getElementById("regionName").value = region.name;
     document.getElementById("worldSizeFt").value = region.world_size_ft;

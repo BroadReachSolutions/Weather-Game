@@ -162,7 +162,7 @@
     return distances;
   }
 
-  function buildTerrainMesh(grid, worldSize, maxLandHeight, maxWaterDepth) {
+  function buildTerrainMesh(grid, worldSize, maxLandHeight, maxWaterDepth, calmGrid) {
     const gridSize = grid.length;
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, gridSize - 1, gridSize - 1);
     const posAttr = geo.attributes.position;
@@ -186,24 +186,28 @@
         } else if (cellType === "beach") {
           const beachMax = Math.max(1, maxLandHeight * 0.08);
           height = beachMax * eased;
-        } else if (cellType === "calm") {
-          /* Calm water: always flat at sea level. The live game's water
-             shader checks userData.calmGrid on the terrain mesh and
-             suppresses swell displacement for cells marked calm, so
-             these areas remain genuinely flat regardless of swell
-             settings -- intended for sheltered harbors, marinas, etc. */
-          height = 0;
         } else {
-          let neighborIsBeach = false;
-          for (let dy = -1; dy <= 1 && !neighborIsBeach; dy++) {
-            for (let dx = -1; dx <= 1 && !neighborIsBeach; dx++) {
-              const ny = gy + dy, nx = gx + dx;
-              if (ny >= 0 && ny < gridSize && nx >= 0 && nx < gridSize && grid[ny][nx] === "beach") {
-                neighborIsBeach = true;
+          /* Water (calm or not) -- calm is a FLAG on regular water
+             cells, not a separate cell type, per request. Calm cells
+             are pinned flat at sea level (y=0) instead of following
+             the normal seafloor-depth slope, which is what the live
+             water shader will also respect via mesh.userData.calmGrid
+             to suppress wave displacement there. */
+          const isCalm = !!(calmGrid && calmGrid[gy] && calmGrid[gy][gx]);
+          if (isCalm) {
+            height = 0;
+          } else {
+            let neighborIsBeach = false;
+            for (let dy = -1; dy <= 1 && !neighborIsBeach; dy++) {
+              for (let dx = -1; dx <= 1 && !neighborIsBeach; dx++) {
+                const ny = gy + dy, nx = gx + dx;
+                if (ny >= 0 && ny < gridSize && nx >= 0 && nx < gridSize && grid[ny][nx] === "beach") {
+                  neighborIsBeach = true;
+                }
               }
             }
+            height = neighborIsBeach ? -seaFloorDepth * eased : -seaFloorDepth;
           }
-          height = neighborIsBeach ? -seaFloorDepth * eased : -seaFloorDepth;
         }
         posAttr.setZ(vertIndex, height);
       }
@@ -220,16 +224,9 @@
     mesh.userData.classificationGrid = grid;
     mesh.userData.shoreDistanceGrid = shoreDist;
     mesh.userData.worldSize = worldSize;
-    /* Calm cell lookup: a flat Set of "gx,gy" keys for O(1) checking
-       in the water shader's per-vertex displacement loop -- avoids
-       scanning the full grid each frame. */
-    const calmSet = new Set();
-    for (let gy = 0; gy < gridSize; gy++) {
-      for (let gx = 0; gx < gridSize; gx++) {
-        if (grid[gy][gx] === "calm") calmSet.add(`${gx},${gy}`);
-      }
-    }
-    mesh.userData.calmGrid = calmSet;
+    /* Kept as-is for the live water shader to use as a quick lookup
+       when suppressing wave displacement near calm areas. */
+    mesh.userData.calmGrid = calmGrid || [];
     return mesh;
   }
 
@@ -266,7 +263,7 @@
       const worldSize = (region.world_size_ft || 2000) * (unitsPerFoot || 0.24);
       const landHeight = Math.max(3, worldSize * 0.02);
       const waterDepth = Math.max(15, worldSize * 0.05);
-      const mesh = buildTerrainMesh(region.classification_grid, worldSize, landHeight, waterDepth);
+      const mesh = buildTerrainMesh(region.classification_grid, worldSize, landHeight, waterDepth, region.calm_grid);
 
       const group = new THREE.Group();
       group.add(mesh);
