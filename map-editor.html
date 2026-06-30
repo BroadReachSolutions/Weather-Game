@@ -328,10 +328,21 @@
         const x = gx + dx, y = gy + dy;
         if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
         if (type === "calm") {
-          /* Flag, not a cell-type overwrite -- only has any effect on
-             cells that are already water, per request ("select an
-             area of normal water and make it not have waves"). */
-          if (grid[y][x] === "water") calmGrid[y][x] = true;
+          /* Set on EVERY cell the brush touches, regardless of current
+             type (land/beach/water) -- not just cells that are
+             currently water. This matters because brush strokes near
+             a coastline (the most common place to want calm water,
+             e.g. a harbor) inevitably overlap some land/beach cells
+             too. If those get skipped, the water immediately
+             adjacent to the coastline stays un-calmed and keeps
+             animating right next to the static land mesh, which
+             reads as "the land area is moving." Harmless to set on
+             land/beach -- their height calculation never reads
+             calmGrid at all, so it has zero visual effect there.
+             It only actually matters wherever the cell IS water
+             (now or if repainted to water later), guaranteeing no
+             gap right at the shoreline. */
+          calmGrid[y][x] = true;
         } else if (type === "uncalm") {
           /* Erase tool over a calm area clears the flag too, restoring
              normal wave behavior, without needing a separate button. */
