@@ -157,25 +157,38 @@
      meaningful opacity in the water-blue family is genuinely
      classified water, not guessed. Far more reliable since this is
      authoritative hydrography data, not a photograph. */
+  /* Classifies a single pixel's hydro-overlay RGBA as water/land. */
   function classifyHydroPixel(r, g, b, a) {
     if (a < 40) return "land"; /* fully/mostly transparent = no water feature drawn here */
-    const isBlueish = b >= r && b >= g - 15; /* the overlay's water fill is consistently blue-family; looser than the satellite heuristic since we're not fighting photo noise here */
+    const isBlueish = b >= r && b >= g - 15; /* the overlay's water fill is consistently blue-family */
     return isBlueish ? "water" : "land";
   }
 
-  /* Same downsample-and-classify approach as buildClassificationGrid,
-     but reading the hydro overlay's alpha channel too (which the
-     satellite imagery doesn't have/need, since it's fully opaque). */
+  /* Downsamples a tile canvas into a coarse grid and classifies each
+     cell by checking what FRACTION of its individual pixels are
+     water, rather than averaging RGBA across the cell first. This
+     matters a lot for narrow features like the ICW: at a 48x48 grid
+     over a ~0.6mi tile, each cell is roughly 70ft across, and a real
+     waterway is often narrower than that -- if you average colors
+     first, a cell that's mostly transparent/land with only a thin
+     strip of actual water gets diluted toward "land" even though it
+     genuinely contains real water (verified numerically: anything
+     under ~16% pixel coverage was being misclassified as land before
+     this fix). Counting individual water pixels and applying a much
+     lower coverage threshold (any real presence, not majority
+     coverage) fixes this -- a cell with even a modest fraction of
+     genuine water pixels is correctly called water. */
   function buildHydroClassificationGrid(ctx, gridSize) {
     const imageData = ctx.getImageData(0, 0, TILE_SIZE_PX, TILE_SIZE_PX);
     const pixels = imageData.data;
     const cellPx = TILE_SIZE_PX / gridSize;
     const grid = [];
+    const WATER_PIXEL_FRACTION_THRESHOLD = 0.08; /* if at least 8% of a cell's pixels are individually classified water, call the whole cell water -- low on purpose, since narrow channels rarely fill a whole coarse cell */
 
     for (let gy = 0; gy < gridSize; gy++) {
       const row = [];
       for (let gx = 0; gx < gridSize; gx++) {
-        let rSum = 0, gSum = 0, bSum = 0, aSum = 0, count = 0;
+        let waterPixelCount = 0, totalCount = 0;
         const startX = Math.floor(gx * cellPx);
         const startY = Math.floor(gy * cellPx);
         const endX = Math.floor((gx + 1) * cellPx);
@@ -183,14 +196,13 @@
         for (let py = startY; py < endY; py++) {
           for (let px = startX; px < endX; px++) {
             const idx = (py * TILE_SIZE_PX + px) * 4;
-            rSum += pixels[idx];
-            gSum += pixels[idx + 1];
-            bSum += pixels[idx + 2];
-            aSum += pixels[idx + 3];
-            count++;
+            const pixelClass = classifyHydroPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]);
+            if (pixelClass === "water") waterPixelCount++;
+            totalCount++;
           }
         }
-        row.push(classifyHydroPixel(rSum / count, gSum / count, bSum / count, aSum / count));
+        const waterFraction = totalCount > 0 ? waterPixelCount / totalCount : 0;
+        row.push(waterFraction >= WATER_PIXEL_FRACTION_THRESHOLD ? "water" : "land");
       }
       grid.push(row);
     }
