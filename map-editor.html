@@ -231,6 +231,8 @@
       <input type="number" id="importRadius" step="0.5" min="0.5" max="10" value="3">
       <label style="margin-top:6px;">Name Prefix</label>
       <input type="text" id="importNamePrefix" value="St Augustine">
+      <label style="margin-top:6px;">Google Maps API Key <span style="opacity:0.6;font-size:10px;">(session only, never saved)</span></label>
+      <input type="text" id="googleApiKey" placeholder="Paste your key here for terrain tiles" autocomplete="off" spellcheck="false">
       <div class="osDevFormActions" style="margin-top:8px;">
         <button class="osDevBtn" id="importAreaBtn">Import Area</button>
         <button class="osDevBtnSecondary" id="viewSourceMapBtn">View Source Map</button>
@@ -1495,16 +1497,34 @@
 
     let completed = 0;
     let failed = 0;
-    let hydroCount = 0;
-    let satelliteFallbackCount = 0;
+    let hydroCount = 0, satelliteFallbackCount = 0, googleCount = 0;
+
+    /* Fetch a Google terrain session token once before the tile loop
+       if the user provided an API key -- one token covers all tiles
+       in this import and is valid for two weeks. Falls back to USGS
+       hydro / satellite if no key or if the session fetch fails. */
+    const googleApiKey = document.getElementById("googleApiKey").value.trim();
+    let googleSession = null;
+    if (googleApiKey) {
+      try {
+        setStatus("Fetching Google terrain session...");
+        googleSession = await window.OSTerrain.fetchGoogleTerrainSession(googleApiKey);
+        setStatus(`Got Google terrain session. Importing ${tileList.length} tiles...`);
+      } catch (e) {
+        setStatus("Google session failed, falling back to USGS hydro: " + e.message, true);
+        console.warn("Google terrain session failed:", e);
+      }
+    }
 
     for (const tile of tileList) {
       try {
         const tileLatLon = window.OSTerrain.tileToLatLon(tile.x, tile.y, zoom);
-        const tileGridSize = 48; /* matches terrain.js's own single-tile generation grid resolution */
-        const classifyResult = await window.OSTerrain.classifyTile(tile.x, tile.y, zoom, tileGridSize);
+        const tileGridSize = 48;
+        const classifyResult = await window.OSTerrain.classifyTile(tile.x, tile.y, zoom, tileGridSize, googleSession, googleApiKey);
         const tileGrid = classifyResult.grid;
-        if (classifyResult.source === "hydro") hydroCount++; else satelliteFallbackCount++;
+        if (classifyResult.source === "google-terrain") googleCount++;
+        else if (classifyResult.source === "hydro") hydroCount++;
+        else satelliteFallbackCount++;
         const emptyCalmGrid = tileGrid.map(row => row.map(() => false));
 
         const milesPerPixelHere = (156543.03392 * Math.cos((tileLatLon.lat * Math.PI) / 180) / Math.pow(2, zoom)) * 0.000621371;
@@ -1534,7 +1554,12 @@
       progressText.textContent = `${done} / ${tileList.length} tiles` + (failed ? ` (${failed} failed)` : "");
     }
 
-    setStatus(`Bulk import complete: ${completed} tiles saved (${hydroCount} via USGS hydro data, ${satelliteFallbackCount} via satellite fallback)` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
+    const sourceBreakdown = [
+      googleCount ? `${googleCount} Google terrain` : "",
+      hydroCount ? `${hydroCount} USGS hydro` : "",
+      satelliteFallbackCount ? `${satelliteFallbackCount} satellite fallback` : ""
+    ].filter(Boolean).join(", ");
+    setStatus(`Bulk import complete: ${completed} tiles saved (${sourceBreakdown})` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
   }
 
   /* ---------------------------------------------------------------

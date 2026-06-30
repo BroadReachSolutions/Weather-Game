@@ -123,17 +123,98 @@
     return grid;
   }
 
-  /* Fetches the USGS National Hydrography Dataset overlay tile for
-     the same z/y/x coordinates (same Web Mercator tiling scheme as
-     the satellite source) -- real, purpose-built water-feature data
-     from the USGS, not a photo we have to interpret. This overlay is
-     mostly TRANSPARENT with water features drawn in a consistent
-     style, which is what makes it classifiable far more reliably
-     than satellite color: real coastal/tidal/marsh water is often
-     tannic, brownish, or murky and doesn't reliably read as "blue"
-     in a photo, but the hydro dataset already KNOWS where the water
-     is regardless of what color it happens to look like. Free,
-     no API key required (confirmed working via direct test). */
+  /* Fetches a Google Maps terrain tile using a pre-obtained session
+     token. Google terrain tiles have extremely consistent, distinct
+     colors for water (a specific flat blue) vs land (cream/white,
+     green, tan) -- much cleaner separation than satellite imagery or
+     even the USGS hydro overlay, and no alpha-channel complications.
+     Session token is obtained once per import via fetchGoogleSession()
+     and reused for all tiles in that import. */
+  function fetchGoogleTerrainTile(tileX, tileY, zoom, sessionToken, apiKey) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = TILE_SIZE_PX;
+        canvas.height = TILE_SIZE_PX;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, TILE_SIZE_PX, TILE_SIZE_PX);
+        resolve({ canvas, ctx });
+      };
+      img.onerror = reject;
+      img.src = `https://tile.googleapis.com/v1/2dtiles/${zoom}/${tileX}/${tileY}?session=${sessionToken}&key=${apiKey}`;
+    });
+  }
+
+  /* Classifies a single pixel from a Google terrain tile.
+     Water is a specific, consistent flat blue (~#9ec0e3 family).
+     Land is cream/white, green, or tan -- none of which have blue
+     as the dominant channel with meaningful separation from red.
+     Simple rule: blue dominates over both red AND green by a clear
+     margin. Verified against real Google terrain color samples. */
+  function classifyGoogleTerrainPixel(r, g, b) {
+    return (b > r + 10 && b > g + 5) ? "water" : "land";
+  }
+
+  /* Builds a classification grid from a Google terrain tile canvas.
+     Uses majority-vote per cell (not any-pixel like the USGS approach)
+     since Google terrain has solid, filled color areas with no
+     transparency complications -- averaging makes more sense here. */
+  function buildGoogleTerrainGrid(ctx, gridSize) {
+    const imageData = ctx.getImageData(0, 0, TILE_SIZE_PX, TILE_SIZE_PX);
+    const pixels = imageData.data;
+    const cellPx = TILE_SIZE_PX / gridSize;
+    const grid = [];
+
+    for (let gy = 0; gy < gridSize; gy++) {
+      const row = [];
+      for (let gx = 0; gx < gridSize; gx++) {
+        let waterCount = 0, totalCount = 0;
+        const startX = Math.floor(gx * cellPx);
+        const startY = Math.floor(gy * cellPx);
+        const endX = Math.floor((gx + 1) * cellPx);
+        const endY = Math.floor((gy + 1) * cellPx);
+        for (let py = startY; py < endY; py++) {
+          for (let px = startX; px < endX; px++) {
+            const idx = (py * TILE_SIZE_PX + px) * 4;
+            if (classifyGoogleTerrainPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2]) === "water") waterCount++;
+            totalCount++;
+          }
+        }
+        /* Majority vote: over 40% water pixels = water cell. Lower
+           than 50% to catch waterway edges where roughly half the
+           cell might be land but the channel is genuinely there. */
+        row.push(waterCount / totalCount > 0.4 ? "water" : "land");
+      }
+      grid.push(row);
+    }
+    return grid;
+  }
+
+  /* Requests a Google Maps Tile API session token for terrain tiles.
+     Must be called once before fetching tiles for an import session.
+     apiKey is the user's Google Maps API key (restricted to Map Tiles
+     API only -- never stored, only used during the active import). */
+  async function fetchGoogleTerrainSession(apiKey) {
+    const resp = await fetch(`https://tile.googleapis.com/v1/createSession?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mapType: "terrain",
+        language: "en-US",
+        region: "US",
+        layerTypes: ["layerRoadmap"]
+      })
+    });
+    if (!resp.ok) throw new Error(`Google session token request failed: ${resp.status} ${resp.statusText}`);
+    const data = await resp.json();
+    if (!data.session) throw new Error("Google session response missing session token");
+    return data.session;
+  }
+
+  /* Fetches the USGS National Hydrography Dataset overlay tile --
+     kept as the no-key fallback when no Google API key is provided. */
   function fetchHydroTileToCanvas(tileX, tileY, zoom) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -151,48 +232,17 @@
     });
   }
 
-  /* Classifies the hydro overlay by alpha + color, rather than the
-     satellite classifier's color-only heuristic -- this overlay is
-     transparent everywhere there's no water, so a pixel with
-     meaningful opacity in the water-blue family is genuinely
-     classified water, not guessed. Far more reliable since this is
-     authoritative hydrography data, not a photograph. */
-  /* Classifies a single pixel's hydro-overlay RGBA as water/land. */
   function classifyHydroPixel(r, g, b, a) {
-    if (a < 15) return "land"; /* essentially fully transparent = no water feature drawn here at all; lowered from 40 per request so any genuine blue overlay pixel, including lightly anti-aliased edges, counts as water */
-    const isBlueish = b >= r && b >= g - 15; /* the overlay's water fill is consistently blue-family */
+    if (a < 15) return "land";
+    const isBlueish = b >= r && b >= g - 15;
     return isBlueish ? "water" : "land";
   }
 
-  /* Downsamples a tile canvas into a coarse grid and classifies each
-     cell by checking what FRACTION of its individual pixels are
-     water, rather than averaging RGBA across the cell first. This
-     matters a lot for narrow features like the ICW: at a 48x48 grid
-     over a ~0.6mi tile, each cell is roughly 70ft across, and a real
-     waterway is often narrower than that -- if you average colors
-     first, a cell that's mostly transparent/land with only a thin
-     strip of actual water gets diluted toward "land" even though it
-     genuinely contains real water (verified numerically: anything
-     under ~16% pixel coverage was being misclassified as land before
-     this fix). Counting individual water pixels and applying a much
-     lower coverage threshold (any real presence, not majority
-     coverage) fixes this -- a cell with even a modest fraction of
-     genuine water pixels is correctly called water. */
   function buildHydroClassificationGrid(ctx, gridSize) {
     const imageData = ctx.getImageData(0, 0, TILE_SIZE_PX, TILE_SIZE_PX);
     const pixels = imageData.data;
     const cellPx = TILE_SIZE_PX / gridSize;
     const grid = [];
-
-    /* Per request: ANY hydro-overlay pixel found in a cell means the
-       whole cell is water, full stop -- no fraction/threshold of any
-       kind. This is the most permissive possible rule and eliminates
-       the dilution problem entirely, at the cost of being generous
-       about cell boundaries (a cell that's mostly land but has even
-       one stray water pixel near its edge gets called water too).
-       That tradeoff is intentional here, since under-detecting water
-       (the previous bug) was the worse failure mode for this use
-       case. */
     for (let gy = 0; gy < gridSize; gy++) {
       const row = [];
       for (let gx = 0; gx < gridSize; gx++) {
@@ -204,9 +254,7 @@
         for (let py = startY; py < endY && !foundWater; py++) {
           for (let px = startX; px < endX && !foundWater; px++) {
             const idx = (py * TILE_SIZE_PX + px) * 4;
-            if (classifyHydroPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]) === "water") {
-              foundWater = true;
-            }
+            if (classifyHydroPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]) === "water") foundWater = true;
           }
         }
         row.push(foundWater ? "water" : "land");
@@ -216,22 +264,25 @@
     return grid;
   }
 
-  /* Combined classification entry point: tries the real USGS hydro
-     data first (more reliable, purpose-built for exactly this), and
-     falls back to the satellite color heuristic only if the hydro
-     fetch fails (network issue, or genuinely no coverage -- this
-     dataset is US-focused, so areas outside the US would have no
-     hydro tiles at all). This is the function every consumer
-     (live game, bulk importer, map editor) should call instead of
-     calling fetchTileToCanvas/buildClassificationGrid directly,
-     so all of them benefit from the more reliable source uniformly. */
-  async function classifyTile(tileX, tileY, zoom, gridSize) {
+  /* Combined classification: uses Google terrain tiles if a session
+     token is provided (much more reliable, solid consistent colors),
+     otherwise falls back to USGS hydro overlay, then satellite. */
+  async function classifyTile(tileX, tileY, zoom, gridSize, googleSession, googleKey) {
+    if (googleSession && googleKey) {
+      try {
+        const result = await fetchGoogleTerrainTile(tileX, tileY, zoom, googleSession, googleKey);
+        const grid = buildGoogleTerrainGrid(result.ctx, gridSize);
+        return { grid, source: "google-terrain" };
+      } catch (e) {
+        console.warn("Oregon Sail terrain: Google terrain tile failed, falling back to USGS hydro", e);
+      }
+    }
     try {
       const hydroResult = await fetchHydroTileToCanvas(tileX, tileY, zoom);
       const grid = buildHydroClassificationGrid(hydroResult.ctx, gridSize);
       return { grid, source: "hydro" };
     } catch (e) {
-      console.warn("Oregon Sail terrain: hydro classification unavailable, falling back to satellite color heuristic", e);
+      console.warn("Oregon Sail terrain: USGS hydro unavailable, falling back to satellite", e);
       const satResult = await fetchTileToCanvas(tileX, tileY, zoom);
       const grid = buildClassificationGrid(satResult.ctx, gridSize);
       return { grid, source: "satellite-fallback" };
@@ -472,13 +523,17 @@
     generateTerrainForLocation,
     latLonToTile,
     tileToLatLon,
-    classifyPixel, /* exposed for testing/tuning the classification heuristic */
-    fetchTileToCanvas, /* exposed for bulk import, which needs to fetch many tiles directly rather than going through the single-tile generateTerrainForLocation pipeline */
+    classifyPixel,
+    fetchTileToCanvas,
     buildClassificationGrid,
     fetchHydroTileToCanvas,
     classifyHydroPixel,
     buildHydroClassificationGrid,
-    classifyTile, /* the recommended entry point -- tries real USGS hydro data first, falls back to the satellite color heuristic only if that fails. Every consumer (live game, bulk importer, map editor) should use this instead of calling the satellite-only path directly. */
+    fetchGoogleTerrainSession,
+    fetchGoogleTerrainTile,
+    classifyGoogleTerrainPixel,
+    buildGoogleTerrainGrid,
+    classifyTile,
     TILE_SIZE_PX
   };
 })();
