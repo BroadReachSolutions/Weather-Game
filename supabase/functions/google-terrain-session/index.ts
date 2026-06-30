@@ -5,10 +5,7 @@
 // the browser. The client sends its API key in the request body;
 // this function forwards it to Google and returns the session token.
 //
-// This is an authoring/import tool only -- not called during gameplay,
-// only called from the map editor when a bulk import is being run.
-//
-// Deploy with: npx supabase functions deploy google-terrain-session
+// Deploy with: npx supabase functions deploy google-terrain-session --no-verify-jwt
 
 Deno.serve(async (req: Request) => {
   /* Allow the map editor (any origin on GitHub Pages / localhost)
@@ -61,6 +58,7 @@ Deno.serve(async (req: Request) => {
   );
 
   const googleData = await googleResp.json();
+  console.log("Google createSession response:", googleResp.status, JSON.stringify(googleData));
 
   if (!googleResp.ok || !googleData.session) {
     return new Response(JSON.stringify({

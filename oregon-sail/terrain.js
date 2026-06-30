@@ -198,11 +198,14 @@
      function makes it server-side and returns just the token.
      The API key is sent in the request body, not stored anywhere. */
   async function fetchGoogleTerrainSession(apiKey) {
-    /* Supabase project URL -- same one used for all other DB calls */
     const SUPABASE_URL = "https://ailcwfpjlelofhqmqzdy.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_3QZVUGb46lWu2ubdurS2Qg_vWNMZ44e";
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/google-terrain-session`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+      },
       body: JSON.stringify({ apiKey })
     });
     if (!resp.ok) {
