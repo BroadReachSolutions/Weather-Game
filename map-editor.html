@@ -1482,13 +1482,16 @@
 
     let completed = 0;
     let failed = 0;
+    let hydroCount = 0;
+    let satelliteFallbackCount = 0;
 
     for (const tile of tileList) {
       try {
         const tileLatLon = window.OSTerrain.tileToLatLon(tile.x, tile.y, zoom);
-        const canvasResult = await window.OSTerrain.fetchTileToCanvas(tile.x, tile.y, zoom);
         const tileGridSize = 48; /* matches terrain.js's own single-tile generation grid resolution */
-        const tileGrid = window.OSTerrain.buildClassificationGrid(canvasResult.ctx, tileGridSize);
+        const classifyResult = await window.OSTerrain.classifyTile(tile.x, tile.y, zoom, tileGridSize);
+        const tileGrid = classifyResult.grid;
+        if (classifyResult.source === "hydro") hydroCount++; else satelliteFallbackCount++;
         const emptyCalmGrid = tileGrid.map(row => row.map(() => false));
 
         const milesPerPixelHere = (156543.03392 * Math.cos((tileLatLon.lat * Math.PI) / 180) / Math.pow(2, zoom)) * 0.000621371;
@@ -1518,7 +1521,7 @@
       progressText.textContent = `${done} / ${tileList.length} tiles` + (failed ? ` (${failed} failed)` : "");
     }
 
-    setStatus(`Bulk import complete: ${completed} tiles saved` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
+    setStatus(`Bulk import complete: ${completed} tiles saved (${hydroCount} via USGS hydro data, ${satelliteFallbackCount} via satellite fallback)` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
   }
 
   function wireDevTools() {
