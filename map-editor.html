@@ -558,8 +558,15 @@
       }
     }
     const tex = new THREE.DataTexture(data, size, size, THREE.LuminanceFormat, THREE.UnsignedByteType);
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
+    /* NearestFilter, not Linear -- this must be a hard binary
+       calm/not-calm read with zero blending. LinearFilter interpolates
+       between adjacent texels, which let a fraction of the wave
+       through anywhere a sample landed between a calm and non-calm
+       texel (i.e. almost everywhere, since the water mesh has far
+       more vertices than the mask has texels) -- this was the actual
+       cause of the reported "slight residual movement." */
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
     /* Explicit clamp-to-edge (THREE's default for DataTexture anyway,
        but set explicitly so this is guaranteed rather than implicit):
        water vertices beyond the terrain's worldSize boundary sample
@@ -623,7 +630,7 @@
              since it directly zeroes the displacement at the vertex
              level rather than relying on the static seafloor mesh. */
           vec2 maskUV = (p / uWorldSize) + 0.5;
-          float calmFactor = texture2D(uCalmMask, maskUV).r;
+          float calmFactor = step(0.5, texture2D(uCalmMask, maskUV).r); /* hard threshold -- guarantees exactly 0.0 or 1.0, no partial/blended values can ever sneak through */
 
           vHeight = (swell * calmFactor) / max(uAmplitude * 2.12, 0.0001);
           vWorldXZ = p;

@@ -517,8 +517,12 @@
       }
     }
     const tex = new THREE.DataTexture(data, size, size, THREE.LuminanceFormat, THREE.UnsignedByteType);
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
+    /* NearestFilter, not Linear -- hard binary calm/not-calm read,
+       no blending between adjacent texels. See the matching note in
+       the map editor's version of this function for why this was
+       the actual cause of residual partial-wave movement. */
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
     tex.wrapS = THREE.ClampToEdgeWrapping;
     tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.needsUpdate = true;
@@ -642,7 +646,7 @@
           float calmFactor = 1.0;
           if (uCalmMaskActive > 0.5) {
             vec2 maskUV = ((p - vec2(uTerrainCenterX, uTerrainCenterZ)) / uWorldSize) + 0.5;
-            calmFactor = texture2D(uCalmMask, maskUV).r;
+            calmFactor = step(0.5, texture2D(uCalmMask, maskUV).r); /* hard threshold -- guarantees exactly 0.0 or 1.0 */
           }
 
           vHeight = (swell * calmFactor) / max(uAmplitude * 2.12, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 8 layers) */
