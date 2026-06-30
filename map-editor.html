@@ -148,6 +148,7 @@
   <div class="toolbar">
     <button id="newRegionBtn">New</button>
     <button id="loadRegionBtn">Load</button>
+    <button id="loadAreaBtn">Load Area</button>
     <button id="saveRegionBtn">Save</button>
   </div>
 </header>
@@ -258,6 +259,11 @@
       <label class="brush-size-label"><input type="checkbox" id="devClockActive"> Override active</label>
       <label style="margin-top:6px;">Time of Day: <span id="devClockVal">12:00</span></label>
       <input type="range" id="devClockHour" min="0" max="23.9" step="0.1" value="12">
+    </div>
+
+    <div class="field-group" id="selectedTileGroup" style="display:none;">
+      <label>📍 Currently Editing</label>
+      <p class="hint" id="selectedTileName">No tile selected — load an area, then click any tile in the 3D view to edit it.</p>
     </div>
 
     <div id="statusMsg"></div>
@@ -563,7 +569,9 @@
     uVeinColor: { value: new THREE.Color(0xeaf6ff) },
     uCellScale: { value: 0.05 },
     uCalmMask: { value: null }, /* DataTexture built from calmGrid -- white=normal waves, black=fully calm */
-    uWorldSize: { value: 2000 * 0.24 } /* needed in the shader to map a vertex's world position back into the calm mask's UV space */
+    uWorldSize: { value: 2000 * 0.24 }, /* needed in the shader to map a vertex's world position back into the calm mask's UV space */
+    uTerrainCenterX: { value: 0 }, /* the active tile's world position offset -- 0 in single-tile mode, the selected tile's real offset in area mode, fixing a real bug where calm water painted on an off-origin area tile would show up in the wrong place */
+    uTerrainCenterZ: { value: 0 }
   };
 
   function rot(p, a) {
@@ -628,6 +636,8 @@
         uniform float uAmplitude;
         uniform sampler2D uCalmMask;
         uniform float uWorldSize;
+        uniform float uTerrainCenterX;
+        uniform float uTerrainCenterZ;
         varying float vHeight;
         varying vec2 vWorldXZ;
         vec2 rotV(vec2 p, float a) {
@@ -663,7 +673,7 @@
              calm areas flat no matter the swell/weather settings,
              since it directly zeroes the displacement at the vertex
              level rather than relying on the static seafloor mesh. */
-          vec2 maskUV = (p / uWorldSize) + 0.5;
+          vec2 maskUV = ((p - vec2(uTerrainCenterX, uTerrainCenterZ)) / uWorldSize) + 0.5;
           float calmFactor = step(0.5, texture2D(uCalmMask, maskUV).r); /* hard threshold -- guarantees exactly 0.0 or 1.0, no partial/blended values can ever sneak through */
 
           vHeight = (swell * calmFactor) / max(uAmplitude * 2.12, 0.0001);
@@ -802,6 +812,32 @@
 
     renderer.domElement.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return; /* left-click only -- right/middle stay free for camera controls */
+
+      /* If an area is loaded, check whether this click hit a
+         DIFFERENT tile than the one currently selected for editing --
+         if so, treat it as a selection click (load that tile for
+         editing) rather than a paint stroke. Clicking the already-
+         selected tile (or painting when no area is loaded at all)
+         behaves exactly as before. */
+      if (areaGroup && areaTiles.length > 0) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const mv = new THREE.Vector2(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        const rc = new THREE.Raycaster();
+        rc.setFromCamera(mv, camera);
+        const areaHits = rc.intersectObjects(areaTiles.map(t => t.mesh), false);
+        if (areaHits.length > 0) {
+          const hitMesh = areaHits[0].object;
+          const hitRegionId = hitMesh.userData.regionId;
+          if (hitRegionId && hitRegionId !== selectedAreaTileId) {
+            selectAreaTile(hitRegionId);
+            return; /* selection click consumed -- don't also paint */
+          }
+        }
+      }
+
       if (currentTool === "structure") { paintFrom3DEvent(e); return; }
       isPaintingIn3D = true;
       controls.enabled = false; /* disable orbit while actively painting, so dragging paints instead of rotating the camera */
@@ -998,13 +1034,200 @@
 
   let structureGroup = null;
 
+  /* ---------------------------------------------------------------
+     LOAD AREA — loads many adjacent regions simultaneously into the
+     3D view so they appear as one continuous coastline, with
+     click-to-select for choosing which single tile becomes the
+     actively-editable one (its data loads into the normal 2D canvas
+     / grid / calmGrid editing flow, same as the existing single-
+     region Load).
+     --------------------------------------------------------------- */
+  let areaTiles = []; /* { regionId, name, anchorLat, anchorLon, mesh, worldX, worldZ } */
+  let areaGroup = null; /* THREE.Group holding all the neighbor tile meshes */
+  let selectedAreaTileId = null; /* regionId of the tile currently loaded into the active editing grid, or null if not in area-edit mode */
+  let areaOriginLat = null; /* the lat/lon all area tiles are positioned relative to (world origin = this point) */
+  let areaOriginLon = null;
+
+  /* Converts a lat/lon into local X/Z world units relative to
+     areaOriginLat/Lon -- a standard equirectangular approximation,
+     accurate enough at the scale of a few miles (the same kind of
+     approximation already used elsewhere in this project for local
+     positioning, just written self-contained here since this
+     standalone editor doesn't load the game's physics.js module). */
+  function latLonToLocalXZ(lat, lon, unitsPerFoot) {
+    const EARTH_RADIUS_FT = 20902231; /* mean Earth radius in feet */
+    const latRad = (areaOriginLat * Math.PI) / 180;
+    const dLat = ((lat - areaOriginLat) * Math.PI) / 180;
+    const dLon = ((lon - areaOriginLon) * Math.PI) / 180;
+    const northFt = dLat * EARTH_RADIUS_FT;
+    const eastFt = dLon * EARTH_RADIUS_FT * Math.cos(latRad);
+    return { x: eastFt * unitsPerFoot, z: -northFt * unitsPerFoot }; /* negative Z = north, matching the existing scene convention (north is -Z) used throughout the live game */
+  }
+
+
+
+  /* Loads every saved region matching a name prefix, positions each
+     one at its correct real-world offset (using latLonToLocalXZ
+     relative to the group's centroid), and builds a STATIC context
+     mesh for each using the same buildPreviewMesh terrain builder --
+     these are NOT individually editable, they're just shown so the
+     whole imported area appears as one continuous coastline. Clicking
+     any of them (see wireAreaTileSelection) loads THAT tile's real
+     data into the normal active-editing grid/canvas, the same as the
+     existing single-region Load button. */
+  async function loadArea() {
+    if (!scene) { setStatus("3D scene isn't ready yet.", true); return; }
+    const prefix = prompt("Enter the name prefix to load (e.g. \"St Augustine\" to match all tiles from that import):");
+    if (!prefix) return;
+
+    setStatus("Loading area...");
+    const { data, error } = await sb.from("custom_map_regions")
+      .select("*")
+      .ilike("name", `${prefix}%`)
+      .not("anchor_lat", "is", null)
+      .limit(200);
+    if (error) { setStatus("Load area failed: " + error.message, true); return; }
+    if (!data || data.length === 0) { setStatus("No regions found matching \"" + prefix + "\".", true); return; }
+
+    /* Clear any previous area */
+    if (areaGroup) {
+      scene.remove(areaGroup);
+      areaGroup.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); if (obj.material) obj.material.dispose(); });
+    }
+    areaTiles = [];
+    selectedAreaTileId = null;
+    document.getElementById("selectedTileGroup").style.display = "block";
+    document.getElementById("selectedTileName").textContent = "Area loaded — click any tile in the 3D view to edit it.";
+
+    /* Center the whole area on the average lat/lon of all loaded
+       tiles, so the group sits roughly centered in the 3D view
+       rather than offset far from the origin. */
+    areaOriginLat = data.reduce((sum, r) => sum + r.anchor_lat, 0) / data.length;
+    areaOriginLon = data.reduce((sum, r) => sum + r.anchor_lon, 0) / data.length;
+
+    areaGroup = new THREE.Group();
+    data.forEach(region => {
+      const worldSize = (region.world_size_ft || 2000) * UNITS_PER_FOOT;
+      const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
+      const mesh = buildPreviewMesh(region.classification_grid, worldSize, landHeightFt, region.calm_grid || []);
+      const pos = latLonToLocalXZ(region.anchor_lat, region.anchor_lon, UNITS_PER_FOOT);
+      mesh.position.set(pos.x, 0, pos.z);
+      mesh.userData.regionId = region.id;
+      mesh.userData.regionData = region;
+      areaGroup.add(mesh);
+      areaTiles.push({ regionId: region.id, name: region.name, anchorLat: region.anchor_lat, anchorLon: region.anchor_lon, mesh, worldX: pos.x, worldZ: pos.z });
+    });
+    scene.add(areaGroup);
+    setStatus(`Loaded ${data.length} tiles. Click any tile in the 3D view to edit it.`);
+  }
+
+  /* Loads one specific region's real data into the active editing
+     grid/canvas (the same effect as the existing single-region Load
+     button), called when a tile is clicked in an active area view.
+     Also visually highlights the selected tile among its neighbors
+     and dims the others slightly so it's clear which one is active. */
+  function selectAreaTile(regionId) {
+    const tileInfo = areaTiles.find(t => t.regionId === regionId);
+    if (!tileInfo || !tileInfo.mesh.userData.regionData) return;
+    const region = tileInfo.mesh.userData.regionData;
+
+    grid = region.classification_grid;
+    calmGrid = region.calm_grid || grid.map(row => row.map(() => false));
+    structures = region.structures || [];
+    document.getElementById("regionName").value = region.name;
+    document.getElementById("worldSizeFt").value = region.world_size_ft;
+    document.getElementById("anchorLat").value = region.anchor_lat != null ? region.anchor_lat : "";
+    document.getElementById("anchorLon").value = region.anchor_lon != null ? region.anchor_lon : "";
+    renderStructureList();
+    redrawPaintCanvas();
+
+    selectedAreaTileId = regionId;
+    document.getElementById("selectedTileName").textContent = "Editing: " + region.name;
+
+    /* Highlight: full-bright on the selected tile, dimmed on every
+       other tile in the area so it's visually obvious which one is
+       about to be painted. */
+    areaTiles.forEach(t => {
+      const isSelected = t.regionId === regionId;
+      t.mesh.traverse(obj => {
+        if (obj.material) {
+          obj.material.emissive = isSelected ? new THREE.Color(0x2a3a10) : new THREE.Color(0x000000);
+          obj.material.opacity = isSelected ? 1.0 : 0.75;
+          obj.material.transparent = !isSelected ? true : obj.material.transparent;
+        }
+      });
+    });
+
+    setStatus("Now editing \"" + region.name + "\" — paint normally, then Save to update just this tile.");
+  }
+
   function updatePreviewMesh() {
     if (!scene) return;
-    if (previewMesh) {
-      scene.remove(previewMesh);
-      previewMesh.geometry.dispose();
-      previewMesh.material.dispose();
+
+    const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
+    const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
+    const worldSize = worldSizeFt * UNITS_PER_FOOT;
+    const newMesh = buildPreviewMesh(grid, worldSize, landHeightFt, calmGrid);
+
+    /* The actively-edited tile's world position offset -- 0,0 in
+       single-tile mode (always at the origin), or the selected
+       tile's real world position when editing one tile within a
+       loaded area. Computed once here and reused below for both the
+       calm mask shader alignment and structure placement. */
+    const activeTileInfo = (areaGroup && selectedAreaTileId != null) ? areaTiles.find(t => t.regionId === selectedAreaTileId) : null;
+    const tileOffsetX = activeTileInfo ? activeTileInfo.worldX : 0;
+    const tileOffsetZ = activeTileInfo ? activeTileInfo.worldZ : 0;
+
+    if (areaGroup && selectedAreaTileId != null) {
+      /* AREA MODE: replace just the selected tile's mesh in place,
+         at its own correct world position -- the rest of the area's
+         tiles are untouched, so the whole group keeps looking like
+         one continuous coastline while only the actively-edited tile
+         updates as you paint. */
+      const tileInfo = areaTiles.find(t => t.regionId === selectedAreaTileId);
+      if (tileInfo) {
+        areaGroup.remove(tileInfo.mesh);
+        tileInfo.mesh.geometry.dispose();
+        tileInfo.mesh.material.dispose();
+        newMesh.position.set(tileInfo.worldX, 0, tileInfo.worldZ);
+        newMesh.userData.regionId = selectedAreaTileId;
+        newMesh.userData.regionData = tileInfo.mesh.userData.regionData;
+        /* Re-apply the same emissive highlight a freshly-selected
+           tile gets, since this is a brand new mesh object replacing
+           the old (now disposed) one. */
+        newMesh.traverse(obj => {
+          if (obj.material) obj.material.emissive = new THREE.Color(0x2a3a10);
+        });
+        areaGroup.add(newMesh);
+        tileInfo.mesh = newMesh;
+      }
+    } else {
+      /* SINGLE-TILE MODE (no area loaded): original behavior --
+         previewMesh is its own standalone mesh at the origin. */
+      if (previewMesh) {
+        scene.remove(previewMesh);
+        previewMesh.geometry.dispose();
+        previewMesh.material.dispose();
+      }
+      previewMesh = newMesh;
+      scene.add(previewMesh);
     }
+
+    /* Refresh the calm mask texture + the shader's worldSize/center
+       uniforms so the water genuinely stops moving wherever calm was
+       just painted, correctly aligned to the active tile's actual
+       world position (fixes a real bug where calm water on an
+       off-origin area tile would render in the wrong place). NOTE:
+       in area mode this only reflects the currently-selected tile's
+       calm data, not all loaded tiles simultaneously -- a real,
+       known limitation worth being upfront about (see the save
+       function for the matching note). */
+    if (waterUniforms.uCalmMask.value) waterUniforms.uCalmMask.value.dispose();
+    waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
+    waterUniforms.uWorldSize.value = worldSize;
+    waterUniforms.uTerrainCenterX.value = tileOffsetX;
+    waterUniforms.uTerrainCenterZ.value = tileOffsetZ;
+
     /* Remove old structure meshes */
     if (structureGroup) {
       scene.remove(structureGroup);
@@ -1014,32 +1237,19 @@
       });
     }
 
-    const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
-    const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
-    const worldSize = worldSizeFt * UNITS_PER_FOOT;
-
-    previewMesh = buildPreviewMesh(grid, worldSize, landHeightFt, calmGrid);
-
-    /* Refresh the calm mask texture + the shader's worldSize uniform
-       so the water genuinely stops moving wherever calm was just
-       painted, and the mask correctly lines up with the (possibly
-       resized) terrain. */
-    if (waterUniforms.uCalmMask.value) waterUniforms.uCalmMask.value.dispose();
-    waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
-    waterUniforms.uWorldSize.value = worldSize;
-    scene.add(previewMesh);
-
     /* Build and add all placed structures -- convert grid-relative
        x/z coordinates to world space using the same grid-cell-size
        formula the terrain mesh uses (worldSize / GRID_SIZE per cell,
-       centered on origin). */
+       centered on origin), then offset by the selected tile's world
+       position if in area mode so structures land in the right spot
+       relative to the whole group, not just relative to the origin. */
     structureGroup = new THREE.Group();
     const cellSize = worldSize / GRID_SIZE;
     const halfGrid = GRID_SIZE / 2;
 
     structures.forEach(s => {
-      const worldX = (s.x - halfGrid) * cellSize;
-      const worldZ = (s.z - halfGrid) * cellSize;
+      const worldX = (s.x - halfGrid) * cellSize + tileOffsetX;
+      const worldZ = (s.z - halfGrid) * cellSize + tileOffsetZ;
       let mesh;
       if (s.type === "pier") mesh = buildEditorPier(s.lengthFt, worldX, worldZ, s.headingDeg);
       else if (s.type === "dock_spine") mesh = buildEditorDockSpine(s.lengthFt, worldX, worldZ, s.headingDeg);
@@ -1066,6 +1276,14 @@
     document.getElementById("regionName").value = "Untitled Region";
     document.getElementById("anchorLat").value = "";
     document.getElementById("anchorLon").value = "";
+    selectedAreaTileId = null;
+    if (areaGroup) {
+      scene.remove(areaGroup);
+      areaGroup.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); if (obj.material) obj.material.dispose(); });
+      areaGroup = null;
+      areaTiles = [];
+    }
+    document.getElementById("selectedTileGroup").style.display = "none";
     renderStructureList();
     redrawPaintCanvas();
     setStatus("Started a new region.");
@@ -1087,9 +1305,27 @@
       structures,
       updated_at: new Date().toISOString()
     };
-    const { error } = await sb.from("custom_map_regions").insert(payload);
-    if (error) { setStatus("Save failed: " + error.message, true); return; }
-    setStatus("Saved \"" + name + "\".");
+
+    if (selectedAreaTileId != null) {
+      /* Editing a tile selected from a loaded area -- UPDATE its
+         existing row by id, not insert a new one, which would
+         otherwise silently create a duplicate region every time you
+         save while working within an area. */
+      const { error } = await sb.from("custom_map_regions").update(payload).eq("id", selectedAreaTileId);
+      if (error) { setStatus("Save failed: " + error.message, true); return; }
+      /* Keep the in-memory area tile's regionData in sync so future
+         selections/edits within this same session see the saved
+         state, not stale pre-save data. */
+      const tileInfo = areaTiles.find(t => t.regionId === selectedAreaTileId);
+      if (tileInfo && tileInfo.mesh.userData.regionData) {
+        Object.assign(tileInfo.mesh.userData.regionData, payload);
+      }
+      setStatus("Saved \"" + name + "\" (updated in place within the loaded area).");
+    } else {
+      const { error } = await sb.from("custom_map_regions").insert(payload);
+      if (error) { setStatus("Save failed: " + error.message, true); return; }
+      setStatus("Saved \"" + name + "\".");
+    }
   });
 
   document.getElementById("loadRegionBtn").addEventListener("click", async () => {
@@ -1110,6 +1346,18 @@
     document.getElementById("worldSizeFt").value = region.world_size_ft;
     document.getElementById("anchorLat").value = region.anchor_lat != null ? region.anchor_lat : "";
     document.getElementById("anchorLon").value = region.anchor_lon != null ? region.anchor_lon : "";
+    /* Exit area mode if one was active -- loading a single region
+       directly should make THIS the active edit target, not silently
+       leave Save still pointed at whatever tile was selected in a
+       previously-loaded area. */
+    selectedAreaTileId = null;
+    if (areaGroup) {
+      scene.remove(areaGroup);
+      areaGroup.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); if (obj.material) obj.material.dispose(); });
+      areaGroup = null;
+      areaTiles = [];
+    }
+    document.getElementById("selectedTileGroup").style.display = "none";
     renderStructureList();
     redrawPaintCanvas();
     setStatus("Loaded \"" + region.name + "\".");
@@ -1270,6 +1518,9 @@
     wireDevTools(); /* independent of the 3D preview init below, so a 3D failure can't take these controls down with it */
     document.getElementById("importAreaBtn").addEventListener("click", () => {
       runBulkImport();
+    });
+    document.getElementById("loadAreaBtn").addEventListener("click", () => {
+      loadArea();
     });
     try {
       initPreview();
