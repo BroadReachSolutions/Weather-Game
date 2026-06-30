@@ -221,6 +221,8 @@
     <div class="field-group">
       <label>🛰️ Area: Lat/Lon + Radius</label>
       <p class="hint">Used by both buttons below: Import Area generates new tiles here (real satellite, classified land/water, chunked grid). Load Area (in the toolbar above) pulls in whatever's already saved at this point/radius instead.</p>
+      <label style="margin-top:6px;">Paste "lat, lon" together</label>
+      <input type="text" id="importLatLonPaste" placeholder="e.g. 29.8908, -81.3124">
       <label style="margin-top:6px;">Center Latitude</label>
       <input type="number" id="importLat" step="0.0001" value="29.8908">
       <label style="margin-top:6px;">Center Longitude</label>
@@ -1654,6 +1656,22 @@
     });
     document.getElementById("loadAreaBtn").addEventListener("click", () => {
       loadArea();
+    });
+    document.getElementById("importLatLonPaste").addEventListener("input", (e) => {
+      /* Accepts "lat, lon", "lat,lon", or "lat lon" -- splits on comma
+         or whitespace, parses the first two numbers found. Leaves
+         the separate lat/lon fields untouched if the pasted text
+         doesn't parse cleanly, rather than clobbering a valid value
+         with garbage from a partial paste. */
+      const parts = e.target.value.split(/[,\s]+/).map(s => s.trim()).filter(s => s.length > 0);
+      if (parts.length >= 2) {
+        const lat = parseFloat(parts[0]);
+        const lon = parseFloat(parts[1]);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          document.getElementById("importLat").value = lat;
+          document.getElementById("importLon").value = lon;
+        }
+      }
     });
     document.getElementById("viewSourceMapBtn").addEventListener("click", () => {
       showSourceMap();

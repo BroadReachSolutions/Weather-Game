@@ -159,7 +159,7 @@
      authoritative hydrography data, not a photograph. */
   /* Classifies a single pixel's hydro-overlay RGBA as water/land. */
   function classifyHydroPixel(r, g, b, a) {
-    if (a < 40) return "land"; /* fully/mostly transparent = no water feature drawn here */
+    if (a < 15) return "land"; /* essentially fully transparent = no water feature drawn here at all; lowered from 40 per request so any genuine blue overlay pixel, including lightly anti-aliased edges, counts as water */
     const isBlueish = b >= r && b >= g - 15; /* the overlay's water fill is consistently blue-family */
     return isBlueish ? "water" : "land";
   }
@@ -183,26 +183,33 @@
     const pixels = imageData.data;
     const cellPx = TILE_SIZE_PX / gridSize;
     const grid = [];
-    const WATER_PIXEL_FRACTION_THRESHOLD = 0.08; /* if at least 8% of a cell's pixels are individually classified water, call the whole cell water -- low on purpose, since narrow channels rarely fill a whole coarse cell */
 
+    /* Per request: ANY hydro-overlay pixel found in a cell means the
+       whole cell is water, full stop -- no fraction/threshold of any
+       kind. This is the most permissive possible rule and eliminates
+       the dilution problem entirely, at the cost of being generous
+       about cell boundaries (a cell that's mostly land but has even
+       one stray water pixel near its edge gets called water too).
+       That tradeoff is intentional here, since under-detecting water
+       (the previous bug) was the worse failure mode for this use
+       case. */
     for (let gy = 0; gy < gridSize; gy++) {
       const row = [];
       for (let gx = 0; gx < gridSize; gx++) {
-        let waterPixelCount = 0, totalCount = 0;
+        let foundWater = false;
         const startX = Math.floor(gx * cellPx);
         const startY = Math.floor(gy * cellPx);
         const endX = Math.floor((gx + 1) * cellPx);
         const endY = Math.floor((gy + 1) * cellPx);
-        for (let py = startY; py < endY; py++) {
-          for (let px = startX; px < endX; px++) {
+        for (let py = startY; py < endY && !foundWater; py++) {
+          for (let px = startX; px < endX && !foundWater; px++) {
             const idx = (py * TILE_SIZE_PX + px) * 4;
-            const pixelClass = classifyHydroPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]);
-            if (pixelClass === "water") waterPixelCount++;
-            totalCount++;
+            if (classifyHydroPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]) === "water") {
+              foundWater = true;
+            }
           }
         }
-        const waterFraction = totalCount > 0 ? waterPixelCount / totalCount : 0;
-        row.push(waterFraction >= WATER_PIXEL_FRACTION_THRESHOLD ? "water" : "land");
+        row.push(foundWater ? "water" : "land");
       }
       grid.push(row);
     }
