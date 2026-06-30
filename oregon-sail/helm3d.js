@@ -479,6 +479,50 @@
     terrainGroup = newTerrainGroup;
     terrainGeneratedForLatLon = { lat: boatLat, lon: boatLon };
     scene.add(terrainGroup);
+
+    /* Build/assign the calm mask texture for the water shader from
+       whatever calm grid this terrain came with (custom regions only
+       -- satellite-generated terrain has no calm data, which is
+       correctly handled as "no calming anywhere"). The terrain mesh
+       itself carries calmGrid/worldSize in userData (see terrain.js),
+       set there regardless of whether this came from a custom region
+       or satellite generation, so this check works for both. */
+    const meshUserData = terrainGroup.children[0] && terrainGroup.children[0].userData;
+    const calmGrid = meshUserData && meshUserData.calmGrid;
+    if (waterUniforms.uCalmMask.value) {
+      waterUniforms.uCalmMask.value.dispose();
+      waterUniforms.uCalmMask.value = null;
+    }
+    if (calmGrid && calmGrid.length && calmGrid.some(row => row.some(c => c))) {
+      waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
+      waterUniforms.uCalmMaskActive.value = 1;
+      waterUniforms.uWorldSize.value = meshUserData.worldSize || 1;
+      waterUniforms.uTerrainCenterX.value = 0; /* terrain is always centered at the origin in this coordinate space, see the comment above updateTerrain */
+      waterUniforms.uTerrainCenterZ.value = 0;
+    } else {
+      waterUniforms.uCalmMaskActive.value = 0;
+    }
+  }
+
+  /* Builds a DataTexture from a calm grid (2D boolean array) for the
+     water shader's uCalmMask -- white=normal waves, black=calm. Same
+     technique as the standalone map editor's buildCalmMaskTexture. */
+  function buildCalmMaskTexture(calmGridParam) {
+    const size = calmGridParam.length;
+    const data = new Uint8Array(size * size);
+    for (let gy = 0; gy < size; gy++) {
+      for (let gx = 0; gx < size; gx++) {
+        const isCalm = !!(calmGridParam[gy] && calmGridParam[gy][gx]);
+        data[(size - 1 - gy) * size + gx] = isCalm ? 0 : 255; /* Y-flip, see the same note in the map editor's version */
+      }
+    }
+    const tex = new THREE.DataTexture(data, size, size, THREE.LuminanceFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   /* ---------------------------------------------------------------
@@ -493,7 +537,12 @@
     uDeepColor: { value: new THREE.Color(0x1565c0) },
     uLightColor: { value: new THREE.Color(0x4fa8e8) },
     uVeinColor: { value: new THREE.Color(0xeaf6ff) },
-    uCellScale: { value: 0.05 }
+    uCellScale: { value: 0.05 },
+    uCalmMask: { value: null }, /* DataTexture from a loaded custom region's calm_grid -- white=normal waves, black=calm (no displacement). Null = no terrain/calm data loaded, waves behave normally everywhere. */
+    uCalmMaskActive: { value: 0 }, /* 0/1 -- whether uCalmMask is actually populated, avoids needing a branch on a possibly-null sampler */
+    uWorldSize: { value: 1 }, /* the loaded custom region's real-world size, for mapping a vertex's world position into the calm mask's UV space */
+    uTerrainCenterX: { value: 0 }, /* terrain group's own offset from the water's coordinate origin, if any -- currently always 0 since terrain is regenerated centered on the boat each time, but kept explicit rather than assumed */
+    uTerrainCenterZ: { value: 0 }
   };
 
   /* Accumulated sampling offset, in world units — shifted each frame
@@ -526,6 +575,11 @@
         uniform float uAmplitude;
         uniform float uOffsetX;
         uniform float uOffsetZ;
+        uniform sampler2D uCalmMask;
+        uniform float uCalmMaskActive;
+        uniform float uWorldSize;
+        uniform float uTerrainCenterX;
+        uniform float uTerrainCenterZ;
         varying float vHeight;
         varying vec2 vWorldXZ;
         varying float vRippleClock;
@@ -576,11 +630,26 @@
                       + sin(layer7.x * 0.066 + slowClock * 0.52 + 2.1) * uAmplitude * 0.08
                       + sin(perpendicular.x * 0.052 + slowClock * 0.75 + 5.5) * uAmplitude * 0.35;
 
-          vHeight = swell / max(uAmplitude * 2.12, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 8 layers) */
+          /* Calm mask: only sampled if a custom region with calm
+             water is actually loaded (uCalmMaskActive=1). Maps this
+             vertex's world position into the mask's UV space, exactly
+             the same approach as the standalone map editor, just
+             accounting for the terrain's own center offset (currently
+             always 0 since terrain regenerates centered on the boat,
+             but kept explicit). Outside the loaded region's bounds,
+             clamp-to-edge sampling correctly continues showing normal
+             waves rather than incorrectly calming the whole ocean. */
+          float calmFactor = 1.0;
+          if (uCalmMaskActive > 0.5) {
+            vec2 maskUV = ((p - vec2(uTerrainCenterX, uTerrainCenterZ)) / uWorldSize) + 0.5;
+            calmFactor = texture2D(uCalmMask, maskUV).r;
+          }
+
+          vHeight = (swell * calmFactor) / max(uAmplitude * 2.12, 0.0001); /* -1..1, normalized against the combined peak amplitude (now 8 layers) */
           vWorldXZ = p; /* pass the (offset) world position for the cell pattern */
           vRippleClock = uTime; /* drives the vein ripple animation in the fragment shader */
 
-          vec3 displaced = vec3(position.x, position.y, swell);
+          vec3 displaced = vec3(position.x, position.y, swell * calmFactor);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
         }
       `,
@@ -754,7 +823,7 @@
     const layer7X = rotX(px, pz, 0.36);
     const perpendicularX = rotX(px, pz, 1.5708);
 
-    return Math.sin(primaryX * 0.045 + slowClock * 0.9) * amplitude
+    const swell = Math.sin(primaryX * 0.045 + slowClock * 0.9) * amplitude
          + Math.sin(secondaryX * 0.11 + slowClock * 1.3) * amplitude * 0.22
          + Math.sin(tertiaryX * 0.071 + slowClock * 0.61 + 1.7) * amplitude * 0.16
          + Math.sin(layer4X * 0.093 + slowClock * 1.07 + 0.6) * amplitude * 0.12
@@ -762,6 +831,38 @@
          + Math.sin(layer6X * 0.082 + slowClock * 1.21 + 4.8) * amplitude * 0.09
          + Math.sin(layer7X * 0.066 + slowClock * 0.52 + 2.1) * amplitude * 0.08
          + Math.sin(perpendicularX * 0.052 + slowClock * 0.75 + 5.5) * amplitude * 0.35;
+
+    /* Calm grid suppression, matching the shader's uCalmMask exactly
+       (same coordinate mapping, same "1.0 outside any loaded region"
+       default) so the boat's actual physical bob/pitch agrees with
+       what's visually rendered -- a calm harbor should be physically
+       calm for the boat too, not just visually flat. */
+    const calmFactor = getCalmFactorAt(px, pz);
+    return swell * calmFactor;
+  }
+
+  /* Shared calm-lookup used by both the boat physics (sampleSwellHeight,
+     CPU-side) and exposed for any other system that needs to know if a
+     given world position is in a calm area. Returns 1.0 (normal waves)
+     if no terrain/calm data is currently loaded, or the point falls
+     outside the loaded region's bounds. */
+  function getCalmFactorAt(worldX, worldZ) {
+    if (!terrainGroup || !terrainGroup.userData || !terrainGroup.userData.calmGrid) return 1.0;
+    const calmGrid = terrainGroup.userData.calmGrid;
+    if (!calmGrid.length) return 1.0;
+    const worldSize = terrainGroup.userData.worldSize || 1;
+    const gridSize = calmGrid.length;
+    /* Same UV mapping as the shader: (position / worldSize) + 0.5,
+       then scaled into grid cell coordinates. Terrain is always
+       centered at the origin in this coordinate space (see
+       updateTerrain), so no separate center offset is needed here. */
+    const u = (worldX / worldSize) + 0.5;
+    const v = (worldZ / worldSize) + 0.5;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 1.0; /* outside the loaded region entirely */
+    const gx = Math.min(gridSize - 1, Math.max(0, Math.floor(u * gridSize)));
+    const gy = Math.min(gridSize - 1, Math.max(0, Math.floor(v * gridSize)));
+    const isCalm = !!(calmGrid[gy] && calmGrid[gy][gx]);
+    return isCalm ? 0.0 : 1.0;
   }
 
   /* ---------------------------------------------------------------

@@ -527,12 +527,49 @@
     uDeepColor: { value: new THREE.Color(0x1565c0) },
     uLightColor: { value: new THREE.Color(0x4fa8e8) },
     uVeinColor: { value: new THREE.Color(0xeaf6ff) },
-    uCellScale: { value: 0.05 }
+    uCellScale: { value: 0.05 },
+    uCalmMask: { value: null }, /* DataTexture built from calmGrid -- white=normal waves, black=fully calm */
+    uWorldSize: { value: 2000 * 0.24 } /* needed in the shader to map a vertex's world position back into the calm mask's UV space */
   };
 
   function rot(p, a) {
     const c = Math.cos(a), s = Math.sin(a);
     return new THREE.Vector2(p.x * c - p.y * s, p.x * s + p.y * c);
+  }
+
+  /* Builds a DataTexture from the calmGrid boolean array -- white
+     (1.0) where waves should behave normally, black (0.0) where calm
+     suppresses them entirely. Sampled in the vertex shader to fade
+     swell displacement smoothly to zero in calm areas (smoothed by
+     the texture's own bilinear filtering, which gives a natural
+     transition at the calm area's edge rather than a hard cut). */
+  function buildCalmMaskTexture(calmGridParam) {
+    const size = calmGridParam && calmGridParam.length ? calmGridParam.length : GRID_SIZE;
+    const data = new Uint8Array(size * size);
+    for (let gy = 0; gy < size; gy++) {
+      for (let gx = 0; gx < size; gx++) {
+        const isCalm = !!(calmGridParam && calmGridParam[gy] && calmGridParam[gy][gx]);
+        /* Texture row 0 = top of the image, but our grid's gy=0 is
+           also visually "top" in the paint canvas -- flip Y here so
+           the mask lines up correctly with world space (THREE's
+           texture V coordinate increases upward, opposite of our
+           grid's row order). */
+        data[(size - 1 - gy) * size + gx] = isCalm ? 0 : 255;
+      }
+    }
+    const tex = new THREE.DataTexture(data, size, size, THREE.LuminanceFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    /* Explicit clamp-to-edge (THREE's default for DataTexture anyway,
+       but set explicitly so this is guaranteed rather than implicit):
+       water vertices beyond the terrain's worldSize boundary sample
+       the mask's outer edge value, which is "normal waves" unless
+       calm was painted right at the edge -- correct behavior for
+       open water surrounding the painted terrain. */
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   /* Real water shader — exact same 8-layer swell + cracked-cell vein
@@ -548,6 +585,8 @@
       vertexShader: `
         uniform float uTime;
         uniform float uAmplitude;
+        uniform sampler2D uCalmMask;
+        uniform float uWorldSize;
         varying float vHeight;
         varying vec2 vWorldXZ;
         vec2 rotV(vec2 p, float a) {
@@ -573,9 +612,22 @@
                       + sin(layer6.x * 0.082 + slowClock * 1.21 + 4.8) * uAmplitude * 0.09
                       + sin(layer7.x * 0.066 + slowClock * 0.52 + 2.1) * uAmplitude * 0.08
                       + sin(perp.x * 0.052 + slowClock * 0.75 + 5.5) * uAmplitude * 0.35;
-          vHeight = swell / max(uAmplitude * 2.12, 0.0001);
+
+          /* Map this vertex's world XY position into the calm mask's
+             0..1 UV space (the water plane is centered on the origin,
+             spanning -uWorldSize/2 to +uWorldSize/2 on each axis,
+             matching how the terrain mesh itself is positioned) and
+             sample it -- 1.0 = full normal waves, 0.0 = fully calm
+             (no displacement at all). This is what actually keeps
+             calm areas flat no matter the swell/weather settings,
+             since it directly zeroes the displacement at the vertex
+             level rather than relying on the static seafloor mesh. */
+          vec2 maskUV = (p / uWorldSize) + 0.5;
+          float calmFactor = texture2D(uCalmMask, maskUV).r;
+
+          vHeight = (swell * calmFactor) / max(uAmplitude * 2.12, 0.0001);
           vWorldXZ = p;
-          vec3 displaced = vec3(position.x, position.y, swell);
+          vec3 displaced = vec3(position.x, position.y, swell * calmFactor);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
         }
       `,
@@ -668,6 +720,7 @@
 
     buildEditorSky();
     waterMesh = buildEditorWater(4000);
+    waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
     scene.add(waterMesh);
 
     /* Raycasting for paint-directly-on-3D-terrain: clicking the 3D
@@ -766,6 +819,10 @@
   }
 
   function buildPreviewMesh(g, worldSize, landHeightFt, calmGridParam) {
+    /* calmGridParam intentionally unused here -- calm no longer
+       affects the static seafloor mesh at all (see the water branch
+       below), only the separate animated water shader's surface
+       displacement. Kept as a parameter for call-site stability. */
     const size = g.length;
     const geo = new THREE.PlaneGeometry(worldSize, worldSize, size - 1, size - 1);
     const posAttr = geo.attributes.position;
@@ -812,30 +869,24 @@
           c = colorBeach;
 
         } else {
-          /* Regular water (calm or not) -- same color logic either
-             way, since calm is a flag on water, not a different
-             material. Only the HEIGHT differs: calm cells are pinned
-             flat at sea level (y=0) instead of following the normal
-             seafloor-depth slope, which is what keeps them visually
-             flat/sheltered while still looking and coloring exactly
-             like the surrounding water. */
-          const isCalm = !!(calmGridParam && calmGridParam[gy] && calmGridParam[gy][gx]);
-
-          if (isCalm) {
-            height = 0;
-          } else {
-            const neighborIsBreach = (function() {
-              for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                  const ny = gy + dy, nx = gx + dx;
-                  if (ny < 0 || ny >= size || nx < 0 || nx >= size) continue;
-                  if (g[ny][nx] === "beach") return true;
-                }
+          /* Regular water -- calm has NO effect on the seafloor mesh
+             at all. Calm only affects the ANIMATED water surface
+             (the separate water shader, see buildEditorWater's
+             uCalmMask), which is what genuinely keeps the surface
+             flat regardless of swell/weather. The seafloor depth
+             here is identical whether the area above it is calm or
+             not, so painting calm never lifts or shallows the floor. */
+          const neighborIsBreach = (function() {
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                const ny = gy + dy, nx = gx + dx;
+                if (ny < 0 || ny >= size || nx < 0 || nx >= size) continue;
+                if (g[ny][nx] === "beach") return true;
               }
-              return false;
-            })();
-            height = neighborIsBreach ? -seaFloorDepth * eased : -seaFloorDepth;
-          }
+            }
+            return false;
+          })();
+          height = neighborIsBreach ? -seaFloorDepth * eased : -seaFloorDepth;
           const depthT = eased;
           c = colorWater.clone().lerp(colorDeepWater, depthT * 0.7 + 0.3);
         }
@@ -927,6 +978,14 @@
     const worldSize = worldSizeFt * UNITS_PER_FOOT;
 
     previewMesh = buildPreviewMesh(grid, worldSize, landHeightFt, calmGrid);
+
+    /* Refresh the calm mask texture + the shader's worldSize uniform
+       so the water genuinely stops moving wherever calm was just
+       painted, and the mask correctly lines up with the (possibly
+       resized) terrain. */
+    if (waterUniforms.uCalmMask.value) waterUniforms.uCalmMask.value.dispose();
+    waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
+    waterUniforms.uWorldSize.value = worldSize;
     scene.add(previewMesh);
 
     /* Build and add all placed structures -- convert grid-relative
