@@ -753,7 +753,7 @@
     skyDomeCtx.fillStyle = grad;
     skyDomeCtx.fillRect(0, 0, 2, 256);
     skyDomeTexture = new THREE.CanvasTexture(skyDomeCanvas);
-    const domeGeo = new THREE.SphereGeometry(2000, 24, 16);
+    const domeGeo = new THREE.SphereGeometry(7000, 24, 16); /* increased from 2000 -- must exceed the camera's maxDistance (5000) or the camera could pull back past the inside of the sky sphere, which looks visually broken */
     const domeMat = new THREE.MeshBasicMaterial({ map: skyDomeTexture, side: THREE.BackSide, depthWrite: false });
     skyDomeMesh = new THREE.Mesh(domeGeo, domeMat);
     scene.add(skyDomeMesh);
@@ -763,17 +763,18 @@
     const canvas3d = document.getElementById("previewCanvas3d");
     scene = new THREE.Scene();
     const wrap = canvas3d.parentElement;
-    camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
-    camera.position.set(0, 500, 700);
+    camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / wrap.clientHeight, 0.1, 8000); /* far-clip raised to cover a ~3mi view radius (per request: see a couple miles out) without distant terrain/water disappearing */
+    camera.position.set(0, 800, 1100); /* pulled back from (0,500,700) to suit the larger view scale -- opens at a more sensible default distance now that the scene supports zooming out to a multi-mile view */
     renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
     renderer.setSize(wrap.clientWidth, wrap.clientHeight);
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 0, 0);
     controls.minDistance = 30;
-    controls.maxDistance = 3000; /* generous range -- free-fly over the whole imported/painted area, not just close-in like the boat-following camera */
+    controls.maxDistance = 5000; /* raised from 3000 to comfortably pull back far enough to see a multi-mile area (per request: see a couple miles out), matching the larger water plane below */
     controls.dampingFactor = 0.08;
     controls.enableDamping = true;
+    controls.zoomSpeed = 0.6; /* slightly slower than OrbitControls' default (1.0) for smoother, more controllable zoom steps rather than large jumps per scroll tick -- damping (above) smooths the motion between steps, this controls how big each step is */
 
     ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
     scene.add(ambientLight);
@@ -782,7 +783,7 @@
     scene.add(sunLight);
 
     buildEditorSky();
-    waterMesh = buildEditorWater(4000);
+    waterMesh = buildEditorWater(7600); /* increased from 4000 -- now covers roughly 3mi radius (per request: see a couple miles out), up from the previous ~1.6mi radius */
     waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
     scene.add(waterMesh);
 
