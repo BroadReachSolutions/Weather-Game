@@ -491,7 +491,7 @@
     const zoom = 15;
     const tile = latLonToTile(lat, lon, zoom);
 
-    const gridSize = 48;
+    const gridSize = 128; /* increased from 48 for same reason */
     let grid;
     try {
       const result = await classifyTile(tile.x, tile.y, tile.zoom, gridSize);

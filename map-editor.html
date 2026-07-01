@@ -1547,7 +1547,7 @@
     for (const tile of tileList) {
       try {
         const tileLatLon = window.OSTerrain.tileToLatLon(tile.x, tile.y, zoom);
-        const tileGridSize = 48;
+        const tileGridSize = 128; /* increased from 48 -- 128x128 gives 27ft/cell at zoom 15, ICW spans ~14 cells vs ~5 before, near-lossless from the 256px source tile */
         const classifyResult = await window.OSTerrain.classifyTile(tile.x, tile.y, zoom, tileGridSize, googleSession, googleApiKey);
         const tileGrid = classifyResult.grid;
         if (classifyResult.source === "google-terrain") googleCount++;
