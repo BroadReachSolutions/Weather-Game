@@ -152,6 +152,7 @@
     <button id="loadRegionBtn">Load</button>
     <button id="loadAreaBtn">Load Area</button>
     <button id="saveRegionBtn">Save</button>
+    <button id="saveAllBtn">Save All</button>
   </div>
 </header>
 
@@ -299,7 +300,98 @@
      regions, only a small change to check for one before falling
      back to satellite generation.
      --------------------------------------------------------------- */
-  const GRID_SIZE = 64;
+  const GRID_SIZE = 128; /* cells per tile -- matches import resolution */
+
+  /* ---------------------------------------------------------------
+     MERGED TILE SELECTION
+     When tiles are selected from the 3D view, the 2D canvas shows
+     all of them stitched together as one seamless merged grid.
+     Painting flows across tile boundaries and saves back to each
+     individual tile's classification_grid in the database.
+     --------------------------------------------------------------- */
+
+  /* selectedTileIds: Set of regionIds currently selected for editing.
+     mergedLayout: the computed bounding box and per-tile offsets for
+     the current selection, rebuilt whenever selection changes. */
+  let selectedTileIds = new Set();
+  let mergedLayout = null; /* { cols, rows, tileMap: {regionId: {col,row}} } */
+
+  /* Compute the merged layout from the current selected tiles.
+     Finds the bounding box of selected tiles in tile-grid space
+     and assigns each tile a col/row offset within that box. */
+  function computeMergedLayout() {
+    if (selectedTileIds.size === 0) { mergedLayout = null; return; }
+
+    /* Get the tile-grid coordinates for each selected tile from its name
+       which contains (tx,ty) e.g. "St Augustine (8983,13529)" */
+    const tileCoords = [];
+    selectedTileIds.forEach(id => {
+      const info = areaTiles.find(t => t.regionId === id);
+      if (!info) return;
+      const match = info.name.match(/\((\d+),(\d+)\)/);
+      if (!match) return;
+      tileCoords.push({ id, tx: parseInt(match[1]), ty: parseInt(match[2]), info });
+    });
+
+    if (tileCoords.length === 0) { mergedLayout = null; return; }
+
+    const minTx = Math.min(...tileCoords.map(t => t.tx));
+    const minTy = Math.min(...tileCoords.map(t => t.ty));
+    const maxTx = Math.max(...tileCoords.map(t => t.tx));
+    const maxTy = Math.max(...tileCoords.map(t => t.ty));
+
+    const tileMap = {};
+    tileCoords.forEach(t => {
+      tileMap[t.id] = {
+        col: t.tx - minTx,  /* column offset within merged grid */
+        row: t.ty - minTy,  /* row offset within merged grid */
+        info: t.info
+      };
+    });
+
+    mergedLayout = {
+      cols: maxTx - minTx + 1,
+      rows: maxTy - minTy + 1,
+      tileMap
+    };
+  }
+
+  /* Dynamic cellPx -- recomputed based on merged layout size */
+  function getCellPx() {
+    if (!mergedLayout) return paintCanvas.width / GRID_SIZE;
+    const totalCols = mergedLayout.cols * GRID_SIZE;
+    return paintCanvas.width / totalCols;
+  }
+
+  /* Given a merged-canvas grid coordinate, find which tile it belongs
+     to and what the local cell coordinate is within that tile. */
+  function mergedToTileCell(mergedCol, mergedRow) {
+    if (!mergedLayout) return { tileId: null, localGx: mergedCol, localGy: mergedRow };
+    const tileCol = Math.floor(mergedCol / GRID_SIZE);
+    const tileRow = Math.floor(mergedRow / GRID_SIZE);
+    const localGx = mergedCol % GRID_SIZE;
+    const localGy = mergedRow % GRID_SIZE;
+    /* Find the tile at this col/row offset */
+    for (const [id, entry] of Object.entries(mergedLayout.tileMap)) {
+      if (entry.col === tileCol && entry.row === tileRow) {
+        return { tileId: id, localGx, localGy };
+      }
+    }
+    return { tileId: null, localGx, localGy }; /* gap between tiles */
+  }
+
+  /* Get the classification grid and calmGrid for a specific tile,
+     either from the active single-tile state or from the area tile data */
+  function getTileGrids(tileId) {
+    if (!tileId) return null;
+    const info = areaTiles.find(t => t.regionId === tileId);
+    if (!info || !info.mesh.userData.regionData) return null;
+    const region = info.mesh.userData.regionData;
+    return {
+      grid: region.classification_grid,
+      calmGrid: region.calm_grid || region.classification_grid.map(r => r.map(() => false))
+    };
+  }
   let grid = [];
   /* Calm is a FLAG layered on top of regular water cells, not its own
      cell type -- per request, it should "apply to the normal water"
@@ -333,67 +425,106 @@
   const cellPx = paintCanvas.width / GRID_SIZE;
 
   function redrawPaintCanvas() {
+    const cellPx = getCellPx();
     paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-    for (let y = 0; y < GRID_SIZE; y++) {
-      for (let x = 0; x < GRID_SIZE; x++) {
-        const cellType = grid[y][x];
-        paintCtx.fillStyle = cellType === "land"  ? "#6b8e4e"
-                           : cellType === "beach" ? "#d4bc8a"
-                           : "#2a73ad";
-        paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
-        /* Calm flag drawn as a lighter overlay ON TOP of normal water
-           color, not a separate fill -- it's a property of the water
-           cell, not a different material. */
-        if (cellType === "water" && calmGrid[y][x]) {
-          paintCtx.fillStyle = "rgba(160, 220, 255, 0.45)";
+
+    if (mergedLayout && selectedTileIds.size > 0) {
+      /* MERGED VIEW: draw all selected tiles stitched together */
+      const totalCols = mergedLayout.cols * GRID_SIZE;
+      const totalRows = mergedLayout.rows * GRID_SIZE;
+      const cPx = paintCanvas.width / totalCols;
+      const rPx = paintCanvas.height / totalRows; /* may differ from cPx if not square */
+
+      /* Fill background (unselected tile gaps) dark */
+      paintCtx.fillStyle = "#111";
+      paintCtx.fillRect(0, 0, paintCanvas.width, paintCanvas.height);
+
+      for (const [id, entry] of Object.entries(mergedLayout.tileMap)) {
+        const grids = getTileGrids(id);
+        if (!grids) continue;
+        const { grid: tGrid, calmGrid: tCalm } = grids;
+        const offsetX = entry.col * GRID_SIZE * cPx;
+        const offsetY = entry.row * GRID_SIZE * rPx;
+        for (let y = 0; y < GRID_SIZE; y++) {
+          for (let x = 0; x < GRID_SIZE; x++) {
+            const cellType = tGrid[y]?.[x];
+            paintCtx.fillStyle = cellType === "land"  ? "#6b8e4e"
+                               : cellType === "beach" ? "#d4bc8a"
+                               : "#2a73ad";
+            paintCtx.fillRect(offsetX + x * cPx, offsetY + y * rPx, cPx + 0.5, rPx + 0.5);
+            if (cellType === "water" && tCalm[y]?.[x]) {
+              paintCtx.fillStyle = "rgba(160, 220, 255, 0.45)";
+              paintCtx.fillRect(offsetX + x * cPx, offsetY + y * rPx, cPx + 0.5, rPx + 0.5);
+            }
+          }
+        }
+        /* Draw tile boundary */
+        paintCtx.strokeStyle = "rgba(255,255,255,0.2)";
+        paintCtx.lineWidth = 1;
+        paintCtx.strokeRect(offsetX, offsetY, GRID_SIZE * cPx, GRID_SIZE * rPx);
+      }
+    } else {
+      /* SINGLE-TILE VIEW: original behavior */
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          const cellType = grid[y]?.[x];
+          paintCtx.fillStyle = cellType === "land"  ? "#6b8e4e"
+                             : cellType === "beach" ? "#d4bc8a"
+                             : "#2a73ad";
           paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+          if (cellType === "water" && calmGrid[y]?.[x]) {
+            paintCtx.fillStyle = "rgba(160, 220, 255, 0.45)";
+            paintCtx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
+          }
         }
       }
+      /* Structures */
+      structures.forEach(s => {
+        paintCtx.save();
+        paintCtx.translate((s.x + 0.5) * cellPx, (s.z + 0.5) * cellPx);
+        paintCtx.fillStyle = "#ffa726";
+        paintCtx.fillRect(-cellPx * 0.4, -cellPx * 1.2, cellPx * 0.8, cellPx * 2.4);
+        paintCtx.restore();
+      });
     }
-    /* Structures drawn as simple markers on top */
-    structures.forEach(s => {
-      paintCtx.save();
-      paintCtx.translate((s.x + 0.5) * cellPx, (s.z + 0.5) * cellPx);
-      paintCtx.rotate((s.headingDeg * Math.PI) / 180);
-      paintCtx.fillStyle = "#e8c84f";
-      paintCtx.fillRect(-cellPx * 0.4, -cellPx * 1.2, cellPx * 0.8, cellPx * 2.4);
-      paintCtx.restore();
-    });
     schedulePreviewUpdate();
   }
   redrawPaintCanvas();
+
+  function applyPaintType(tGrid, tCalm, x, y, type) {
+    if (type === "calm") {
+      tCalm[y][x] = true;
+    } else if (type === "uncalm") {
+      tCalm[y][x] = false;
+      tGrid[y][x] = "water";
+    } else {
+      tGrid[y][x] = type;
+      tCalm[y][x] = false;
+    }
+  }
 
   function paintAt(gx, gy, type) {
     const r = brushSize;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy > r * r) continue; /* circular brush */
-        const x = gx + dx, y = gy + dy;
-        if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
-        if (type === "calm") {
-          /* Set on EVERY cell the brush touches, regardless of current
-             type (land/beach/water) -- not just cells that are
-             currently water. This matters because brush strokes near
-             a coastline (the most common place to want calm water,
-             e.g. a harbor) inevitably overlap some land/beach cells
-             too. If those get skipped, the water immediately
-             adjacent to the coastline stays un-calmed and keeps
-             animating right next to the static land mesh, which
-             reads as "the land area is moving." Harmless to set on
-             land/beach -- their height calculation never reads
-             calmGrid at all, so it has zero visual effect there.
-             It only actually matters wherever the cell IS water
-             (now or if repainted to water later), guaranteeing no
-             gap right at the shoreline. */
-          calmGrid[y][x] = true;
-        } else if (type === "uncalm") {
-          /* Erase tool over a calm area clears the flag too, restoring
-             normal wave behavior, without needing a separate button. */
-          calmGrid[y][x] = false;
-          grid[y][x] = "water";
+        if (dx * dx + dy * dy > r * r) continue;
+        const mx = gx + dx, my = gy + dy;
+
+        if (mergedLayout && selectedTileIds.size > 0) {
+          const totalCols = mergedLayout.cols * GRID_SIZE;
+          const totalRows = mergedLayout.rows * GRID_SIZE;
+          if (mx < 0 || mx >= totalCols || my < 0 || my >= totalRows) continue;
+          const { tileId, localGx, localGy } = mergedToTileCell(mx, my);
+          if (!tileId) continue;
+          const grids = getTileGrids(tileId);
+          if (!grids) continue;
+          const { grid: tGrid, calmGrid: tCalm } = grids;
+          if (!tGrid[localGy] || localGx >= tGrid[0].length) continue;
+          applyPaintType(tGrid, tCalm, localGx, localGy, type);
         } else {
-          grid[y][x] = type;
-          calmGrid[y][x] = false; /* painting a different cell type here clears any stale calm flag underneath it */
+          const x = mx, y = my;
+          if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
+          applyPaintType(grid, calmGrid, x, y, type);
         }
       }
     }
@@ -405,7 +536,11 @@
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     const px = (clientX - rect.left) * (paintCanvas.width / rect.width);
     const py = (clientY - rect.top) * (paintCanvas.height / rect.height);
-    return { gx: Math.floor(px / cellPx), gy: Math.floor(py / cellPx) };
+    const cellPx = getCellPx();
+    const totalCols = mergedLayout ? mergedLayout.cols * GRID_SIZE : GRID_SIZE;
+    const totalRows = mergedLayout ? mergedLayout.rows * GRID_SIZE : GRID_SIZE;
+    const rPx = paintCanvas.height / totalRows;
+    return { gx: Math.floor(px / cellPx), gy: Math.floor(py / rPx) };
   }
 
   function handlePaintStart(e) {
@@ -932,9 +1067,68 @@
         if (areaHits.length > 0) {
           const hitMesh = areaHits[0].object;
           const hitRegionId = hitMesh.userData.regionId;
-          if (hitRegionId && hitRegionId !== selectedAreaTileId) {
-            selectAreaTile(hitRegionId);
-            return; /* selection click consumed -- don't also paint */
+          if (hitRegionId) {
+            if (e.shiftKey) {
+              /* Shift+click: toggle this tile in/out of multi-selection */
+              if (selectedTileIds.has(hitRegionId)) {
+                selectedTileIds.delete(hitRegionId);
+              } else {
+                selectedTileIds.add(hitRegionId);
+              }
+            } else {
+              /* Normal click: single-tile select (or deselect if clicking the only selected tile) */
+              if (selectedTileIds.size === 1 && selectedTileIds.has(hitRegionId)) {
+                selectedTileIds.clear();
+              } else {
+                selectedTileIds.clear();
+                selectedTileIds.add(hitRegionId);
+              }
+            }
+
+            /* Update visual highlights */
+            areaTiles.forEach(t => {
+              const isSel = selectedTileIds.has(t.regionId);
+              t.mesh.traverse(obj => {
+                if (obj.material) {
+                  obj.material.emissive = isSel ? new THREE.Color(0x2a3a10) : new THREE.Color(0x000000);
+                  obj.material.opacity = (!isSel && selectedTileIds.size > 0) ? 0.75 : 1.0;
+                  obj.material.transparent = (!isSel && selectedTileIds.size > 0);
+                }
+              });
+            });
+
+            /* Rebuild merged layout and refresh the 2D canvas */
+            computeMergedLayout();
+            selectedAreaTileId = selectedTileIds.size === 1 ? [...selectedTileIds][0] : null;
+
+            if (selectedTileIds.size > 0) {
+              const names = [...selectedTileIds].map(id => areaTiles.find(t => t.regionId === id)?.name).filter(Boolean);
+              document.getElementById("selectedTileGroup").style.display = "block";
+              document.getElementById("selectedTileName").textContent =
+                selectedTileIds.size === 1
+                  ? "Editing: " + names[0]
+                  : `Editing ${selectedTileIds.size} tiles (Shift+click to add/remove)`;
+            } else {
+              document.getElementById("selectedTileName").textContent = "Click a tile to select it, Shift+click to select multiple.";
+            }
+
+            /* Load single-tile data into left panel if only one selected */
+            if (selectedTileIds.size === 1) {
+              const region = areaTiles.find(t => t.regionId === selectedAreaTileId)?.mesh.userData.regionData;
+              if (region) {
+                grid = region.classification_grid;
+                calmGrid = region.calm_grid || grid.map(r => r.map(() => false));
+                structures = region.structures || [];
+                document.getElementById("regionName").value = region.name;
+                document.getElementById("worldSizeFt").value = region.world_size_ft;
+                document.getElementById("anchorLat").value = region.anchor_lat ?? "";
+                document.getElementById("anchorLon").value = region.anchor_lon ?? "";
+                renderStructureList();
+              }
+            }
+
+            redrawPaintCanvas();
+            return;
           }
         }
       }
@@ -1878,6 +2072,26 @@
     });
     document.getElementById("loadAreaBtn").addEventListener("click", () => {
       loadArea();
+    });
+    document.getElementById("saveAllBtn").addEventListener("click", async () => {
+      if (selectedTileIds.size === 0) { setStatus("No tiles selected.", true); return; }
+      let saved = 0, failed = 0;
+      for (const id of selectedTileIds) {
+        const info = areaTiles.find(t => t.regionId === id);
+        if (!info || !info.mesh.userData.regionData) continue;
+        const region = info.mesh.userData.regionData;
+        const grids = getTileGrids(id);
+        if (!grids) continue;
+        const payload = {
+          classification_grid: grids.grid,
+          calm_grid: grids.calmGrid,
+          updated_at: new Date().toISOString()
+        };
+        const { error } = await sb.from("custom_map_regions").update(payload).eq("id", id);
+        if (error) { failed++; console.error("Save All failed for", region.name, error); }
+        else { saved++; Object.assign(region, payload); }
+      }
+      setStatus(`Saved ${saved} tiles` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
     });
     document.getElementById("importLatLonPaste").addEventListener("input", (e) => {
       /* Accepts "lat, lon", "lat,lon", or "lat lon" -- splits on comma
