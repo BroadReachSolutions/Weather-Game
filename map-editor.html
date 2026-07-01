@@ -1870,6 +1870,7 @@
       try {
         setStatus("Fetching Google terrain session...");
         googleSession = await window.OSTerrain.fetchGoogleTerrainSession(googleApiKey);
+        lastGoogleSession = googleSession; /* cache for source map preview reuse */
         setStatus(`Got Google terrain session. Importing ${tileList.length} tiles...`);
       } catch (e) {
         setStatus("Google session failed, falling back to USGS hydro: " + e.message, true);
@@ -1934,33 +1935,20 @@
      --------------------------------------------------------------- */
   let sourceMap = null;
   let sourceMapGoogleLayer = null;
-  let sourceMapFallbackLayer = null;
-  let sourceMapOverlayLayer = null;
 
   function buildSourceMapLayers(googleSession, googleKey) {
-    /* Remove any existing tile layers before adding new ones */
     if (sourceMapGoogleLayer) { sourceMap.removeLayer(sourceMapGoogleLayer); sourceMapGoogleLayer = null; }
-    if (sourceMapFallbackLayer) { sourceMap.removeLayer(sourceMapFallbackLayer); sourceMapFallbackLayer = null; }
-    if (sourceMapOverlayLayer) { sourceMap.removeLayer(sourceMapOverlayLayer); sourceMapOverlayLayer = null; }
-
     if (googleSession && googleKey) {
-      /* Google terrain -- exactly what Import Area classifies from */
       sourceMapGoogleLayer = L.tileLayer(
         `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${googleSession}&key=${googleKey}`,
         { attribution: "Google Terrain", maxZoom: 19 }
       ).addTo(sourceMap);
-    } else {
-      /* Fallback: satellite + USGS hydro overlay when no Google key */
-      sourceMapFallbackLayer = L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { attribution: "Esri World Imagery", maxZoom: 19 }
-      ).addTo(sourceMap);
-      sourceMapOverlayLayer = L.tileLayer(
-        "https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/tile/{z}/{y}/{x}",
-        { attribution: "USGS Hydro", maxZoom: 19, opacity: 0.85 }
-      ).addTo(sourceMap);
     }
+    /* No fallback -- if no Google session, map stays blank rather than
+       showing a different source that doesn't match what gets imported */
   }
+
+  let lastGoogleSession = null; /* reused for source map preview to avoid extra API calls */
 
   async function showSourceMap() {
     const wrap = document.getElementById("sourceMapWrap");
@@ -1973,23 +1961,22 @@
     const radiusMi = parseFloat(document.getElementById("importRadius").value) || 3;
     if (isNaN(lat) || isNaN(lon)) { setStatus("Enter a valid center lat/lon to preview the source map.", true); return; }
 
-    /* Init Leaflet map once */
     if (!sourceMap) sourceMap = L.map("sourceMapPreview", { zoomControl: true });
 
-    /* Fetch a fresh Google session if a key is present -- always
-       fetch a new one here rather than reusing an old one, since
-       the session from a previous import may have expired or the
-       key may have changed. */
     const googleKey = document.getElementById("googleApiKey").value.trim();
-    let googleSession = null;
-    if (googleKey) {
+    let googleSession = lastGoogleSession; /* reuse cached session if available */
+
+    if (googleKey && !googleSession) {
       try {
-        setStatus("Fetching Google session for map preview...");
+        setStatus("Fetching Google terrain session for preview...");
         googleSession = await window.OSTerrain.fetchGoogleTerrainSession(googleKey);
+        lastGoogleSession = googleSession;
         setStatus("Showing Google terrain map.");
       } catch (e) {
-        setStatus("Google session failed, showing USGS fallback.", true);
+        setStatus("Google session failed — enter your API key and try again.", true);
       }
+    } else if (!googleKey && !googleSession) {
+      setStatus("Enter your Google API key above to see the terrain map used for importing.", true);
     }
 
     buildSourceMapLayers(googleSession, googleKey);
@@ -2136,11 +2123,9 @@
       showSourceMap();
     });
     document.getElementById("sourceMapToggleHydro").addEventListener("change", (e) => {
-      if (!sourceMap) return;
-      const layer = sourceMapGoogleLayer || sourceMapOverlayLayer;
-      if (!layer) return;
-      if (e.target.checked) sourceMap.addLayer(layer);
-      else sourceMap.removeLayer(layer);
+      if (!sourceMap || !sourceMapGoogleLayer) return;
+      if (e.target.checked) sourceMap.addLayer(sourceMapGoogleLayer);
+      else sourceMap.removeLayer(sourceMapGoogleLayer);
     });
     try {
       initPreview();
