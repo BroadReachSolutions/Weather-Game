@@ -244,10 +244,10 @@
         <p class="hint" id="importProgressText">0 / 0 tiles</p>
       </div>
       <div id="sourceMapWrap" style="display:none; margin-top:8px;">
-        <p class="hint">Real USGS hydro data (blue = classified as water) over satellite imagery, centered on the coordinates above -- this is exactly what Import Area reads from. Zoom/pan freely to inspect any area before importing it.</p>
+        <p class="hint">Shows the actual Google terrain tiles being imported (or USGS hydro if no key entered). This is exactly what the classifier reads — pan and zoom to inspect any area before importing.</p>
         <div id="sourceMapPreview" style="width:100%; height:280px; border-radius:6px; border:1px solid rgba(125,186,220,0.3);"></div>
         <label class="brush-size-label" style="margin-top:6px; display:block;">
-          <input type="checkbox" id="sourceMapToggleHydro" checked> Show hydro overlay (blue = water)
+          <input type="checkbox" id="sourceMapToggleHydro" checked> Show map layer
         </label>
       </div>
     </div>
@@ -1572,31 +1572,39 @@
      after the fact from the resulting 3D terrain.
      --------------------------------------------------------------- */
   let sourceMap = null;
-  let sourceMapHydroLayer = null;
+  let sourceMapGoogleLayer = null;
+  let sourceMapFallbackLayer = null;
+  let sourceMapOverlayLayer = null;
 
-  function initSourceMap() {
-    if (sourceMap) return; /* already built, just needs recentering -- see showSourceMap */
-    sourceMap = L.map("sourceMapPreview", { zoomControl: true });
+  function buildSourceMapLayers(googleSession, googleKey) {
+    /* Remove any existing tile layers before adding new ones */
+    if (sourceMapGoogleLayer) { sourceMap.removeLayer(sourceMapGoogleLayer); sourceMapGoogleLayer = null; }
+    if (sourceMapFallbackLayer) { sourceMap.removeLayer(sourceMapFallbackLayer); sourceMapFallbackLayer = null; }
+    if (sourceMapOverlayLayer) { sourceMap.removeLayer(sourceMapOverlayLayer); sourceMapOverlayLayer = null; }
 
-    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "Esri World Imagery",
-      maxZoom: 19
-    }).addTo(sourceMap);
-
-    sourceMapHydroLayer = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "USGS National Hydrography Dataset",
-      maxZoom: 19,
-      opacity: 0.85
-    }).addTo(sourceMap);
+    if (googleSession && googleKey) {
+      /* Google terrain -- exactly what Import Area classifies from */
+      sourceMapGoogleLayer = L.tileLayer(
+        `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${googleSession}&key=${googleKey}`,
+        { attribution: "Google Terrain", maxZoom: 19 }
+      ).addTo(sourceMap);
+    } else {
+      /* Fallback: satellite + USGS hydro overlay when no Google key */
+      sourceMapFallbackLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        { attribution: "Esri World Imagery", maxZoom: 19 }
+      ).addTo(sourceMap);
+      sourceMapOverlayLayer = L.tileLayer(
+        "https://basemap.nationalmap.gov/arcgis/rest/services/USGSHydroCached/MapServer/tile/{z}/{y}/{x}",
+        { attribution: "USGS Hydro", maxZoom: 19, opacity: 0.85 }
+      ).addTo(sourceMap);
+    }
   }
 
-  function showSourceMap() {
+  async function showSourceMap() {
     const wrap = document.getElementById("sourceMapWrap");
     const isVisible = wrap.style.display !== "none";
-    if (isVisible) {
-      wrap.style.display = "none";
-      return;
-    }
+    if (isVisible) { wrap.style.display = "none"; return; }
     wrap.style.display = "block";
 
     const lat = parseFloat(document.getElementById("importLat").value);
@@ -1604,18 +1612,29 @@
     const radiusMi = parseFloat(document.getElementById("importRadius").value) || 3;
     if (isNaN(lat) || isNaN(lon)) { setStatus("Enter a valid center lat/lon to preview the source map.", true); return; }
 
-    initSourceMap();
-    /* Leaflet needs a size recalculation after its container goes
-       from display:none to visible, or it renders broken/blank tiles
-       until the next manual interaction -- standard Leaflet gotcha,
-       handled with a short delay so the container has its real
-       dimensions by the time invalidateSize runs. */
+    /* Init Leaflet map once */
+    if (!sourceMap) sourceMap = L.map("sourceMapPreview", { zoomControl: true });
+
+    /* Fetch a fresh Google session if a key is present -- always
+       fetch a new one here rather than reusing an old one, since
+       the session from a previous import may have expired or the
+       key may have changed. */
+    const googleKey = document.getElementById("googleApiKey").value.trim();
+    let googleSession = null;
+    if (googleKey) {
+      try {
+        setStatus("Fetching Google session for map preview...");
+        googleSession = await window.OSTerrain.fetchGoogleTerrainSession(googleKey);
+        setStatus("Showing Google terrain map.");
+      } catch (e) {
+        setStatus("Google session failed, showing USGS fallback.", true);
+      }
+    }
+
+    buildSourceMapLayers(googleSession, googleKey);
+
     setTimeout(() => {
       sourceMap.invalidateSize();
-      /* Zoom level chosen so the radius roughly fills the preview
-         pane -- rough mapping from miles to zoom, generous enough
-         that the requested import area is visible without being
-         either a tiny dot or zoomed in past the area's edges. */
       const zoomForRadius = radiusMi <= 1 ? 15 : radiusMi <= 3 ? 13 : radiusMi <= 6 ? 12 : 11;
       sourceMap.setView([lat, lon], zoomForRadius);
       L.circle([lat, lon], { radius: radiusMi * 1609.34, color: "#ffa726", weight: 2, fill: false }).addTo(sourceMap);
@@ -1703,9 +1722,11 @@
       showSourceMap();
     });
     document.getElementById("sourceMapToggleHydro").addEventListener("change", (e) => {
-      if (!sourceMapHydroLayer || !sourceMap) return;
-      if (e.target.checked) sourceMap.addLayer(sourceMapHydroLayer);
-      else sourceMap.removeLayer(sourceMapHydroLayer);
+      if (!sourceMap) return;
+      const layer = sourceMapGoogleLayer || sourceMapOverlayLayer;
+      if (!layer) return;
+      if (e.target.checked) sourceMap.addLayer(layer);
+      else sourceMap.removeLayer(layer);
     });
     try {
       initPreview();
