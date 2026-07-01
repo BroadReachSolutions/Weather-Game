@@ -153,6 +153,7 @@
     <button id="loadAreaBtn">Load Area</button>
     <button id="saveRegionBtn">Save</button>
     <button id="saveAllBtn">Save All</button>
+    <button id="deleteSelectedBtn" style="color:#ff6b6b;">Delete Selected</button>
   </div>
 </header>
 
@@ -2093,6 +2094,39 @@
       }
       setStatus(`Saved ${saved} tiles` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
     });
+
+    document.getElementById("deleteSelectedBtn").addEventListener("click", async () => {
+      if (selectedTileIds.size === 0) { setStatus("No tiles selected.", true); return; }
+      const count = selectedTileIds.size;
+      if (!confirm(`Delete ${count} tile${count > 1 ? "s" : ""} from the database? You can re-import them at the same coordinates after.`)) return;
+
+      let deleted = 0, failed = 0;
+      const idsToDelete = [...selectedTileIds];
+
+      for (const id of idsToDelete) {
+        const { error } = await sb.from("custom_map_regions").delete().eq("id", id);
+        if (error) { failed++; console.error("Delete failed for", id, error); continue; }
+        deleted++;
+
+        /* Remove from 3D scene */
+        const info = areaTiles.find(t => t.regionId === id);
+        if (info && areaGroup) {
+          areaGroup.remove(info.mesh);
+          info.mesh.geometry.dispose();
+          info.mesh.material.dispose();
+        }
+      }
+
+      /* Remove from areaTiles array and clear selection */
+      areaTiles = areaTiles.filter(t => !idsToDelete.includes(t.regionId));
+      selectedTileIds.clear();
+      mergedLayout = null;
+      selectedAreaTileId = null;
+      document.getElementById("selectedTileName").textContent = "Tiles deleted. Re-import at the same coordinates to regenerate them.";
+      redrawPaintCanvas();
+      setStatus(`Deleted ${deleted} tile${deleted > 1 ? "s" : ""}` + (failed ? `, ${failed} failed` : "") + ". Re-import to regenerate.", failed > 0);
+    });
+
     document.getElementById("importLatLonPaste").addEventListener("input", (e) => {
       /* Accepts "lat, lon", "lat,lon", or "lat lon" -- splits on comma
          or whitespace, parses the first two numbers found. Leaves
