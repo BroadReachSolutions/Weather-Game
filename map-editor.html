@@ -195,7 +195,7 @@
 
     <div class="field-group">
       <label class="brush-size-label">Land Height: <span id="landHeightVal">20</span> ft</label>
-      <input type="range" id="landHeight" min="2" max="100" value="8">
+      <input type="range" id="landHeight" min="2" max="100" value="15">
       <p class="hint">How far land rises straight up above the waterline. Beach uses a fixed gentle slope instead of this height.</p>
     </div>
 
@@ -787,7 +787,7 @@
     buildEditorSky();
     waterMesh = buildEditorWater(7600); /* increased from 4000 -- now covers roughly 3mi radius (per request: see a couple miles out), up from the previous ~1.6mi radius */
     waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
-    waterMesh.position.y = 0.5;
+    waterMesh.position.y = 0;
     scene.add(waterMesh);
 
     /* Raycasting for paint-directly-on-3D-terrain: clicking the 3D
@@ -987,7 +987,13 @@
     geo.computeVertexNormals();
     geo.rotateX(-Math.PI / 2);
 
-    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true });
+    const mat = new THREE.MeshPhongMaterial({
+      vertexColors: true,
+      flatShading: true,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1
+    });
     return new THREE.Mesh(geo, mat);
   }
 
