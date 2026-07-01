@@ -583,9 +583,11 @@
     uVeinColor: { value: new THREE.Color(0xeaf6ff) },
     uCellScale: { value: 0.05 },
     uCalmMask: { value: null }, /* DataTexture built from calmGrid -- white=normal waves, black=fully calm */
-    uWorldSize: { value: 2000 * 0.24 }, /* needed in the shader to map a vertex's world position back into the calm mask's UV space */
-    uTerrainCenterX: { value: 0 }, /* the active tile's world position offset -- 0 in single-tile mode, the selected tile's real offset in area mode, fixing a real bug where calm water painted on an off-origin area tile would show up in the wrong place */
-    uTerrainCenterZ: { value: 0 }
+    uWorldSize: { value: 2000 * 0.24 },
+    uTerrainCenterX: { value: 0 },
+    uTerrainCenterZ: { value: 0 },
+    uLandMask: { value: null }, /* DataTexture -- white=water (render normally), black=land (water invisible). Eliminates z-fighting by making water genuinely absent over land rather than fighting for depth. */
+    uLandMaskActive: { value: 0 }
   };
 
   function rot(p, a) {
@@ -599,6 +601,71 @@
      swell displacement smoothly to zero in calm areas (smoothed by
      the texture's own bilinear filtering, which gives a natural
      transition at the calm area's edge rather than a hard cut). */
+  /* Builds a DataTexture from the loaded area's combined classification
+     grid -- white where water (render water normally), black where
+     land (discard the water fragment entirely). This is what eliminates
+     z-fighting: water is genuinely absent over land rather than
+     fighting the terrain mesh for depth. Uses NearestFilter for hard
+     cell boundaries matching the actual tile grid. */
+  function buildLandMaskTexture(areaTilesList, originLat, originLon, maskSize) {
+    maskSize = maskSize || 512;
+    const data = new Uint8Array(maskSize * maskSize);
+    /* Default to land (black) -- any water cells from tiles will be
+       painted white on top. This means areas outside any loaded tile
+       default to land, which is correct (open ocean outside the
+       imported area should not show water plane either). Actually
+       for areas outside tiles we WANT water to show, so default to
+       white (water) and paint land black. */
+    data.fill(255); /* default: water visible everywhere */
+
+    areaTilesList.forEach(tileInfo => {
+      const region = tileInfo.mesh.userData.regionData;
+      if (!region || !region.classification_grid) return;
+      const grid = region.classification_grid;
+      const gridSize = grid.length;
+      if (!gridSize) return;
+      const worldSize = (region.world_size_ft || 2000) * UNITS_PER_FOOT;
+
+      /* Map this tile's position into the mask texture's pixel space.
+         The mask covers the entire area centered on originLat/Lon. */
+      const EARTH_RADIUS_FT = 20902231;
+      const originLatRad = (originLat * Math.PI) / 180;
+      const dLat = ((region.anchor_lat - originLat) * Math.PI) / 180;
+      const dLon = ((region.anchor_lon - originLon) * Math.PI) / 180;
+      const northFt = dLat * EARTH_RADIUS_FT;
+      const eastFt = dLon * EARTH_RADIUS_FT * Math.cos(originLatRad);
+
+      /* Total area the mask covers in world units */
+      const totalSpan = 3 * 5280 * UNITS_PER_FOOT; /* ~3 miles total span */
+
+      for (let gy = 0; gy < gridSize; gy++) {
+        for (let gx = 0; gx < gridSize; gx++) {
+          if (grid[gy][gx] !== 'land') continue; /* only paint land cells black */
+          /* Cell center in world units relative to origin */
+          const cellX = eastFt * UNITS_PER_FOOT + (gx + 0.5) / gridSize * worldSize;
+          const cellZ = -northFt * UNITS_PER_FOOT + (gy + 0.5) / gridSize * worldSize;
+          /* Convert to mask UV (0..1) */
+          const u = (cellX / totalSpan) + 0.5;
+          const v = (cellZ / totalSpan) + 0.5;
+          if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+          const px = Math.floor(u * maskSize);
+          const py = Math.floor((1 - v) * maskSize); /* flip Y */
+          if (px >= 0 && px < maskSize && py >= 0 && py < maskSize) {
+            data[py * maskSize + px] = 0; /* black = land, discard water here */
+          }
+        }
+      }
+    });
+
+    const tex = new THREE.DataTexture(data, maskSize, maskSize, THREE.LuminanceFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
   function buildCalmMaskTexture(calmGridParam) {
     const size = calmGridParam && calmGridParam.length ? calmGridParam.length : GRID_SIZE;
     const data = new Uint8Array(size * size);
@@ -652,6 +719,9 @@
         uniform float uWorldSize;
         uniform float uTerrainCenterX;
         uniform float uTerrainCenterZ;
+        uniform sampler2D uLandMask;
+        uniform float uLandMaskActive;
+        varying float vIsOverLand;
         varying float vHeight;
         varying vec2 vWorldXZ;
         vec2 rotV(vec2 p, float a) {
@@ -692,6 +762,14 @@
 
           vHeight = (swell * calmFactor) / max(uAmplitude * 2.12, 0.0001);
           vWorldXZ = p;
+          /* Land mask: 1.0 = water (render), 0.0 = land (hide water) */
+          vIsOverLand = 0.0;
+          if (uLandMaskActive > 0.5) {
+            vec2 landUV = ((p - vec2(uTerrainCenterX, uTerrainCenterZ)) / uWorldSize) + 0.5;
+            float isWater = step(0.5, texture2D(uLandMask, landUV).r);
+            vIsOverLand = 1.0 - isWater; /* 1.0 over land, 0.0 over water */
+          }
+
           vec3 displaced = vec3(position.x, position.y, swell * calmFactor);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
         }
@@ -703,11 +781,18 @@
         uniform float uCellScale;
         varying float vHeight;
         varying vec2 vWorldXZ;
+        varying float vIsOverLand;
         vec2 hash2(vec2 p) {
           p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
           return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
         }
         void main() {
+          /* Discard water fragments that are over land cells -- this
+             eliminates z-fighting completely by making the water
+             surface genuinely absent over land rather than fighting
+             the terrain mesh for depth. NearestFilter on the land
+             mask texture ensures hard cell boundaries with no blending. */
+          if (vIsOverLand > 0.5) discard;
           vec2 uv = vWorldXZ * uCellScale;
           vec2 cell = floor(uv);
           vec2 frac = fract(uv);
@@ -1259,6 +1344,14 @@
     while (idx < data.length) {
       idx = await buildBatch(idx);
     }
+
+    /* Build land mask so water is invisible over land cells, eliminating z-fighting */
+    if (waterUniforms.uLandMask.value) waterUniforms.uLandMask.value.dispose();
+    waterUniforms.uLandMask.value = buildLandMaskTexture(areaTiles, areaOriginLat, areaOriginLon, 512);
+    waterUniforms.uLandMaskActive.value = 1;
+    waterUniforms.uWorldSize.value = 3 * 5280 * UNITS_PER_FOOT;
+    waterUniforms.uTerrainCenterX.value = 0;
+    waterUniforms.uTerrainCenterZ.value = 0;
 
     /* Reposition camera to look at the center of the loaded area */
     if (controls && camera) {
