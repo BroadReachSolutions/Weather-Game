@@ -1203,6 +1203,16 @@
       areaTiles.push({ regionId: region.id, name: region.name, anchorLat: region.anchor_lat, anchorLon: region.anchor_lon, mesh, worldX: pos.x + halfSize, worldZ: pos.z + halfSize });
     });
     scene.add(areaGroup);
+
+    /* Reposition camera to look at the center of the loaded area */
+    if (controls && camera) {
+      controls.target.set(0, 0, 0);
+      const tileCount = areaTiles.length;
+      const pullback = Math.max(1100, Math.sqrt(tileCount) * 500);
+      camera.position.set(0, pullback * 0.7, pullback);
+      controls.update();
+    }
+
     setStatus(`Loaded ${data.length} tiles. Click any tile in the 3D view to edit it.`);
   }
 
@@ -1445,6 +1455,14 @@
     document.getElementById("selectedTileGroup").style.display = "none";
     renderStructureList();
     redrawPaintCanvas();
+    updatePreviewMesh();
+    /* Recenter the camera on the newly loaded tile so it's
+       immediately visible without having to hunt for it */
+    if (controls && camera) {
+      controls.target.set(0, 0, 0);
+      camera.position.set(0, 800, 1100);
+      controls.update();
+    }
     setStatus("Loaded \"" + region.name + "\".");
   });
 
