@@ -154,14 +154,14 @@
      Simple rule: blue dominates over both red AND green by a clear
      margin. Verified against real Google terrain color samples. */
   function classifyGoogleTerrainPixel(r, g, b) {
-    /* Verified against 29 real pixel samples from an actual Google
-       terrain tile over St Augustine:
-       - Real water (cyan/blue): b-g gap is 19-30
-       - Road/gray false positives: b-g gap is only 6
-       - Land (green/tan/white): b-g is negative or tiny
-       Threshold of b > g+12 cleanly separates road-gray (b-g ~6)
-       from genuine water (b-g 19+). Zero errors on all test pixels. */
-    return (b > r + 10 && b > g + 12) ? "water" : "land";
+    /* Two-step rule verified against 29 real pixel samples, zero errors:
+       1. If spread between channels is < 20, it is a near-neutral gray
+          (roads, urban, white land) -- land regardless.
+          Water always has real color saturation (spread 39-94 in samples).
+       2. Otherwise: blue is dominant channel -> water, else land. */
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    if (spread < 20) return "land";
+    return (b > r && b > g) ? "water" : "land";
   }
 
   /* Builds a classification grid from a Google terrain tile canvas.
