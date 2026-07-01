@@ -1047,7 +1047,7 @@
       redrawPaintCanvas();
     }
 
-    const clickTarget = renderer.domElement.parentElement; /* canvas-wrap div -- catches clicks that OrbitControls consumes on the canvas itself */
+    const clickTarget = renderer.domElement;
     clickTarget.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
 
@@ -1137,12 +1137,12 @@
 
       if (currentTool === "structure") { paintFrom3DEvent(e); return; }
       isPaintingIn3D = true;
-      controls.enabled = false; /* disable orbit while actively painting, so dragging paints instead of rotating the camera */
+      controls.enabled = false;
       paintFrom3DEvent(e);
-    });
+    }, true); /* capture phase -- fires before OrbitControls stopPropagation */
     clickTarget.addEventListener("mousemove", (e) => {
       if (isPaintingIn3D) paintFrom3DEvent(e);
-    });
+    }, true);
     window.addEventListener("mouseup", () => {
       isPaintingIn3D = false;
       controls.enabled = true;
