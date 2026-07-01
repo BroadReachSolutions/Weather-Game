@@ -195,7 +195,7 @@
 
     <div class="field-group">
       <label class="brush-size-label">Land Height: <span id="landHeightVal">20</span> ft</label>
-      <input type="range" id="landHeight" min="2" max="100" value="20">
+      <input type="range" id="landHeight" min="2" max="100" value="8">
       <p class="hint">How far land rises straight up above the waterline. Beach uses a fixed gentle slope instead of this height.</p>
     </div>
 
@@ -644,6 +644,7 @@
     const mat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
       transparent: true,
+      depthWrite: false, /* water never occludes terrain underneath -- eliminates z-fighting flicker at shorelines where terrain vertices ease to y=0 */
       side: THREE.DoubleSide,
       vertexShader: `
         uniform float uTime;
@@ -922,7 +923,7 @@
     /* Sea floor at 100ft deep by default (per request), converted to
        world units. Not scaled to worldSize anymore -- this is a real
        depth, not a proportion, so small areas still get real depth. */
-    const seaFloorDepth = 100 * 0.24; /* 100ft * UNITS_PER_FOOT */
+    const seaFloorDepth = 100 * 0.24;
 
     /* Land height in world units from the slider */
     const landHeight = (landHeightFt || 20) * 0.24;
@@ -961,13 +962,6 @@
           c = colorBeach;
 
         } else {
-          /* Regular water -- calm has NO effect on the seafloor mesh
-             at all. Calm only affects the ANIMATED water surface
-             (the separate water shader, see buildEditorWater's
-             uCalmMask), which is what genuinely keeps the surface
-             flat regardless of swell/weather. The seafloor depth
-             here is identical whether the area above it is calm or
-             not, so painting calm never lifts or shallows the floor. */
           const neighborIsBreach = (function() {
             for (let dy = -1; dy <= 1; dy++) {
               for (let dx = -1; dx <= 1; dx++) {
@@ -1181,28 +1175,74 @@
     areaOriginLon = data.reduce((sum, r) => sum + r.anchor_lon, 0) / data.length;
 
     areaGroup = new THREE.Group();
-    data.forEach(region => {
-      const worldSize = (region.world_size_ft || 2000) * UNITS_PER_FOOT;
-      const halfSize = worldSize / 2;
-      const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
-      const mesh = buildPreviewMesh(region.classification_grid, worldSize, landHeightFt, region.calm_grid || []);
-      const pos = latLonToLocalXZ(region.anchor_lat, region.anchor_lon, UNITS_PER_FOOT);
-      /* anchor_lat/lon is the NW (top-left) corner of the tile --
-         that's what tileToLatLon returns. buildPreviewMesh creates a
-         PlaneGeometry centered on the origin, so without this offset
-         the mesh center lands on the NW corner instead of the mesh's
-         own NW corner, shifting every tile half a tile width toward
-         NW and creating a full tile of overlap/gap between neighbors.
-         Fix: shift +halfSize east (X) and +halfSize south (+Z since
-         north = -Z in this scene convention) so the mesh's NW corner
-         lines up with its anchor point. */
-      mesh.position.set(pos.x + halfSize, 0, pos.z + halfSize);
-      mesh.userData.regionId = region.id;
-      mesh.userData.regionData = region;
-      areaGroup.add(mesh);
-      areaTiles.push({ regionId: region.id, name: region.name, anchorLat: region.anchor_lat, anchorLon: region.anchor_lon, mesh, worldX: pos.x + halfSize, worldZ: pos.z + halfSize });
-    });
     scene.add(areaGroup);
+
+    /* Build meshes in small batches with async pauses between them
+       so the browser stays responsive. 81 tiles at 128x128 each =
+       1.3M vertices all at once was freezing Firefox. Context tiles
+       (not being edited) use a lower 32x32 resolution since they're
+       just for visual reference -- the full 128x128 resolution only
+       matters for the actively-selected tile being painted. */
+    const CONTEXT_GRID_SIZE = 32;
+    const BATCH_SIZE = 8;
+    const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
+
+    const buildBatch = (startIdx) => {
+      return new Promise(resolve => {
+        setTimeout(() => {
+          const end = Math.min(startIdx + BATCH_SIZE, data.length);
+          for (let i = startIdx; i < end; i++) {
+            const region = data[i];
+            const worldSize = (region.world_size_ft || 2000) * UNITS_PER_FOOT;
+            const halfSize = worldSize / 2;
+
+            /* Downsample the saved grid to CONTEXT_GRID_SIZE using
+               majority vote per block -- sparse point sampling was
+               skipping water cells and showing mostly land even when
+               the saved data was correct (e.g. 83% water tile showing
+               as all land because the sampled points happened to land
+               on the minority land cells). */
+            const fullGrid = region.classification_grid;
+            const fullSize = fullGrid.length;
+            const contextGrid = [];
+            const blockSize = fullSize / CONTEXT_GRID_SIZE;
+            for (let gy = 0; gy < CONTEXT_GRID_SIZE; gy++) {
+              const row = [];
+              for (let gx = 0; gx < CONTEXT_GRID_SIZE; gx++) {
+                let waterCount = 0, total = 0;
+                const startY = Math.floor(gy * blockSize);
+                const endY = Math.floor((gy + 1) * blockSize);
+                const startX = Math.floor(gx * blockSize);
+                const endX = Math.floor((gx + 1) * blockSize);
+                for (let sy = startY; sy < endY; sy++) {
+                  for (let sx = startX; sx < endX; sx++) {
+                    if (fullGrid[sy] && fullGrid[sy][sx] === 'water') waterCount++;
+                    total++;
+                  }
+                }
+                row.push(waterCount > 0 ? 'water' : 'land');
+              }
+              contextGrid.push(row);
+            }
+
+            const mesh = buildPreviewMesh(contextGrid, worldSize, landHeightFt, []);
+            const pos = latLonToLocalXZ(region.anchor_lat, region.anchor_lon, UNITS_PER_FOOT);
+            mesh.position.set(pos.x + halfSize, 0, pos.z + halfSize);
+            mesh.userData.regionId = region.id;
+            mesh.userData.regionData = region;
+            areaGroup.add(mesh);
+            areaTiles.push({ regionId: region.id, name: region.name, anchorLat: region.anchor_lat, anchorLon: region.anchor_lon, mesh, worldX: pos.x + halfSize, worldZ: pos.z + halfSize });
+          }
+          setStatus(`Loading tiles... ${Math.min(end, data.length)}/${data.length}`);
+          resolve(end);
+        }, 0);
+      });
+    };
+
+    let idx = 0;
+    while (idx < data.length) {
+      idx = await buildBatch(idx);
+    }
 
     /* Reposition camera to look at the center of the loaded area */
     if (controls && camera) {
