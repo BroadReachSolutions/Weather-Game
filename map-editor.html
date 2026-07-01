@@ -1047,13 +1047,14 @@
       redrawPaintCanvas();
     }
 
-    /* Tile SELECTION uses 'click' -- OrbitControls hijacks 'mousedown'
-       via setPointerCapture, but 'click' still fires after a short
-       press without dragging, which is the correct UX for selection anyway. */
-    clickTarget.addEventListener("click", (e) => {
+    /* Tile SELECTION: registered on document in capture phase so
+       nothing on the canvas can block it. Checks the click landed
+       on the 3D canvas before doing anything. */
+    document.addEventListener("click", (e) => {
       if (e.button !== 0) return;
-
-      if (areaGroup && areaTiles.length > 0) {
+      if (!areaGroup || areaTiles.length === 0) return;
+      /* Only act if the click was on the 3D canvas */
+      if (e.target !== renderer.domElement) return;
         const rect = renderer.domElement.getBoundingClientRect();
         const mv = new THREE.Vector2(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -1117,7 +1118,6 @@
             return;
           }
         }
-      }
     }, true); /* capture phase */
 
     /* PAINTING uses mousedown/move -- separate from selection */
