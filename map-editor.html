@@ -1047,16 +1047,12 @@
       redrawPaintCanvas();
     }
 
-    const clickTarget = renderer.domElement;
-    clickTarget.addEventListener("mousedown", (e) => {
+    /* Tile SELECTION uses 'click' -- OrbitControls hijacks 'mousedown'
+       via setPointerCapture, but 'click' still fires after a short
+       press without dragging, which is the correct UX for selection anyway. */
+    clickTarget.addEventListener("click", (e) => {
       if (e.button !== 0) return;
 
-      /* If an area is loaded, check whether this click hit a
-         DIFFERENT tile than the one currently selected for editing --
-         if so, treat it as a selection click (load that tile for
-         editing) rather than a paint stroke. Clicking the already-
-         selected tile (or painting when no area is loaded at all)
-         behaves exactly as before. */
       if (areaGroup && areaTiles.length > 0) {
         const rect = renderer.domElement.getBoundingClientRect();
         const mv = new THREE.Vector2(
@@ -1071,23 +1067,13 @@
           const hitRegionId = hitMesh.userData.regionId;
           if (hitRegionId) {
             if (e.shiftKey) {
-              /* Shift+click: toggle this tile in/out of multi-selection */
-              if (selectedTileIds.has(hitRegionId)) {
-                selectedTileIds.delete(hitRegionId);
-              } else {
-                selectedTileIds.add(hitRegionId);
-              }
+              if (selectedTileIds.has(hitRegionId)) selectedTileIds.delete(hitRegionId);
+              else selectedTileIds.add(hitRegionId);
             } else {
-              /* Normal click: single-tile select (or deselect if clicking the only selected tile) */
-              if (selectedTileIds.size === 1 && selectedTileIds.has(hitRegionId)) {
-                selectedTileIds.clear();
-              } else {
-                selectedTileIds.clear();
-                selectedTileIds.add(hitRegionId);
-              }
+              if (selectedTileIds.size === 1 && selectedTileIds.has(hitRegionId)) selectedTileIds.clear();
+              else { selectedTileIds.clear(); selectedTileIds.add(hitRegionId); }
             }
 
-            /* Update visual highlights */
             areaTiles.forEach(t => {
               const isSel = selectedTileIds.has(t.regionId);
               t.mesh.traverse(obj => {
@@ -1099,7 +1085,6 @@
               });
             });
 
-            /* Rebuild merged layout and refresh the 2D canvas */
             computeMergedLayout();
             selectedAreaTileId = selectedTileIds.size === 1 ? [...selectedTileIds][0] : null;
 
@@ -1114,7 +1099,6 @@
               document.getElementById("selectedTileName").textContent = "Click a tile to select it, Shift+click to select multiple.";
             }
 
-            /* Load single-tile data into left panel if only one selected */
             if (selectedTileIds.size === 1) {
               const region = areaTiles.find(t => t.regionId === selectedAreaTileId)?.mesh.userData.regionData;
               if (region) {
@@ -1134,8 +1118,11 @@
           }
         }
       }
+    }, true); /* capture phase */
 
-      if (currentTool === "structure") { paintFrom3DEvent(e); return; }
+    /* PAINTING uses mousedown/move -- separate from selection */
+    clickTarget.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
       isPaintingIn3D = true;
       controls.enabled = false;
       paintFrom3DEvent(e);
