@@ -150,7 +150,7 @@
   <div class="toolbar">
     <button id="newRegionBtn">New</button>
     <button id="loadRegionBtn">Load</button>
-    <button id="loadAreaBtn">Load Area</button>
+    <button id="importSelectedBtn">Import Selected</button>
     <button id="saveRegionBtn">Save</button>
     <button id="saveAllBtn">Save All</button>
     <button id="deleteSelectedBtn" style="color:#ff6b6b;">Delete Selected</button>
@@ -178,16 +178,20 @@
       <input type="text" id="regionName" value="Untitled Region">
     </div>
 
+    <input type="hidden" id="worldSizeFt" value="3477">
+
     <div class="field-group">
-      <label>Real-World Size (feet across)</label>
-      <input type="number" id="worldSizeFt" value="2000" min="200" step="100">
+      <label>View Center</label>
+      <input type="text" id="viewCenterPaste" placeholder="Paste lat, lon to jump here">
+      <input type="number" id="anchorLat" placeholder="Latitude" step="0.0001" style="margin-top:4px;">
+      <input type="number" id="anchorLon" placeholder="Longitude" step="0.0001" style="margin-top:4px;">
+      <p class="hint">Right-click drag in the 3D view to pan. Paste a lat,lon to jump anywhere in the world.</p>
     </div>
 
     <div class="field-group">
-      <label>Anchor — Real Location (optional)</label>
-      <input type="number" id="anchorLat" placeholder="Latitude (blank = standalone)" step="0.0001">
-      <input type="number" id="anchorLon" placeholder="Longitude" step="0.0001" style="margin-top:4px;">
-      <p class="hint">Leave blank for a standalone practice area (like the marina). Set both to anchor this region at a real GPS location.</p>
+      <label class="brush-size-label">Tiles Wide: <span id="tilesWideVal">7</span></label>
+      <input type="range" id="tilesWide" min="3" max="15" step="2" value="7">
+      <p class="hint">How many tiles render around your view center. Black = not yet imported.</p>
     </div>
 
     <div class="field-group">
@@ -1054,72 +1058,93 @@
        on the 3D canvas before doing anything. */
     document.addEventListener("click", (e) => {
       if (e.button !== 0) return;
-      if (!areaGroup || areaTiles.length === 0) return;
-      /* Only act if the click was on the 3D canvas */
       if (e.target !== renderer.domElement) return;
-        const rect = renderer.domElement.getBoundingClientRect();
-        const mv = new THREE.Vector2(
-          ((e.clientX - rect.left) / rect.width) * 2 - 1,
-          -((e.clientY - rect.top) / rect.height) * 2 + 1
-        );
-        const rc = new THREE.Raycaster();
-        rc.setFromCamera(mv, camera);
+      if (isDraggingView) return; /* ignore click if we were just panning */
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mv = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      const rc = new THREE.Raycaster();
+      rc.setFromCamera(mv, camera);
+
+      /* Check world tile cache meshes (both imported terrain and black placeholders) */
+      const allMeshes = Object.values(worldTileCache).map(e => e.mesh).filter(Boolean);
+      const hits = rc.intersectObjects(allMeshes, false);
+
+      if (hits.length > 0) {
+        /* Find which tile was hit by matching mesh */
+        let hitKey = null;
+        for (const [key, entry] of Object.entries(worldTileCache)) {
+          if (entry.mesh === hits[0].object) { hitKey = key; break; }
+        }
+        if (!hitKey) return;
+
+        const entry = worldTileCache[hitKey];
+        if (e.shiftKey) {
+          /* Shift+click: toggle selection */
+          if (selectedWorldTiles.has(hitKey)) {
+            selectedWorldTiles.delete(hitKey);
+            applyWorldTileHighlight(hitKey, false);
+          } else {
+            selectedWorldTiles.add(hitKey);
+            applyWorldTileHighlight(hitKey, true);
+          }
+        } else {
+          /* Single click: clear selection, select this tile */
+          selectedWorldTiles.forEach(k => applyWorldTileHighlight(k, false));
+          selectedWorldTiles.clear();
+          selectedWorldTiles.add(hitKey);
+          applyWorldTileHighlight(hitKey, true);
+        }
+
+        /* If imported tile clicked: load into 2D canvas for editing */
+        if (entry.state === 'loaded' && entry.regionData) {
+          const region = entry.regionData;
+          grid = region.classification_grid;
+          calmGrid = region.calm_grid || grid.map(r => r.map(() => false));
+          structures = region.structures || [];
+          selectedAreaTileId = entry.regionId;
+          document.getElementById("regionName").value = region.name;
+          document.getElementById("anchorLat").value = region.anchor_lat ?? "";
+          document.getElementById("anchorLon").value = region.anchor_lon ?? "";
+          document.getElementById("selectedTileGroup").style.display = "block";
+          document.getElementById("selectedTileName").textContent = "Editing: " + region.name;
+          selectedTileIds.clear();
+          selectedTileIds.add(entry.regionId);
+          computeMergedLayout();
+          redrawPaintCanvas();
+        } else if (entry.state === 'missing') {
+          document.getElementById("selectedTileGroup").style.display = "block";
+          document.getElementById("selectedTileName").textContent =
+            `Not imported yet — ${selectedWorldTiles.size} tile(s) selected. Use Import Selected to import them.`;
+        }
+        return;
+      }
+
+      /* Legacy: also handle old areaTiles if any exist */
+      if (areaGroup && areaTiles.length > 0) {
         const areaHits = rc.intersectObjects(areaTiles.map(t => t.mesh), false);
         if (areaHits.length > 0) {
-          const hitMesh = areaHits[0].object;
-          const hitRegionId = hitMesh.userData.regionId;
+          const hitRegionId = areaHits[0].object.userData.regionId;
           if (hitRegionId) {
-            if (e.shiftKey) {
-              if (selectedTileIds.has(hitRegionId)) selectedTileIds.delete(hitRegionId);
-              else selectedTileIds.add(hitRegionId);
-            } else {
-              if (selectedTileIds.size === 1 && selectedTileIds.has(hitRegionId)) selectedTileIds.clear();
-              else { selectedTileIds.clear(); selectedTileIds.add(hitRegionId); }
-            }
-
-            areaTiles.forEach(t => {
-              const isSel = selectedTileIds.has(t.regionId);
-              t.mesh.traverse(obj => {
-                if (obj.material) {
-                  obj.material.emissive = isSel ? new THREE.Color(0x2a3a10) : new THREE.Color(0x000000);
-                  obj.material.opacity = (!isSel && selectedTileIds.size > 0) ? 0.75 : 1.0;
-                  obj.material.transparent = (!isSel && selectedTileIds.size > 0);
-                }
-              });
-            });
-
+            if (!e.shiftKey) { selectedTileIds.clear(); }
+            selectedTileIds.add(hitRegionId);
+            selectedAreaTileId = hitRegionId;
             computeMergedLayout();
-            selectedAreaTileId = selectedTileIds.size === 1 ? [...selectedTileIds][0] : null;
-
-            if (selectedTileIds.size > 0) {
-              const names = [...selectedTileIds].map(id => areaTiles.find(t => t.regionId === id)?.name).filter(Boolean);
-              document.getElementById("selectedTileGroup").style.display = "block";
-              document.getElementById("selectedTileName").textContent =
-                selectedTileIds.size === 1
-                  ? "Editing: " + names[0]
-                  : `Editing ${selectedTileIds.size} tiles (Shift+click to add/remove)`;
-            } else {
-              document.getElementById("selectedTileName").textContent = "Click a tile to select it, Shift+click to select multiple.";
+            const region = areaTiles.find(t => t.regionId === hitRegionId)?.mesh.userData.regionData;
+            if (region) {
+              grid = region.classification_grid;
+              calmGrid = region.calm_grid || grid.map(r => r.map(() => false));
+              structures = region.structures || [];
+              document.getElementById("regionName").value = region.name;
+              renderStructureList();
+              redrawPaintCanvas();
             }
-
-            if (selectedTileIds.size === 1) {
-              const region = areaTiles.find(t => t.regionId === selectedAreaTileId)?.mesh.userData.regionData;
-              if (region) {
-                grid = region.classification_grid;
-                calmGrid = region.calm_grid || grid.map(r => r.map(() => false));
-                structures = region.structures || [];
-                document.getElementById("regionName").value = region.name;
-                document.getElementById("worldSizeFt").value = region.world_size_ft;
-                document.getElementById("anchorLat").value = region.anchor_lat ?? "";
-                document.getElementById("anchorLon").value = region.anchor_lon ?? "";
-                renderStructureList();
-              }
-            }
-
-            redrawPaintCanvas();
-            return;
           }
         }
+      }
     }, true); /* capture phase */
 
     /* PAINTING uses mousedown/move -- separate from selection */
@@ -1129,16 +1154,58 @@
       isPaintingIn3D = true;
       controls.enabled = false;
       paintFrom3DEvent(e);
-    }, true); /* capture phase -- fires before OrbitControls stopPropagation */
+    }, true);
     clickTarget.addEventListener("mousemove", (e) => {
       if (isPaintingIn3D) paintFrom3DEvent(e);
     }, true);
-    window.addEventListener("mouseup", () => {
+
+    /* RIGHT-CLICK DRAG: pan the world view center */
+    clickTarget.addEventListener("mousedown", (e) => {
+      if (e.button !== 2) return;
+      isDraggingView = true;
+      dragLastX = e.clientX;
+      dragLastY = e.clientY;
+      e.preventDefault();
+    }, true);
+    window.addEventListener("mousemove", (e) => {
+      if (!isDraggingView) return;
+      const dx = e.clientX - dragLastX;
+      const dy = e.clientY - dragLastY;
+      dragLastX = e.clientX;
+      dragLastY = e.clientY;
+      /* Convert pixel drag to lat/lon delta.
+         worldTileSize is units per tile. The canvas shows tilesWide tiles
+         across its width. So pixels-per-world-unit = canvasWidth / (tilesWide * worldTileSize) */
+      updateWorldTileSize();
+      const canvasW = renderer.domElement.clientWidth || 770;
+      const unitsPerPx = (tilesWide * worldTileSize) / canvasW;
+      /* Dragging right moves view left (west) -- negate dx */
+      const dEastUnits = -dx * unitsPerPx;
+      const dNorthUnits = dy * unitsPerPx; /* drag down = move north */
+      /* Convert units back to degrees */
+      const EARTH_RADIUS_FT = 20902231;
+      const latRad = viewLat * Math.PI / 180;
+      viewLon += (dEastUnits / UNITS_PER_FOOT) / (EARTH_RADIUS_FT * Math.cos(latRad)) * (180 / Math.PI);
+      viewLat += (dNorthUnits / UNITS_PER_FOOT) / EARTH_RADIUS_FT * (180 / Math.PI);
+      viewLat = Math.max(-85, Math.min(85, viewLat));
+      /* Update anchor lat/lon fields to show current position */
+      document.getElementById("anchorLat").value = viewLat.toFixed(6);
+      document.getElementById("anchorLon").value = viewLon.toFixed(6);
+      repositionWorldTiles();
+      updateWorldView();
+    });
+    window.addEventListener("mouseup", (e) => {
       isPaintingIn3D = false;
       controls.enabled = true;
+      if (e.button === 2) isDraggingView = false;
     });
 
+    /* Disable context menu on 3D canvas so right-click drag works */
+    clickTarget.addEventListener("contextmenu", (e) => e.preventDefault());
+
     animatePreview();
+    /* Kick off initial world view */
+    setTimeout(() => updateWorldView(), 100);
     window.addEventListener("resize", () => {
       renderer.setSize(wrap.clientWidth, wrap.clientHeight);
       camera.aspect = wrap.clientWidth / wrap.clientHeight;
@@ -1327,6 +1394,56 @@
      region Load).
      --------------------------------------------------------------- */
   let areaTiles = []; /* { regionId, name, anchorLat, anchorLon, mesh, worldX, worldZ } */
+
+  /* ---------------------------------------------------------------
+     STREAMING WORLD VIEWER
+     The 3D canvas shows a live tile grid centered on viewLat/viewLon.
+     Tiles that exist in the DB render as terrain; missing tiles render
+     as black placeholder squares. Right-click drag pans the view.
+     All tiles are anchored to the real-world zoom-15 tile grid so
+     everything lines up globally regardless of where you navigate.
+     --------------------------------------------------------------- */
+  const WORLD_ZOOM = 15; /* tile zoom level -- same as import */
+  let viewLat = 29.8930; /* current view center */
+  let viewLon = -81.3043;
+  let tilesWide = 7; /* how many tiles render each direction */
+  let worldTileCache = {}; /* key: "tx,ty" -> { regionId, mesh, state: "loaded"|"missing"|"loading" } */
+  let worldGroup = null; /* THREE.Group holding all world tile meshes */
+  let worldTileSize = 1; /* world units per tile, computed from lat */
+  let pendingDbQuery = null; /* debounce token for DB queries */
+  let isDraggingView = false;
+  let dragLastX = 0, dragLastY = 0;
+  let selectedWorldTiles = new Set(); /* set of "tx,ty" keys selected for import or editing */
+  let isDragSelecting = false;
+  let dragSelectStart = null; /* {tx,ty} tile coord where drag started */
+
+  /* Converts a lat/lon to zoom-15 tile coordinates */
+  function latLonToTileXY(lat, lon) {
+    const n = Math.pow(2, WORLD_ZOOM);
+    const tx = Math.floor((lon + 180) / 360 * n);
+    const latRad = lat * Math.PI / 180;
+    const ty = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+    return { tx, ty };
+  }
+
+  /* Returns the NW corner lat/lon of a tile */
+  function tileXYToLatLon(tx, ty) {
+    const n = Math.pow(2, WORLD_ZOOM);
+    const lon = tx / n * 360 - 180;
+    const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * ty / n)));
+    return { lat: latRad * 180 / Math.PI, lon };
+  }
+
+  /* Returns the world-space XZ position of a tile's center relative
+     to the current view center tile */
+  function tileToWorldXZ(tx, ty, centerTx, centerTy) {
+    return {
+      x: (tx - centerTx) * worldTileSize,
+      z: (ty - centerTy) * worldTileSize  /* positive Z = south (higher tile Y) */
+    };
+  }
+
+
   let areaLoadGeneration = 0; /* incremented each time loadArea starts -- stale async batches check this and abort */
   let areaGroup = null; /* THREE.Group holding all the neighbor tile meshes */
   let selectedAreaTileId = null; /* regionId of the tile currently loaded into the active editing grid, or null if not in area-edit mode */
@@ -1360,6 +1477,190 @@
      any of them (see wireAreaTileSelection) loads THAT tile's real
      data into the normal active-editing grid/canvas, the same as the
      existing single-region Load button. */
+  /* Computes worldTileSize in scene units from the current viewLat */
+  function updateWorldTileSize() {
+    const EARTH_RADIUS_FT = 20902231;
+    const n = Math.pow(2, WORLD_ZOOM);
+    const latRad = viewLat * Math.PI / 180;
+    const metersPerPixel = (156543.03392 * Math.cos(latRad)) / n;
+    const tileFt = metersPerPixel * 256 * 3.28084;
+    worldTileSize = tileFt * UNITS_PER_FOOT;
+  }
+
+  /* Builds a black placeholder mesh for an unimported tile */
+  function buildPlaceholderMesh() {
+    const geo = new THREE.PlaneGeometry(worldTileSize * 0.98, worldTileSize * 0.98);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide });
+    return new THREE.Mesh(geo, mat);
+  }
+
+  /* Builds a selected-tile highlight mesh (orange outline) */
+  function buildSelectedMesh() {
+    const geo = new THREE.PlaneGeometry(worldTileSize * 0.98, worldTileSize * 0.98);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff8800, wireframe: true });
+    return new THREE.Mesh(geo, mat);
+  }
+
+  /* Main world viewer update -- called when view center changes or
+     tiles-wide changes. Computes the visible tile grid, queries DB
+     for which tiles exist, builds/removes meshes as needed. */
+  async function updateWorldView() {
+    if (!scene) return;
+    updateWorldTileSize();
+
+    const { tx: centerTx, ty: centerTy } = latLonToTileXY(viewLat, viewLon);
+    const radius = Math.floor(tilesWide / 2);
+
+    /* Compute the full set of tile keys that should be visible */
+    const visibleKeys = new Set();
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        visibleKeys.add(`${centerTx + dx},${centerTy + dy}`);
+      }
+    }
+
+    /* Remove tiles no longer in view */
+    for (const key of Object.keys(worldTileCache)) {
+      if (!visibleKeys.has(key)) {
+        const entry = worldTileCache[key];
+        if (entry.mesh && worldGroup) worldGroup.remove(entry.mesh);
+        if (entry.selectedMesh && worldGroup) worldGroup.remove(entry.selectedMesh);
+        if (entry.mesh) { entry.mesh.geometry.dispose(); entry.mesh.material.dispose(); }
+        delete worldTileCache[key];
+      }
+    }
+
+    /* Ensure worldGroup exists */
+    if (!worldGroup) { worldGroup = new THREE.Group(); scene.add(worldGroup); }
+
+    /* Add placeholder meshes for new tiles immediately */
+    for (const key of visibleKeys) {
+      if (worldTileCache[key]) continue;
+      const [tx, ty] = key.split(',').map(Number);
+      const pos = tileToWorldXZ(tx, ty, centerTx, centerTy);
+      const mesh = buildPlaceholderMesh();
+      mesh.position.set(pos.x, -0.1, pos.z);
+      worldGroup.add(mesh);
+      worldTileCache[key] = { state: 'loading', mesh, tx, ty };
+    }
+
+    /* Query DB for which tiles in the visible area are imported.
+       Debounced so rapid panning doesn't spam the DB. */
+    if (pendingDbQuery) clearTimeout(pendingDbQuery);
+    pendingDbQuery = setTimeout(() => doWorldDbQuery(centerTx, centerTy, radius), 200);
+  }
+
+  async function doWorldDbQuery(centerTx, centerTy, radius) {
+    /* Compute lat/lon bounding box for the visible tile area */
+    const nw = tileXYToLatLon(centerTx - radius, centerTy - radius);
+    const se = tileXYToLatLon(centerTx + radius + 1, centerTy + radius + 1);
+
+    const { data, error } = await sb.from('custom_map_regions')
+      .select('id, name, anchor_lat, anchor_lon, classification_grid, calm_grid, world_size_ft, grid_size, structures')
+      .gte('anchor_lat', se.lat)
+      .lte('anchor_lat', nw.lat)
+      .gte('anchor_lon', nw.lon)
+      .lte('anchor_lon', se.lon)
+      .not('anchor_lat', 'is', null);
+
+    if (error) { console.error('World view DB query failed:', error); return; }
+
+    const importedKeys = new Set();
+    (data || []).forEach(region => {
+      const { tx, ty } = latLonToTileXY(region.anchor_lat, region.anchor_lon);
+      /* Snap to nearest tile -- anchor is NW corner */
+      const key = `${tx},${ty}`;
+      importedKeys.add(key);
+
+      /* Replace placeholder with real terrain mesh if not already done */
+      const entry = worldTileCache[key];
+      if (!entry || entry.state === 'loaded') return;
+
+      const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 15;
+      const ws = (region.world_size_ft || 3477) * UNITS_PER_FOOT;
+      const contextGrid = downsampleGrid(region.classification_grid, 32);
+      const terrainMesh = buildPreviewMesh(contextGrid, ws, landHeightFt, []);
+      const pos = entry.mesh ? entry.mesh.position.clone() : new THREE.Vector3(
+        tileToWorldXZ(tx, ty, Math.round(viewLat), Math.round(viewLon)).x, 0,
+        tileToWorldXZ(tx, ty, Math.round(viewLat), Math.round(viewLon)).z
+      );
+      terrainMesh.position.copy(pos);
+      terrainMesh.position.y = 0;
+
+      if (entry.mesh && worldGroup) { worldGroup.remove(entry.mesh); entry.mesh.geometry.dispose(); entry.mesh.material.dispose(); }
+      worldGroup.add(terrainMesh);
+      worldTileCache[key] = { state: 'loaded', mesh: terrainMesh, tx, ty, regionId: region.id, regionData: region };
+
+      /* Reapply selection highlight if this tile is selected */
+      if (selectedWorldTiles.has(key)) applyWorldTileHighlight(key, true);
+    });
+
+    /* Mark remaining loading tiles as missing (not in DB) */
+    for (const [key, entry] of Object.entries(worldTileCache)) {
+      if (entry.state === 'loading' && !importedKeys.has(key)) {
+        entry.state = 'missing';
+      }
+    }
+  }
+
+  /* Downsamples a classification grid to a smaller size using majority vote */
+  function downsampleGrid(fullGrid, targetSize) {
+    if (!fullGrid || !fullGrid.length) return Array.from({ length: targetSize }, () => Array(targetSize).fill('land'));
+    const fullSize = fullGrid.length;
+    if (fullSize <= targetSize) return fullGrid;
+    const blockSize = fullSize / targetSize;
+    const out = [];
+    for (let gy = 0; gy < targetSize; gy++) {
+      const row = [];
+      for (let gx = 0; gx < targetSize; gx++) {
+        let water = 0;
+        const sy0 = Math.floor(gy * blockSize), sy1 = Math.floor((gy + 1) * blockSize);
+        const sx0 = Math.floor(gx * blockSize), sx1 = Math.floor((gx + 1) * blockSize);
+        for (let sy = sy0; sy < sy1; sy++)
+          for (let sx = sx0; sx < sx1; sx++)
+            if (fullGrid[sy]?.[sx] === 'water') water++;
+        row.push(water > 0 ? 'water' : 'land');
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  function applyWorldTileHighlight(key, isSelected) {
+    const entry = worldTileCache[key];
+    if (!entry) return;
+    if (isSelected) {
+      if (!entry.selectedMesh) {
+        entry.selectedMesh = buildSelectedMesh();
+        entry.selectedMesh.position.copy(entry.mesh.position);
+        entry.selectedMesh.position.y = 0.5;
+        worldGroup.add(entry.selectedMesh);
+      }
+    } else {
+      if (entry.selectedMesh) {
+        worldGroup.remove(entry.selectedMesh);
+        entry.selectedMesh.geometry.dispose();
+        entry.selectedMesh.material.dispose();
+        entry.selectedMesh = null;
+      }
+    }
+  }
+
+  /* Repositions all visible tile meshes when view center changes */
+  function repositionWorldTiles() {
+    if (!worldGroup) return;
+    updateWorldTileSize();
+    const { tx: centerTx, ty: centerTy } = latLonToTileXY(viewLat, viewLon);
+    for (const [key, entry] of Object.entries(worldTileCache)) {
+      if (!entry.mesh) continue;
+      const pos = tileToWorldXZ(entry.tx, entry.ty, centerTx, centerTy);
+      entry.mesh.position.set(pos.x, entry.state === 'loaded' ? 0 : -0.1, pos.z);
+      if (entry.selectedMesh) entry.selectedMesh.position.set(pos.x, 0.5, pos.z);
+    }
+  }
+
   async function loadArea() {
     if (!scene) { setStatus("3D scene isn't ready yet.", true); return; }
 
@@ -2043,30 +2344,109 @@
   }
 
   window.addEventListener("load", () => {
-    wireDevTools(); /* independent of the 3D preview init below, so a 3D failure can't take these controls down with it */
+    wireDevTools();
+
+    /* Tiles-wide slider */
+    document.getElementById("tilesWide").addEventListener("input", (e) => {
+      tilesWide = parseInt(e.target.value);
+      document.getElementById("tilesWideVal").textContent = tilesWide;
+      updateWorldView();
+    });
+
+    /* View center paste field */
+    document.getElementById("viewCenterPaste").addEventListener("input", (e) => {
+      const parts = e.target.value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const lat = parseFloat(parts[0]), lon = parseFloat(parts[1]);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          viewLat = lat; viewLon = lon;
+          document.getElementById("anchorLat").value = lat;
+          document.getElementById("anchorLon").value = lon;
+          /* Clear tile cache so the new area loads fresh */
+          if (worldGroup) { scene.remove(worldGroup); worldGroup = null; }
+          worldTileCache = {};
+          selectedWorldTiles.clear();
+          updateWorldView();
+        }
+      }
+    });
+
+    /* Import Selected: import all selected black (missing) tiles */
+    document.getElementById("importSelectedBtn").addEventListener("click", async () => {
+      const missingKeys = [...selectedWorldTiles].filter(k => worldTileCache[k]?.state === 'missing');
+      if (missingKeys.length === 0) { setStatus("No unimported tiles selected. Click black tiles to select them.", true); return; }
+      const googleApiKey = document.getElementById("googleApiKey").value.trim();
+      if (!googleApiKey) { setStatus("Enter your Google API key first.", true); return; }
+
+      let googleSession = lastGoogleSession;
+      if (!googleSession) {
+        try {
+          setStatus("Fetching Google terrain session...");
+          googleSession = await window.OSTerrain.fetchGoogleTerrainSession(googleApiKey);
+          lastGoogleSession = googleSession;
+        } catch (e) { setStatus("Google session failed: " + e.message, true); return; }
+      }
+
+      setStatus(`Importing ${missingKeys.length} selected tiles...`);
+      let done = 0;
+      const namePrefix = document.getElementById("importNamePrefix").value.trim() || "Map";
+
+      for (const key of missingKeys) {
+        const [tx, ty] = key.split(',').map(Number);
+        const tileLatLon = window.OSTerrain.tileToLatLon(tx, ty, WORLD_ZOOM);
+        try {
+          const classifyResult = await window.OSTerrain.classifyTile(tx, ty, WORLD_ZOOM, 128, googleSession, googleApiKey);
+          const tileGrid = classifyResult.grid;
+          const milesPerPixel = (156543.03392 * Math.cos(tileLatLon.lat * Math.PI / 180) / Math.pow(2, WORLD_ZOOM)) * 0.000621371;
+          const tileSpanFt = milesPerPixel * window.OSTerrain.TILE_SIZE_PX * 5280;
+          const payload = {
+            name: `${namePrefix} (${tx},${ty})`,
+            anchor_lat: tileLatLon.lat,
+            anchor_lon: tileLatLon.lon,
+            classification_grid: tileGrid,
+            calm_grid: tileGrid.map(r => r.map(() => false)),
+            grid_size: 128,
+            world_size_ft: tileSpanFt,
+            structures: [],
+            updated_at: new Date().toISOString()
+          };
+          const { data: inserted, error } = await sb.from("custom_map_regions").insert(payload).select('id').single();
+          if (!error && inserted) {
+            /* Update tile cache to loaded state */
+            const entry = worldTileCache[key];
+            if (entry) {
+              entry.state = 'loading';
+              entry.regionId = inserted.id;
+            }
+          }
+          done++;
+        } catch (e) { console.error("Import failed for", key, e); }
+        setStatus(`Importing... ${done}/${missingKeys.length}`);
+      }
+
+      /* Refresh world view to show newly imported tiles */
+      if (worldGroup) { scene.remove(worldGroup); worldGroup = null; }
+      worldTileCache = {};
+      updateWorldView();
+      setStatus(`Imported ${done} tiles.`);
+    });
+
     document.getElementById("importAreaBtn").addEventListener("click", () => {
       runBulkImport();
-    });
-    document.getElementById("loadAreaBtn").addEventListener("click", () => {
-      loadArea();
     });
     document.getElementById("saveAllBtn").addEventListener("click", async () => {
       if (selectedTileIds.size === 0) { setStatus("No tiles selected.", true); return; }
       let saved = 0, failed = 0;
       for (const id of selectedTileIds) {
-        const info = areaTiles.find(t => t.regionId === id);
-        if (!info || !info.mesh.userData.regionData) continue;
-        const region = info.mesh.userData.regionData;
-        const grids = getTileGrids(id);
-        if (!grids) continue;
+        const entry = Object.values(worldTileCache).find(e => e.regionId === id);
+        if (!entry || !entry.regionData) continue;
         const payload = {
-          classification_grid: grids.grid,
-          calm_grid: grids.calmGrid,
+          classification_grid: entry.regionData.classification_grid,
+          calm_grid: entry.regionData.calm_grid,
           updated_at: new Date().toISOString()
         };
         const { error } = await sb.from("custom_map_regions").update(payload).eq("id", id);
-        if (error) { failed++; console.error("Save All failed for", region.name, error); }
-        else { saved++; Object.assign(region, payload); }
+        if (error) failed++; else { saved++; Object.assign(entry.regionData, payload); }
       }
       setStatus(`Saved ${saved} tiles` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
     });
