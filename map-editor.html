@@ -1058,6 +1058,7 @@
      region Load).
      --------------------------------------------------------------- */
   let areaTiles = []; /* { regionId, name, anchorLat, anchorLon, mesh, worldX, worldZ } */
+  let areaLoadGeneration = 0; /* incremented each time loadArea starts -- stale async batches check this and abort */
   let areaGroup = null; /* THREE.Group holding all the neighbor tile meshes */
   let selectedAreaTileId = null; /* regionId of the tile currently loaded into the active editing grid, or null if not in area-edit mode */
   let areaOriginLat = null; /* the lat/lon all area tiles are positioned relative to (world origin = this point) */
@@ -1171,14 +1172,22 @@
     }
     areaTiles = [];
     selectedAreaTileId = null;
+    const myGeneration = ++areaLoadGeneration; /* capture this load's generation -- if it changes before a batch runs, that batch aborts */
     document.getElementById("selectedTileGroup").style.display = "block";
     document.getElementById("selectedTileName").textContent = `Area loaded (${data.length} tiles) — click any tile in the 3D view to edit it.`;
 
-    /* Center the whole area on the average lat/lon of all loaded
-       tiles, so the group sits roughly centered in the 3D view
-       rather than offset far from the origin. */
-    areaOriginLat = data.reduce((sum, r) => sum + r.anchor_lat, 0) / data.length;
-    areaOriginLon = data.reduce((sum, r) => sum + r.anchor_lon, 0) / data.length;
+    /* Use the import coordinates as the fixed origin so tile positions
+       are consistent regardless of which subset of tiles is loaded.
+       Fallback to average of loaded tiles if no import coords set. */
+    const importLat = parseFloat(document.getElementById("importLat").value);
+    const importLon = parseFloat(document.getElementById("importLon").value);
+    if (!isNaN(importLat) && !isNaN(importLon)) {
+      areaOriginLat = importLat;
+      areaOriginLon = importLon;
+    } else {
+      areaOriginLat = data.reduce((sum, r) => sum + r.anchor_lat, 0) / data.length;
+      areaOriginLon = data.reduce((sum, r) => sum + r.anchor_lon, 0) / data.length;
+    }
 
     areaGroup = new THREE.Group();
     scene.add(areaGroup);
@@ -1196,6 +1205,7 @@
     const buildBatch = (startIdx) => {
       return new Promise(resolve => {
         setTimeout(() => {
+          if (areaLoadGeneration !== myGeneration) { resolve(data.length); return; } /* abort -- a newer load started */
           const end = Math.min(startIdx + BATCH_SIZE, data.length);
           for (let i = startIdx; i < end; i++) {
             const region = data[i];
