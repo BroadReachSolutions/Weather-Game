@@ -644,7 +644,6 @@
     const mat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
       transparent: true,
-      depthWrite: false, /* water never occludes terrain underneath -- eliminates z-fighting flicker at shorelines where terrain vertices ease to y=0 */
       side: THREE.DoubleSide,
       vertexShader: `
         uniform float uTime;
@@ -788,6 +787,7 @@
     buildEditorSky();
     waterMesh = buildEditorWater(7600); /* increased from 4000 -- now covers roughly 3mi radius (per request: see a couple miles out), up from the previous ~1.6mi radius */
     waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
+    waterMesh.position.y = 0.5;
     scene.add(waterMesh);
 
     /* Raycasting for paint-directly-on-3D-terrain: clicking the 3D
