@@ -1121,6 +1121,7 @@
     }, true); /* capture phase */
 
     /* PAINTING uses mousedown/move -- separate from selection */
+    const clickTarget = renderer.domElement;
     clickTarget.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       isPaintingIn3D = true;
