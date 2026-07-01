@@ -1047,8 +1047,9 @@
       redrawPaintCanvas();
     }
 
-    renderer.domElement.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return; /* left-click only -- right/middle stay free for camera controls */
+    const clickTarget = renderer.domElement.parentElement; /* canvas-wrap div -- catches clicks that OrbitControls consumes on the canvas itself */
+    clickTarget.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
 
       /* If an area is loaded, check whether this click hit a
          DIFFERENT tile than the one currently selected for editing --
@@ -1139,7 +1140,7 @@
       controls.enabled = false; /* disable orbit while actively painting, so dragging paints instead of rotating the camera */
       paintFrom3DEvent(e);
     });
-    renderer.domElement.addEventListener("mousemove", (e) => {
+    clickTarget.addEventListener("mousemove", (e) => {
       if (isPaintingIn3D) paintFrom3DEvent(e);
     });
     window.addEventListener("mouseup", () => {
