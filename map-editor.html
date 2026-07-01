@@ -1006,10 +1006,12 @@
     scene.add(sunLight);
 
     buildEditorSky();
-    waterMesh = buildEditorWater(7600); /* increased from 4000 -- now covers roughly 3mi radius (per request: see a couple miles out), up from the previous ~1.6mi radius */
+    /* Water plane removed from editor -- terrain mesh already shows
+       blue vertex colors for water cells, so the animated water plane
+       was just causing z-fighting and flickering with no visual benefit.
+       The waterUniforms/shader are kept since they're used by the calm
+       mask system, just not rendered here. */
     waterUniforms.uCalmMask.value = buildCalmMaskTexture(calmGrid);
-    waterMesh.position.y = 0;
-    scene.add(waterMesh);
 
     /* Raycasting for paint-directly-on-3D-terrain: clicking the 3D
        view (not the 2D canvas) finds which grid cell of the terrain
@@ -1146,9 +1148,7 @@
   function animatePreview() {
     requestAnimationFrame(animatePreview);
     waveClock += 0.016;
-    waterUniforms.uTime.value = waveClock;
     updateEditorDayNight();
-    updateEditorWaterFromOverrides();
     if (controls) controls.update();
     renderer.render(scene, camera);
   }
