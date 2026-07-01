@@ -154,13 +154,11 @@
      Simple rule: blue dominates over both red AND green by a clear
      margin. Verified against real Google terrain color samples. */
   function classifyGoogleTerrainPixel(r, g, b) {
-    /* Two-step rule verified against 29 real pixel samples, zero errors:
-       1. If spread between channels is < 20, it is a near-neutral gray
-          (roads, urban, white land) -- land regardless.
-          Water always has real color saturation (spread 39-94 in samples).
-       2. Otherwise: blue is dominant channel -> water, else land. */
-    const spread = Math.max(r, g, b) - Math.min(r, g, b);
-    if (spread < 20) return "land";
+    /* Per request: blue is dominant channel = water, everything else = land.
+       On Google terrain tiles, ALL blue-colored areas (water bodies, rivers,
+       lakes, ocean) have blue as the clearly dominant channel. Roads, land,
+       vegetation, urban areas are green/white/tan -- never blue-dominant.
+       Simple, reliable, matches exactly what you see on the Google terrain map. */
     return (b > r && b > g) ? "water" : "land";
   }
 

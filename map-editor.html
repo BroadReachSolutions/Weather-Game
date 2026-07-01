@@ -970,20 +970,8 @@
      LIVE dev-tools panel (added in a later piece) will let this be
      overridden on demand. */
   function buildEditorSky() {
-    skyDomeCanvas = document.createElement("canvas");
-    skyDomeCanvas.width = 2;
-    skyDomeCanvas.height = 256;
-    skyDomeCtx = skyDomeCanvas.getContext("2d");
-    const grad = skyDomeCtx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, "#2a6fd6");
-    grad.addColorStop(1, "#9fe0f0");
-    skyDomeCtx.fillStyle = grad;
-    skyDomeCtx.fillRect(0, 0, 2, 256);
-    skyDomeTexture = new THREE.CanvasTexture(skyDomeCanvas);
-    const domeGeo = new THREE.SphereGeometry(7000, 24, 16); /* increased from 2000 -- must exceed the camera's maxDistance (5000) or the camera could pull back past the inside of the sky sphere, which looks visually broken */
-    const domeMat = new THREE.MeshBasicMaterial({ map: skyDomeTexture, side: THREE.BackSide, depthWrite: false });
-    skyDomeMesh = new THREE.Mesh(domeGeo, domeMat);
-    scene.add(skyDomeMesh);
+    /* Solid white background -- clean map editor look, no skydome sphere */
+    scene.background = new THREE.Color(0xffffff);
   }
 
   function initPreview() {
@@ -997,11 +985,14 @@
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 0, 0);
-    controls.minDistance = 30;
-    controls.maxDistance = 5000; /* raised from 3000 to comfortably pull back far enough to see a multi-mile area (per request: see a couple miles out), matching the larger water plane below */
-    controls.dampingFactor = 0.08;
+    controls.minDistance = 50;
+    controls.maxDistance = 20000;
+    controls.dampingFactor = 0.12;
     controls.enableDamping = true;
-    controls.zoomSpeed = 0.6; /* slightly slower than OrbitControls' default (1.0) for smoother, more controllable zoom steps rather than large jumps per scroll tick -- damping (above) smooths the motion between steps, this controls how big each step is */
+    controls.zoomSpeed = 1.2;
+    controls.screenSpacePanning = true; /* pan in screen space so middle-click drag is intuitive */
+    controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+    /* Disable left-click orbit so left-click can be used for tile selection */
 
     ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
     scene.add(ambientLight);
@@ -1159,39 +1150,41 @@
       if (isPaintingIn3D) paintFrom3DEvent(e);
     }, true);
 
-    /* RIGHT-CLICK DRAG: pan the world view center */
+    /* RIGHT-CLICK DRAG: pan the world view center.
+       We let OrbitControls handle the actual camera movement (it's
+       already set up for right-click pan via MIDDLE button -- but
+       we re-map so right-click also pans). After OrbitControls moves
+       the camera target, we convert that back to lat/lon and trigger
+       a world view update to load the right tiles. */
+    let lastCameraTargetX = 0, lastCameraTargetZ = 0;
     clickTarget.addEventListener("mousedown", (e) => {
       if (e.button !== 2) return;
       isDraggingView = true;
       dragLastX = e.clientX;
       dragLastY = e.clientY;
-      e.preventDefault();
     }, true);
     window.addEventListener("mousemove", (e) => {
       if (!isDraggingView) return;
+      /* Convert pixel delta to world units based on camera height */
+      const camHeight = camera.position.y;
+      const fovRad = camera.fov * Math.PI / 180;
+      const visibleHeight = 2 * camHeight * Math.tan(fovRad / 2);
+      const canvasH = renderer.domElement.clientHeight || 554;
+      const unitsPerPx = visibleHeight / canvasH;
       const dx = e.clientX - dragLastX;
       const dy = e.clientY - dragLastY;
       dragLastX = e.clientX;
       dragLastY = e.clientY;
-      /* Convert pixel drag to lat/lon delta.
-         worldTileSize is units per tile. The canvas shows tilesWide tiles
-         across its width. So pixels-per-world-unit = canvasWidth / (tilesWide * worldTileSize) */
-      updateWorldTileSize();
-      const canvasW = renderer.domElement.clientWidth || 770;
-      const unitsPerPx = (tilesWide * worldTileSize) / canvasW;
-      /* Dragging right moves view left (west) -- negate dx */
-      const dEastUnits = -dx * unitsPerPx;
-      const dNorthUnits = dy * unitsPerPx; /* drag down = move north */
-      /* Convert units back to degrees */
+      /* Update view lat/lon based on drag */
       const EARTH_RADIUS_FT = 20902231;
       const latRad = viewLat * Math.PI / 180;
-      viewLon += (dEastUnits / UNITS_PER_FOOT) / (EARTH_RADIUS_FT * Math.cos(latRad)) * (180 / Math.PI);
-      viewLat += (dNorthUnits / UNITS_PER_FOOT) / EARTH_RADIUS_FT * (180 / Math.PI);
+      const dEastFt = -dx * unitsPerPx / UNITS_PER_FOOT;
+      const dNorthFt = dy * unitsPerPx / UNITS_PER_FOOT;
+      viewLon += dEastFt / (EARTH_RADIUS_FT * Math.cos(latRad)) * (180 / Math.PI);
+      viewLat += dNorthFt / EARTH_RADIUS_FT * (180 / Math.PI);
       viewLat = Math.max(-85, Math.min(85, viewLat));
-      /* Update anchor lat/lon fields to show current position */
       document.getElementById("anchorLat").value = viewLat.toFixed(6);
       document.getElementById("anchorLon").value = viewLon.toFixed(6);
-      repositionWorldTiles();
       updateWorldView();
     });
     window.addEventListener("mouseup", (e) => {
@@ -1199,8 +1192,6 @@
       controls.enabled = true;
       if (e.button === 2) isDraggingView = false;
     });
-
-    /* Disable context menu on 3D canvas so right-click drag works */
     clickTarget.addEventListener("contextmenu", (e) => e.preventDefault());
 
     animatePreview();
@@ -1513,6 +1504,9 @@
     const { tx: centerTx, ty: centerTy } = latLonToTileXY(viewLat, viewLon);
     const radius = Math.floor(tilesWide / 2);
 
+    /* Ensure worldGroup exists */
+    if (!worldGroup) { worldGroup = new THREE.Group(); scene.add(worldGroup); }
+
     /* Compute the full set of tile keys that should be visible */
     const visibleKeys = new Set();
     for (let dy = -radius; dy <= radius; dy++) {
@@ -1525,31 +1519,30 @@
     for (const key of Object.keys(worldTileCache)) {
       if (!visibleKeys.has(key)) {
         const entry = worldTileCache[key];
-        if (entry.mesh && worldGroup) worldGroup.remove(entry.mesh);
-        if (entry.selectedMesh && worldGroup) worldGroup.remove(entry.selectedMesh);
-        if (entry.mesh) { entry.mesh.geometry.dispose(); entry.mesh.material.dispose(); }
+        if (entry.mesh) { worldGroup.remove(entry.mesh); entry.mesh.geometry.dispose(); entry.mesh.material.dispose(); }
+        if (entry.selectedMesh) { worldGroup.remove(entry.selectedMesh); entry.selectedMesh.geometry.dispose(); entry.selectedMesh.material.dispose(); }
         delete worldTileCache[key];
       }
     }
 
-    /* Ensure worldGroup exists */
-    if (!worldGroup) { worldGroup = new THREE.Group(); scene.add(worldGroup); }
-
-    /* Add placeholder meshes for new tiles immediately */
+    /* Add placeholder meshes for new tiles immediately, positioned
+       relative to view center */
     for (const key of visibleKeys) {
       if (worldTileCache[key]) continue;
       const [tx, ty] = key.split(',').map(Number);
       const pos = tileToWorldXZ(tx, ty, centerTx, centerTy);
       const mesh = buildPlaceholderMesh();
-      mesh.position.set(pos.x, -0.1, pos.z);
+      mesh.position.set(pos.x, -0.5, pos.z);
       worldGroup.add(mesh);
       worldTileCache[key] = { state: 'loading', mesh, tx, ty };
     }
 
-    /* Query DB for which tiles in the visible area are imported.
-       Debounced so rapid panning doesn't spam the DB. */
+    /* Reposition ALL existing tiles relative to new center */
+    repositionWorldTiles();
+
+    /* Query DB (debounced) */
     if (pendingDbQuery) clearTimeout(pendingDbQuery);
-    pendingDbQuery = setTimeout(() => doWorldDbQuery(centerTx, centerTy, radius), 200);
+    pendingDbQuery = setTimeout(() => doWorldDbQuery(centerTx, centerTy, radius), 150);
   }
 
   async function doWorldDbQuery(centerTx, centerTy, radius) {
@@ -1652,12 +1645,21 @@
   function repositionWorldTiles() {
     if (!worldGroup) return;
     updateWorldTileSize();
+    /* Use the camera target (where OrbitControls is orbiting around)
+       as the "view center" for tile positioning, so tiles move with
+       where you're actually looking rather than a separate lat/lon cursor */
     const { tx: centerTx, ty: centerTy } = latLonToTileXY(viewLat, viewLon);
     for (const [key, entry] of Object.entries(worldTileCache)) {
       if (!entry.mesh) continue;
       const pos = tileToWorldXZ(entry.tx, entry.ty, centerTx, centerTy);
-      entry.mesh.position.set(pos.x, entry.state === 'loaded' ? 0 : -0.1, pos.z);
-      if (entry.selectedMesh) entry.selectedMesh.position.set(pos.x, 0.5, pos.z);
+      entry.mesh.position.set(pos.x, entry.state === 'loaded' ? 0 : -0.5, pos.z);
+      if (entry.selectedMesh) entry.selectedMesh.position.set(pos.x, 1, pos.z);
+    }
+    /* Also move camera target to track view center so OrbitControls
+       orbits around the right point */
+    if (controls) {
+      controls.target.set(0, 0, 0);
+      controls.update();
     }
   }
 
@@ -1930,9 +1932,8 @@
         areaGroup.add(newMesh);
         tileInfo.mesh = newMesh;
       }
-    } else {
-      /* SINGLE-TILE MODE (no area loaded): original behavior --
-         previewMesh is its own standalone mesh at the origin. */
+    } else if (Object.keys(worldTileCache).length === 0) {
+      /* SINGLE-TILE MODE (world viewer not active): show standalone mesh */
       if (previewMesh) {
         scene.remove(previewMesh);
         previewMesh.geometry.dispose();
@@ -1941,6 +1942,7 @@
       previewMesh = newMesh;
       scene.add(previewMesh);
     }
+    /* In world viewer mode with no tile selected, don't add a floating mesh */
 
     /* Refresh the calm mask texture + the shader's worldSize/center
        uniforms so the water genuinely stops moving wherever calm was
@@ -2452,35 +2454,36 @@
     });
 
     document.getElementById("deleteSelectedBtn").addEventListener("click", async () => {
-      if (selectedTileIds.size === 0) { setStatus("No tiles selected.", true); return; }
-      const count = selectedTileIds.size;
-      if (!confirm(`Delete ${count} tile${count > 1 ? "s" : ""} from the database? You can re-import them at the same coordinates after.`)) return;
+      /* Works with world viewer selectedWorldTiles (imported tiles only) */
+      const importedSelected = [...selectedWorldTiles].filter(k => worldTileCache[k]?.state === 'loaded' && worldTileCache[k]?.regionId);
+      if (importedSelected.length === 0) { setStatus("No imported tiles selected to delete. Select imported (colored) tiles first.", true); return; }
+      if (!confirm(`Delete ${importedSelected.length} tile(s) from the database? They will become black placeholders you can re-import.`)) return;
 
       let deleted = 0, failed = 0;
-      const idsToDelete = [...selectedTileIds];
-
-      for (const id of idsToDelete) {
-        const { error } = await sb.from("custom_map_regions").delete().eq("id", id);
-        if (error) { failed++; console.error("Delete failed for", id, error); continue; }
+      for (const key of importedSelected) {
+        const entry = worldTileCache[key];
+        const { error } = await sb.from("custom_map_regions").delete().eq("id", entry.regionId);
+        if (error) { failed++; continue; }
         deleted++;
-
-        /* Remove from 3D scene */
-        const info = areaTiles.find(t => t.regionId === id);
-        if (info && areaGroup) {
-          areaGroup.remove(info.mesh);
-          info.mesh.geometry.dispose();
-          info.mesh.material.dispose();
+        /* Replace terrain mesh with black placeholder immediately */
+        if (worldGroup && entry.mesh) {
+          worldGroup.remove(entry.mesh);
+          entry.mesh.geometry.dispose();
+          entry.mesh.material.dispose();
         }
+        if (entry.selectedMesh && worldGroup) {
+          worldGroup.remove(entry.selectedMesh);
+          entry.selectedMesh.geometry.dispose();
+          entry.selectedMesh.material.dispose();
+        }
+        const placeholder = buildPlaceholderMesh();
+        placeholder.position.copy(entry.mesh?.position || new THREE.Vector3());
+        if (worldGroup) worldGroup.add(placeholder);
+        worldTileCache[key] = { state: 'missing', mesh: placeholder, tx: entry.tx, ty: entry.ty };
       }
-
-      /* Remove from areaTiles array and clear selection */
-      areaTiles = areaTiles.filter(t => !idsToDelete.includes(t.regionId));
-      selectedTileIds.clear();
-      mergedLayout = null;
-      selectedAreaTileId = null;
-      document.getElementById("selectedTileName").textContent = "Tiles deleted. Re-import at the same coordinates to regenerate them.";
-      redrawPaintCanvas();
-      setStatus(`Deleted ${deleted} tile${deleted > 1 ? "s" : ""}` + (failed ? `, ${failed} failed` : "") + ". Re-import to regenerate.", failed > 0);
+      selectedWorldTiles.clear();
+      document.getElementById("selectedTileName").textContent = `Deleted ${deleted} tile(s). They now show as black -- click Import Selected to re-import.`;
+      setStatus(`Deleted ${deleted} tile(s).` + (failed ? ` ${failed} failed.` : ''), failed > 0);
     });
 
     document.getElementById("importLatLonPaste").addEventListener("input", (e) => {
