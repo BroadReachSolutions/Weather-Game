@@ -1895,26 +1895,45 @@
   function updatePreviewMesh() {
     if (!scene) return;
 
-    const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 2000;
-    const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 20;
+    const landHeightFt = parseFloat(document.getElementById("landHeight").value) || 15;
+
+    /* WORLD VIEWER MODE: update the selected tile in worldTileCache */
+    if (Object.keys(worldTileCache).length > 0 && selectedWorldTiles.size > 0) {
+      /* Find the one imported tile that's actively being edited */
+      let activeKey = null;
+      for (const key of selectedWorldTiles) {
+        if (worldTileCache[key]?.state === 'loaded') { activeKey = key; break; }
+      }
+      if (activeKey && worldGroup) {
+        const entry = worldTileCache[activeKey];
+        const ws = (entry.regionData?.world_size_ft || 3477) * UNITS_PER_FOOT;
+        const newMesh = buildPreviewMesh(grid, ws, landHeightFt, calmGrid);
+        newMesh.position.copy(entry.mesh.position);
+        newMesh.userData.regionId = entry.regionId;
+        newMesh.userData.regionData = entry.regionData;
+        worldGroup.remove(entry.mesh);
+        entry.mesh.geometry.dispose();
+        entry.mesh.material.dispose();
+        worldGroup.add(newMesh);
+        entry.mesh = newMesh;
+        /* Reapply selection highlight */
+        if (entry.selectedMesh) {
+          entry.selectedMesh.position.copy(newMesh.position);
+          entry.selectedMesh.position.y = 1;
+        }
+      }
+      return; /* don't fall through to other modes */
+    }
+
+    const worldSizeFt = parseFloat(document.getElementById("worldSizeFt").value) || 3477;
     const worldSize = worldSizeFt * UNITS_PER_FOOT;
     const newMesh = buildPreviewMesh(grid, worldSize, landHeightFt, calmGrid);
 
-    /* The actively-edited tile's world position offset -- 0,0 in
-       single-tile mode (always at the origin), or the selected
-       tile's real world position when editing one tile within a
-       loaded area. Computed once here and reused below for both the
-       calm mask shader alignment and structure placement. */
     const activeTileInfo = (areaGroup && selectedAreaTileId != null) ? areaTiles.find(t => t.regionId === selectedAreaTileId) : null;
     const tileOffsetX = activeTileInfo ? activeTileInfo.worldX : 0;
     const tileOffsetZ = activeTileInfo ? activeTileInfo.worldZ : 0;
 
     if (areaGroup && selectedAreaTileId != null) {
-      /* AREA MODE: replace just the selected tile's mesh in place,
-         at its own correct world position -- the rest of the area's
-         tiles are untouched, so the whole group keeps looking like
-         one continuous coastline while only the actively-edited tile
-         updates as you paint. */
       const tileInfo = areaTiles.find(t => t.regionId === selectedAreaTileId);
       if (tileInfo) {
         areaGroup.remove(tileInfo.mesh);
@@ -1923,9 +1942,6 @@
         newMesh.position.set(tileInfo.worldX, 0, tileInfo.worldZ);
         newMesh.userData.regionId = selectedAreaTileId;
         newMesh.userData.regionData = tileInfo.mesh.userData.regionData;
-        /* Re-apply the same emissive highlight a freshly-selected
-           tile gets, since this is a brand new mesh object replacing
-           the old (now disposed) one. */
         newMesh.traverse(obj => {
           if (obj.material) obj.material.emissive = new THREE.Color(0x2a3a10);
         });
@@ -1933,7 +1949,6 @@
         tileInfo.mesh = newMesh;
       }
     } else if (Object.keys(worldTileCache).length === 0) {
-      /* SINGLE-TILE MODE (world viewer not active): show standalone mesh */
       if (previewMesh) {
         scene.remove(previewMesh);
         previewMesh.geometry.dispose();
@@ -1942,7 +1957,6 @@
       previewMesh = newMesh;
       scene.add(previewMesh);
     }
-    /* In world viewer mode with no tile selected, don't add a floating mesh */
 
     /* Refresh the calm mask texture + the shader's worldSize/center
        uniforms so the water genuinely stops moving wherever calm was
