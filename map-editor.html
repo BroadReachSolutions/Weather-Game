@@ -283,7 +283,8 @@
 
     <div class="field-group" id="selectedTileGroup" style="display:none;">
       <label>📍 Currently Editing</label>
-      <p class="hint" id="selectedTileName">No tile selected — load an area, then click any tile in the 3D view to edit it.</p>
+      <p class="hint" id="selectedTileName">No tile selected — click any tile in the 3D view to edit it.</p>
+      <button id="teleportBoatBtn" style="margin-top:6px;width:100%;background:#1a6b3a;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;">🚢 Teleport My Boat Here</button>
     </div>
 
     <div id="statusMsg"></div>
@@ -991,8 +992,18 @@
     controls.enableDamping = true;
     controls.zoomSpeed = 1.2;
     controls.screenSpacePanning = true; /* pan in screen space so middle-click drag is intuitive */
-    controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+    controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
     /* Disable left-click orbit so left-click can be used for tile selection */
+
+    /* Scroll wheel: zoom camera AND trigger world tile refresh so new
+       tiles load in/out as you zoom */
+    clickTarget.addEventListener("wheel", () => {
+      if (pendingDbQuery) clearTimeout(pendingDbQuery);
+      pendingDbQuery = setTimeout(() => {
+        const { tx: cx, ty: cy } = latLonToTileXY(viewLat, viewLon);
+        doWorldDbQuery(cx, cy, Math.floor(tilesWide / 2));
+      }, 300);
+    }, { passive: true });
 
     ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
     scene.add(ambientLight);
@@ -1535,6 +1546,12 @@
       mesh.position.set(pos.x, -0.5, pos.z);
       worldGroup.add(mesh);
       worldTileCache[key] = { state: 'loading', mesh, tx, ty };
+      /* Force to missing after 3s if DB query doesn't resolve it */
+      setTimeout(() => {
+        if (worldTileCache[key]?.state === 'loading') {
+          worldTileCache[key].state = 'missing';
+        }
+      }, 3000);
     }
 
     /* Reposition ALL existing tiles relative to new center */
@@ -2051,25 +2068,34 @@
       updated_at: new Date().toISOString()
     };
 
-    if (selectedAreaTileId != null) {
-      /* Editing a tile selected from a loaded area -- UPDATE its
-         existing row by id, not insert a new one, which would
-         otherwise silently create a duplicate region every time you
-         save while working within an area. */
-      const { error } = await sb.from("custom_map_regions").update(payload).eq("id", selectedAreaTileId);
-      if (error) { setStatus("Save failed: " + error.message, true); return; }
-      /* Keep the in-memory area tile's regionData in sync so future
-         selections/edits within this same session see the saved
-         state, not stale pre-save data. */
-      const tileInfo = areaTiles.find(t => t.regionId === selectedAreaTileId);
-      if (tileInfo && tileInfo.mesh.userData.regionData) {
-        Object.assign(tileInfo.mesh.userData.regionData, payload);
+    /* Find which tile is actively being edited -- world viewer uses
+       selectedWorldTiles, legacy area mode uses selectedAreaTileId */
+    let activeRegionId = selectedAreaTileId;
+    if (!activeRegionId && selectedWorldTiles.size > 0) {
+      for (const key of selectedWorldTiles) {
+        if (worldTileCache[key]?.state === 'loaded' && worldTileCache[key]?.regionId) {
+          activeRegionId = worldTileCache[key].regionId;
+          /* Also update the in-memory regionData so it reflects current edits */
+          const entry = worldTileCache[key];
+          if (entry.regionData) {
+            entry.regionData.classification_grid = grid;
+            entry.regionData.calm_grid = calmGrid;
+          }
+          payload.classification_grid = grid;
+          payload.calm_grid = calmGrid;
+          break;
+        }
       }
-      setStatus("Saved \"" + name + "\" (updated in place within the loaded area).");
+    }
+
+    if (activeRegionId) {
+      const { error } = await sb.from("custom_map_regions").update(payload).eq("id", activeRegionId);
+      if (error) { setStatus("Save failed: " + error.message, true); return; }
+      setStatus("Saved.");
     } else {
       const { error } = await sb.from("custom_map_regions").insert(payload);
       if (error) { setStatus("Save failed: " + error.message, true); return; }
-      setStatus("Saved \"" + name + "\".");
+      setStatus("Saved new region.");
     }
   });
 
@@ -2378,9 +2404,7 @@
           viewLat = lat; viewLon = lon;
           document.getElementById("anchorLat").value = lat;
           document.getElementById("anchorLon").value = lon;
-          /* Clear tile cache so the new area loads fresh */
-          if (worldGroup) { scene.remove(worldGroup); worldGroup = null; }
-          worldTileCache = {};
+          /* Reposition tiles for new location */
           selectedWorldTiles.clear();
           updateWorldView();
         }
@@ -2440,31 +2464,61 @@
         setStatus(`Importing... ${done}/${missingKeys.length}`);
       }
 
-      /* Refresh world view to show newly imported tiles */
-      if (worldGroup) { scene.remove(worldGroup); worldGroup = null; }
-      worldTileCache = {};
-      updateWorldView();
-      setStatus(`Imported ${done} tiles.`);
+      /* Refresh world view -- just re-query DB, don't wipe existing meshes */
+      selectedWorldTiles.clear();
+      if (pendingDbQuery) clearTimeout(pendingDbQuery);
+      const { tx: cx, ty: cy } = latLonToTileXY(viewLat, viewLon);
+      const rad = Math.floor(tilesWide / 2);
+      /* Mark newly imported tiles as loading so they get terrain meshes */
+      for (const key of missingKeys) {
+        if (worldTileCache[key]) worldTileCache[key].state = 'loading';
+      }
+      doWorldDbQuery(cx, cy, rad);
+      setStatus(`Imported ${done} tile(s).`);
+    });
+
+    document.getElementById("teleportBoatBtn").addEventListener("click", async () => {
+      /* Teleport the player's boat to the current view center.
+         Writes directly to the boats table using the same device_id
+         the live game uses, so it takes effect immediately when the
+         player opens/refreshes the game on their phone. */
+      const lat = viewLat;
+      const lon = viewLon;
+      if (isNaN(lat) || isNaN(lon)) { setStatus("Set a view center first.", true); return; }
+
+      /* Get device_id the same way the game does */
+      let deviceId = localStorage.getItem("os_device_id");
+      if (!deviceId) { setStatus("No device ID found -- open the game on your phone first, then try again.", true); return; }
+
+      const { error } = await sb.from("boats")
+        .update({ lat, lon, destination_lat: null, destination_lon: null, autopilot_on: false, updated_at: new Date().toISOString() })
+        .eq("device_id", deviceId);
+
+      if (error) { setStatus("Teleport failed: " + error.message, true); return; }
+      setStatus(`Boat teleported to ${lat.toFixed(4)}, ${lon.toFixed(4)}. Refresh the game on your phone to see it.`);
     });
 
     document.getElementById("importAreaBtn").addEventListener("click", () => {
       runBulkImport();
     });
     document.getElementById("saveAllBtn").addEventListener("click", async () => {
-      if (selectedTileIds.size === 0) { setStatus("No tiles selected.", true); return; }
+      /* Save all selected imported tiles from the world viewer */
+      const toSave = [...selectedWorldTiles].filter(k => worldTileCache[k]?.state === 'loaded' && worldTileCache[k]?.regionId);
+      if (toSave.length === 0) { setStatus("No imported tiles selected to save.", true); return; }
       let saved = 0, failed = 0;
-      for (const id of selectedTileIds) {
-        const entry = Object.values(worldTileCache).find(e => e.regionId === id);
-        if (!entry || !entry.regionData) continue;
+      for (const key of toSave) {
+        const entry = worldTileCache[key];
+        if (!entry?.regionId || !entry?.regionData) continue;
         const payload = {
           classification_grid: entry.regionData.classification_grid,
           calm_grid: entry.regionData.calm_grid,
           updated_at: new Date().toISOString()
         };
-        const { error } = await sb.from("custom_map_regions").update(payload).eq("id", id);
-        if (error) failed++; else { saved++; Object.assign(entry.regionData, payload); }
+        const { error } = await sb.from("custom_map_regions").update(payload).eq("id", entry.regionId);
+        if (error) { failed++; console.error("Save failed for", key, error); }
+        else { saved++; Object.assign(entry.regionData, payload); }
       }
-      setStatus(`Saved ${saved} tiles` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
+      setStatus(`Saved ${saved} tile(s)` + (failed ? `, ${failed} failed` : "") + ".", failed > 0);
     });
 
     document.getElementById("deleteSelectedBtn").addEventListener("click", async () => {
