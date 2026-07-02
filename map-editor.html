@@ -991,19 +991,8 @@
     controls.dampingFactor = 0.12;
     controls.enableDamping = true;
     controls.zoomSpeed = 1.2;
-    controls.screenSpacePanning = true; /* pan in screen space so middle-click drag is intuitive */
+    controls.screenSpacePanning = true;
     controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
-    /* Disable left-click orbit so left-click can be used for tile selection */
-
-    /* Scroll wheel: zoom camera AND trigger world tile refresh so new
-       tiles load in/out as you zoom */
-    clickTarget.addEventListener("wheel", () => {
-      if (pendingDbQuery) clearTimeout(pendingDbQuery);
-      pendingDbQuery = setTimeout(() => {
-        const { tx: cx, ty: cy } = latLonToTileXY(viewLat, viewLon);
-        doWorldDbQuery(cx, cy, Math.floor(tilesWide / 2));
-      }, 300);
-    }, { passive: true });
 
     ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
     scene.add(ambientLight);
@@ -1151,6 +1140,15 @@
 
     /* PAINTING uses mousedown/move -- separate from selection */
     const clickTarget = renderer.domElement;
+
+    /* Scroll wheel: trigger world tile refresh so new tiles load as you zoom */
+    clickTarget.addEventListener("wheel", () => {
+      if (pendingDbQuery) clearTimeout(pendingDbQuery);
+      pendingDbQuery = setTimeout(() => {
+        const { tx: cx, ty: cy } = latLonToTileXY(viewLat, viewLon);
+        doWorldDbQuery(cx, cy, Math.floor(tilesWide / 2));
+      }, 300);
+    }, { passive: true });
     clickTarget.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       isPaintingIn3D = true;
